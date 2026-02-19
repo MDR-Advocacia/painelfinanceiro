@@ -1,0 +1,80 @@
+@import url('https://fonts.googleapis.com/css2?family=Poppins:wght@400;500;600;700&family=Inter:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500;600&display=swap');
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  :root {
+    --background: 0 0% 100%;
+    --foreground: 207 59% 15%;
+
+    --card: 0 0% 100%;
+    --card-foreground: 207 59% 15%;
+
+    --popover: 0 0% 100%;
+    --popover-foreground: 207 59% 15%;
+
+    --primary: 207 59% 30%;
+    --primary-foreground: 0 0% 100%;
+
+    --secondary: 220 33% 97%;
+    --secondary-foreground: 207 59% 20%;
+
+    --muted: 220 20% 95%;
+    --muted-foreground: 215 16% 47%;
+
+    --accent: 220 33% 97%;
+    --accent-foreground: 207 59% 20%;
+
+    --destructive: 6 78% 57%;
+    --destructive-foreground: 0 0% 100%;
+
+    --success: 145 63% 42%;
+    --success-foreground: 0 0% 100%;
+
+    --warning: 37 90% 51%;
+    --warning-foreground: 0 0% 100%;
+
+    --border: 220 20% 90%;
+    --input: 220 20% 90%;
+    --ring: 207 59% 30%;
+
+    --radius: 0.75rem;
+
+    --sidebar-background: 207 59% 15%;
+    --sidebar-foreground: 210 20% 90%;
+    --sidebar-primary: 207 59% 50%;
+    --sidebar-primary-foreground: 0 0% 100%;
+    --sidebar-accent: 207 40% 22%;
+    --sidebar-accent-foreground: 210 20% 95%;
+    --sidebar-border: 207 30% 25%;
+    --sidebar-ring: 207 59% 50%;
+
+    --chart-1: 207 59% 30%;
+    --chart-2: 145 63% 42%;
+    --chart-3: 37 90% 51%;
+    --chart-4: 6 78% 57%;
+    --chart-5: 270 50% 50%;
+  }
+}
+
+@layer base {
+  * {
+    @apply border-border;
+  }
+
+  body {
+    @apply bg-background text-foreground font-sans antialiased;
+  }
+
+  h1, h2, h3, h4, h5, h6 {
+    font-family: 'Poppins', sans-serif;
+    @apply font-semibold tracking-tight;
+  }
+
+  .font-mono-numbers {
+    font-family: 'IBM Plex Mono', monospace;
+    font-variant-numeric: tabular-nums;
+  }
+}
