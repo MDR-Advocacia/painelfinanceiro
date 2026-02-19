@@ -6,17 +6,18 @@ import { componentTagger } from "lovable-tagger";
 // https://vitejs.dev/config/
 export default defineConfig(({ mode }) => ({
   server: {
-    host: "0.0.0.0", // Alterado para IPv4 para melhor compatibilidade com Docker no Windows
+    host: "0.0.0.0",
     port: 8080,
+    allowedHosts: [
+      "painelfinanceiro.mdradvocacia.com"
+    ],
     hmr: {
       overlay: false,
     },
-    // --- ADICIONE ESTE BLOCO ABAIXO ---
     watch: {
-      usePolling: true,   // Força o Vite a verificar mudanças de arquivos manualmente
-      interval: 100,      // Checa a cada 100ms
+      usePolling: true,
+      interval: 100,
     },
-    // ---------------------------------
   },
   plugins: [
     react(),
