@@ -10,6 +10,7 @@ export default defineConfig(({ mode }) => ({
     port: 8080,
     allowedHosts: [
       "painelfinanceiro.mdradvocacia.com"
+      "jcokc0c4gc4swgsgkgcsgo44.3.21.60.254.sslip.io"
     ],
     hmr: {
       overlay: false,
