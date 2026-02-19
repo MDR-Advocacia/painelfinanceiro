@@ -9,7 +9,7 @@ export default defineConfig(({ mode }) => ({
     host: "0.0.0.0",
     port: 8080,
     allowedHosts: [
-      "painelfinanceiro.mdradvocacia.com"
+      "painelfinanceiro.mdradvocacia.com",
       "jcokc0c4gc4swgsgkgcsgo44.3.21.60.254.sslip.io"
     ],
     hmr: {
