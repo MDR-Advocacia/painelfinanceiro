@@ -12,6 +12,8 @@ export default defineConfig(({ mode }) => ({
       "painelfinanceiro.mdradvocacia.com",
       "jcokc0c4gc4swgsgkgcsgo44.3.21.60.254.sslip.io",
       "mdrpainelfinanceiro.mdradvocacia.com",
+      "https://painelfinanceiro.mdradvocacia.com",
+      "https://api-painelfinanceiro.mdradvocacia.com",
     ],
     hmr: {
       overlay: false,
