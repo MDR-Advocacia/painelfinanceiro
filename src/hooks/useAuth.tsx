@@ -11,40 +11,42 @@ export function useAuth() {
   useEffect(() => {
     let mounted = true;
 
+    // Função para verificar se o utilizador é admin (sem bloquear o loading principal)
+    async function checkAdminRole(userId: string) {
+      try {
+        const { data, error } = await supabase.rpc("has_role", {
+          _user_id: userId,
+          _role: "admin",
+        });
+        if (error) throw error;
+        if (mounted) setIsAdmin(!!data);
+      } catch (e) {
+        console.error("Erro ao verificar permissões de admin:", e);
+        if (mounted) setIsAdmin(false);
+      }
+    }
+
     async function initialize() {
       try {
-        // Tenta pegar a sessão atual (o que o persistSession salvou)
-        const { data: { session: initialSession }, error: sessionError } = await supabase.auth.getSession();
+        // 1. Tenta recuperar a sessão (o que o persistSession: true guardou)
+        const { data: { session: initialSession } } = await supabase.auth.getSession();
         
         if (!mounted) return;
-        if (sessionError) throw sessionError;
 
-        setSession(initialSession);
-        setUser(initialSession?.user ?? null);
-
-        if (initialSession?.user) {
-          // Tenta verificar se é admin, mas se falhar, apenas assume que não é
-          try {
-            const { data, error: rpcError } = await supabase.rpc("has_role", {
-              _user_id: initialSession.user.id,
-              _role: "admin",
-            });
-            if (rpcError) throw rpcError;
-            if (mounted) setIsAdmin(!!data);
-          } catch (e) {
-            console.error("Erro ao verificar permissões:", e);
-            if (mounted) setIsAdmin(false);
-          }
+        if (initialSession) {
+          setSession(initialSession);
+          setUser(initialSession.user);
+          // Dispara a verificação de admin mas NÃO espera por ela para desligar o loading
+          checkAdminRole(initialSession.user.id);
         }
       } catch (error) {
         console.error("Erro na inicialização do Auth:", error);
       } finally {
-        // ESSENCIAL: Garante que o estado de "Loading" saia da tela
+        // 2. DESLIGA O LOADING IMEDIATAMENTE após saber se há sessão ou não
         if (mounted) setLoading(false);
       }
     }
 
-    // Listener para mudanças de estado (login/logout)
     const { data: { subscription } } = supabase.auth.onAuthStateChange(
       async (event, currentSession) => {
         if (!mounted) return;
@@ -53,17 +55,13 @@ export function useAuth() {
         setUser(currentSession?.user ?? null);
 
         if (currentSession?.user) {
-          const { data } = await supabase.rpc("has_role", {
-            _user_id: currentSession.user.id,
-            _role: "admin",
-          });
-          if (mounted) setIsAdmin(!!data);
+          checkAdminRole(currentSession.user.id);
         } else {
-          if (mounted) setIsAdmin(false);
+          setIsAdmin(false);
         }
         
-        // Se o evento disparar antes do initialize, também encerramos o loading aqui
-        if (mounted) setLoading(false);
+        // Garante que o loading é desligado em qualquer evento de mudança (login/logout)
+        setLoading(false);
       }
     );
 
