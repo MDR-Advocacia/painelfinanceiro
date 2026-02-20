@@ -9,44 +9,70 @@ export function useAuth() {
   const [isAdmin, setIsAdmin] = useState(false);
 
   useEffect(() => {
-    const { data: { subscription } } = supabase.auth.onAuthStateChange(
-      async (_event, session) => {
-        setSession(session);
-        setUser(session?.user ?? null);
+    let mounted = true;
 
-        if (session?.user) {
-          // Check admin role
+    async function initialize() {
+      try {
+        // Tenta pegar a sessão atual (o que o persistSession salvou)
+        const { data: { session: initialSession }, error: sessionError } = await supabase.auth.getSession();
+        
+        if (!mounted) return;
+        if (sessionError) throw sessionError;
+
+        setSession(initialSession);
+        setUser(initialSession?.user ?? null);
+
+        if (initialSession?.user) {
+          // Tenta verificar se é admin, mas se falhar, apenas assume que não é
+          try {
+            const { data, error: rpcError } = await supabase.rpc("has_role", {
+              _user_id: initialSession.user.id,
+              _role: "admin",
+            });
+            if (rpcError) throw rpcError;
+            if (mounted) setIsAdmin(!!data);
+          } catch (e) {
+            console.error("Erro ao verificar permissões:", e);
+            if (mounted) setIsAdmin(false);
+          }
+        }
+      } catch (error) {
+        console.error("Erro na inicialização do Auth:", error);
+      } finally {
+        // ESSENCIAL: Garante que o estado de "Loading" saia da tela
+        if (mounted) setLoading(false);
+      }
+    }
+
+    // Listener para mudanças de estado (login/logout)
+    const { data: { subscription } } = supabase.auth.onAuthStateChange(
+      async (event, currentSession) => {
+        if (!mounted) return;
+        
+        setSession(currentSession);
+        setUser(currentSession?.user ?? null);
+
+        if (currentSession?.user) {
           const { data } = await supabase.rpc("has_role", {
-            _user_id: session.user.id,
+            _user_id: currentSession.user.id,
             _role: "admin",
           });
-          setIsAdmin(!!data);
+          if (mounted) setIsAdmin(!!data);
         } else {
-          setIsAdmin(false);
+          if (mounted) setIsAdmin(false);
         }
-
-        setLoading(false);
+        
+        // Se o evento disparar antes do initialize, também encerramos o loading aqui
+        if (mounted) setLoading(false);
       }
     );
 
-    supabase.auth.getSession().then(({ data: { session } }) => {
-      setSession(session);
-      setUser(session?.user ?? null);
+    initialize();
 
-      if (session?.user) {
-        supabase.rpc("has_role", {
-          _user_id: session.user.id,
-          _role: "admin",
-        }).then(({ data }) => {
-          setIsAdmin(!!data);
-          setLoading(false);
-        });
-      } else {
-        setLoading(false);
-      }
-    });
-
-    return () => subscription.unsubscribe();
+    return () => {
+      mounted = false;
+      subscription.unsubscribe();
+    };
   }, []);
 
   const signOut = async () => {
