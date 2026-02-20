@@ -6,7 +6,8 @@ import { Projections } from "@/components/Projections";
 import { RankingAnalysis } from "@/components/RankingAnalysis";
 import { SedeView } from "@/components/SedeView";
 import HonorariosBB from "./HonorariosBB"; 
-import { SaveIndicator } from "@/components/SaveIndicator"; // Importação do novo indicador
+import { StrategicConfig } from "@/components/StrategicConfig"; // <-- Importação da nova tela
+import { SaveIndicator } from "@/components/SaveIndicator"; 
 
 const MainContent = () => {
   const { view, loading } = useApp();
@@ -30,6 +31,9 @@ const MainContent = () => {
       {view === 'ranking' && <RankingAnalysis />}
       {view === 'sede' && <SedeView />}
       {view === 'honorarios' && <HonorariosBB />}
+      
+      {/* <-- Nova rota para a Gestão Estratégica (VPD) --> */}
+      {view === 'config-estrategica' && <StrategicConfig />}
     </main>
   );
 };

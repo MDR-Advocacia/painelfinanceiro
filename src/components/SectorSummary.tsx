@@ -4,53 +4,79 @@ import { calcResumo, formatCurrency, formatPercent, getStatusLabel, getStatusCol
 import { Badge } from "@/components/ui/badge";
 
 export function SectorSummary() {
-  const { activePeriodoData, activeSetor, getRateioPerSetor, periodoAtivo } = useApp();
+  // Puxamos o currentVpdValor configurado na tela de Gestão Estratégica
+  const { activePeriodoData, activeSetor, currentVpdValor } = useApp();
+  
   if (!activePeriodoData || !activeSetor) return null;
 
-  const r = calcResumo(activePeriodoData);
-  const rateioEstrutura = activeSetor.sedeId ? getRateioPerSetor(activeSetor.sedeId, periodoAtivo) : 0;
+  // O cálculo agora considera o VPD (ex: R$ 2.472,85) para achar o ROF real
+  const r = calcResumo(activePeriodoData, currentVpdValor);
 
   if (r.faturamentoBruto === 0 && r.totalCustoPessoal === 0) return null;
-
-  const margemComEstrutura = r.margemBruta - rateioEstrutura;
-  const margemComEstruturaPercent = r.faturamentoBruto > 0 ? (margemComEstrutura / r.faturamentoBruto) * 100 : 0;
 
   return (
     <Card className="border-primary/20 bg-primary/[0.02]">
       <CardContent className="pt-6">
         <h3 className="font-heading text-sm font-semibold mb-4 flex items-center gap-2">
-          Resumo Financeiro — {activeSetor.nome}
+          Análise de Eficiência (ROF) — {activeSetor.nome}
           <Badge variant="outline" className={`${getStatusColor(r.status)} text-xs`}>
             {getStatusLabel(r.status)}
           </Badge>
         </h3>
-        <div className={`grid grid-cols-2 ${rateioEstrutura > 0 ? 'md:grid-cols-5' : 'md:grid-cols-4'} gap-4`}>
-          <Metric label="Faturamento Bruto" value={formatCurrency(r.faturamentoBruto)} />
-          <Metric label="Total Impostos" value={formatCurrency(r.impostos.total)} sub={formatPercent(r.cargaTributaria)} />
-          <Metric label="Custos de Pessoal" value={formatCurrency(r.totalCustoPessoal)} />
-          {rateioEstrutura > 0 && (
-            <Metric label="Rateio Estrutura" value={formatCurrency(rateioEstrutura)} />
-          )}
-          <Metric
-            label={rateioEstrutura > 0 ? "Margem (c/ Estrutura)" : "Margem Bruta"}
-            value={formatCurrency(rateioEstrutura > 0 ? margemComEstrutura : r.margemBruta)}
-            sub={formatPercent(rateioEstrutura > 0 ? margemComEstruturaPercent : r.margemBrutaPercent)}
-            highlight={(rateioEstrutura > 0 ? margemComEstrutura : r.margemBruta) >= 0 ? 'positive' : 'negative'}
+        
+        {/* Transformamos o grid em 5 colunas para mostrar a "Cascata" completa */}
+        <div className="grid grid-cols-2 md:grid-cols-5 gap-4">
+          <Metric 
+            label="Faturamento Bruto" 
+            value={formatCurrency(r.faturamentoBruto)} 
           />
+          
+          <Metric 
+            label="Total Impostos" 
+            value={formatCurrency(r.impostos.total)} 
+            sub={formatPercent(r.cargaTributaria)} 
+            color="text-warning"
+          />
+          
+          <Metric 
+            label="Custos Diretos (Pessoal)" 
+            value={formatCurrency(r.totalCustoPessoal)} 
+            sub={`${r.headcount} colab.`}
+            color="text-destructive"
+          />
+          
+          {/* Nova métrica que reflete as despesas indiretas baseadas no VPD */}
+          <Metric 
+            label="Despesas Indiretas (VPD)" 
+            value={formatCurrency(r.custoVPD)} 
+            sub={`Rateio Estrutural`}
+            color="text-destructive"
+          />
+          
+          {/* O Resultado Operacional Final (Lucro Líquido) com destaque */}
+          <div className="col-span-2 md:col-span-1 border-l pl-4 border-primary/20">
+            <Metric
+              label="Lucro Líquido (ROF)"
+              value={formatCurrency(r.lucroLiquidoReal)}
+              sub={`Margem: ${formatPercent(r.margemLiquidaPercent)}`}
+              highlight={r.lucroLiquidoReal >= 0 ? 'positive' : 'negative'}
+            />
+          </div>
         </div>
       </CardContent>
     </Card>
   );
 }
 
-function Metric({ label, value, sub, highlight }: { label: string; value: string; sub?: string; highlight?: 'positive' | 'negative' }) {
+// Pequeno ajuste no Metric para aceitar a propriedade 'color' e facilitar a leitura visual
+function Metric({ label, value, sub, highlight, color }: { label: string; value: string; sub?: string; highlight?: 'positive' | 'negative', color?: string }) {
   return (
     <div>
       <p className="text-xs text-muted-foreground">{label}</p>
-      <p className={`font-mono text-sm font-semibold mt-0.5 ${highlight === 'positive' ? 'text-success' : highlight === 'negative' ? 'text-destructive' : 'text-foreground'}`}>
+      <p className={`font-mono text-sm font-semibold mt-0.5 ${highlight === 'positive' ? 'text-success' : highlight === 'negative' ? 'text-destructive' : color || 'text-foreground'}`}>
         {value}
       </p>
-      {sub && <p className="text-[10px] font-mono text-muted-foreground">{sub}</p>}
+      {sub && <p className="text-[10px] font-mono text-muted-foreground font-medium">{sub}</p>}
     </div>
   );
 }
