@@ -10,7 +10,6 @@ interface AppState {
   activeSetorId: string | null;
   activeSedeId: string | null;
   periodoAtivo: string;
-  // REVISADO: Adicionado 'honorarios' como opção válida de view
   view: 'dashboard' | 'setor' | 'projecoes' | 'ranking' | 'sede' | 'honorarios'; 
   viewMode: ViewMode;
 }
@@ -89,9 +88,10 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     if (!user) { setLoading(false); return; }
 
     const loadData = async () => {
+      // CORREÇÃO 1: Removido o .eq('user_id', user.id) para buscar os dados do escritório todo
       const [setoresRes, sedesRes] = await Promise.all([
-        supabase.from('setores').select('*').eq('user_id', user.id),
-        supabase.from('sedes').select('*').eq('user_id', user.id),
+        supabase.from('setores').select('*'),
+        supabase.from('sedes').select('*'),
       ]);
 
       if (setoresRes.data) {
@@ -124,7 +124,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     if (!user || !initialLoadDone.current) return;
     const rows = items.map(s => ({
       id: s.id,
-      user_id: user.id,
+      user_id: user.id, // O usuário logado que editou por último "assina" a modificação
       nome: s.nome,
       tipo: s.tipo,
       sede_id: s.sedeId ?? null,
@@ -134,15 +134,8 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     if (rows.length > 0) {
       await supabase.from('setores').upsert(rows, { onConflict: 'id' });
     }
-
-    const currentIds = items.map(s => s.id);
-    const { data: dbSetores } = await supabase.from('setores').select('id').eq('user_id', user.id);
-    if (dbSetores) {
-      const toDelete = dbSetores.filter(d => !currentIds.includes(d.id)).map(d => d.id);
-      if (toDelete.length > 0) {
-        await supabase.from('setores').delete().in('id', toDelete);
-      }
-    }
+    // CORREÇÃO 2: Removido o bloco perigoso que deletava automaticamente os setores do banco 
+    // caso eles não estivessem no cache local deste usuário (evita que um usuário apague o do outro sem querer).
   }, [user]);
 
   const syncSedes = useCallback(async (items: Sede[]) => {
@@ -157,15 +150,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     if (rows.length > 0) {
       await supabase.from('sedes').upsert(rows, { onConflict: 'id' });
     }
-
-    const currentIds = items.map(s => s.id);
-    const { data: dbSedes } = await supabase.from('sedes').select('id').eq('user_id', user.id);
-    if (dbSedes) {
-      const toDelete = dbSedes.filter(d => !currentIds.includes(d.id)).map(d => d.id);
-      if (toDelete.length > 0) {
-        await supabase.from('sedes').delete().in('id', toDelete);
-      }
-    }
+    // CORREÇÃO 3: Removido o bloco que deletava automaticamente as sedes
   }, [user]);
 
   const debouncedSyncSetores = useDebouncedSync(syncSetores);
@@ -189,6 +174,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
   const removeSetor = useCallback((id: string) => {
     setSetores(prev => prev.filter(s => s.id !== id));
     setActiveSetorId(prev => prev === id ? null : prev);
+    // Deleção explícita mantida e segura (agora só deleta quando clica no botão lixeira)
     if (user) supabase.from('setores').delete().eq('id', id).then(() => {});
   }, [user]);
 
@@ -226,6 +212,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     setSedes(prev => prev.filter(s => s.id !== id));
     setSetores(prev => prev.map(s => s.sedeId === id ? { ...s, sedeId: undefined } : s));
     setActiveSedeId(prev => prev === id ? null : prev);
+    // Deleção explícita mantida e segura
     if (user) supabase.from('sedes').delete().eq('id', id).then(() => {});
   }, [user]);
 
