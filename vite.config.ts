@@ -11,7 +11,9 @@ export default defineConfig(({ mode }) => ({
     allowedHosts: [
       "painelfinanceiro.mdradvocacia.com",
       "jcokc0c4gc4swgsgkgcsgo44.3.21.60.254.sslip.io",
-      "mdrpainelfinanceiro.mdradvocacia.com"
+      "mdrpainelfinanceiro.mdradvocacia.com",
+      "https://painelfinanceiro.mdradvocacia.com.br",
+      "https://api-painelfinanceiro.mdradvocacia.com.br",
     ],
     hmr: {
       overlay: false,
