@@ -38,7 +38,7 @@ interface AppContextType extends AppState {
 const APP_CTX_KEY = '__APP_CONTEXT__';
 const AppContext = ((globalThis as any)[APP_CTX_KEY] ??= createContext<AppContextType | null>(null)) as React.Context<AppContextType | null>;
 
-// Auxiliares de inicialização com proteção contra nulos
+// Funções auxiliares para evitar crashes com dados nulos ou inexistentes
 function getOrCreatePeriodoData(setor: Setor, periodo: string): PeriodoData {
   if (setor.periodos && setor.periodos[periodo]) return setor.periodos[periodo];
   const sorted = Object.keys(setor.periodos || {}).sort();
@@ -73,11 +73,11 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
   const initialLoadDone = useRef(false);
   const syncTimers = useRef<Record<string, ReturnType<typeof setTimeout>>>({});
 
-  // --- SINCRONIZAÇÃO GRANULAR (Evita Loop Infinito) ---
+  // --- SINCRONIZAÇÃO GRANULAR (Salva apenas o item alterado) ---
   const syncItem = useCallback(async (table: 'setores' | 'sedes', item: any) => {
     if (!user || !initialLoadDone.current) return;
 
-    // Debounce por ID para não sobrecarregar em digitação rápida
+    // Debounce por ID para evitar múltiplas chamadas durante a digitação
     if (syncTimers.current[item.id]) clearTimeout(syncTimers.current[item.id]);
 
     syncTimers.current[item.id] = setTimeout(async () => {
@@ -100,9 +100,12 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     }, 500);
   }, [user]);
 
-  // --- CARREGAMENTO E REALTIME ---
+  // --- CARREGAMENTO INICIAL E REALTIME ---
   useEffect(() => {
-    if (!user) { setLoading(false); return; }
+    if (!user) {
+      setLoading(false);
+      return;
+    }
 
     const loadData = async () => {
       try {
@@ -113,29 +116,37 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
 
         if (setoresRes.data) {
           setSetores(setoresRes.data.map((r: any) => ({
-            id: r.id, nome: r.nome, tipo: r.tipo as TipoSetor,
-            sedeId: r.sede_id ?? undefined, periodos: r.periodos ?? {},
+            id: r.id,
+            nome: r.nome,
+            tipo: r.tipo as TipoSetor,
+            sedeId: r.sede_id ?? undefined,
+            periodos: r.periodos ?? {},
           })));
         }
 
         if (sedesRes.data) {
           setSedes(sedesRes.data.map((r: any) => ({
-            id: r.id, nome: r.nome, periodos: r.periodos ?? {},
+            id: r.id,
+            nome: r.nome,
+            periodos: r.periodos ?? {},
           })));
         }
+        
         initialLoadDone.current = true;
       } catch (err) {
-        console.error("Falha no carregamento inicial:", err);
-        toast.error("Erro ao carregar dados do servidor.");
+        console.error("Falha ao carregar dados iniciais:", err);
+        toast.error("Erro ao sincronizar com o servidor.");
       } finally {
+        // Garante que o estado de carregamento é removido mesmo em caso de erro
         setLoading(false);
       }
     };
 
     loadData();
 
+    // Configuração do Realtime para refletir mudanças de outros usuários
     const channel = supabase
-      .channel('db-realtime')
+      .channel('db-realtime-sync')
       .on('postgres_changes', { event: '*', schema: 'public', table: 'setores' }, (payload) => {
         if (payload.eventType === 'INSERT' || payload.eventType === 'UPDATE') {
           const r = payload.new as any;
@@ -160,7 +171,9 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       })
       .subscribe();
 
-    return () => { supabase.removeChannel(channel); };
+    return () => {
+      supabase.removeChannel(channel);
+    };
   }, [user]);
 
   // --- ACTIONS ---
@@ -182,7 +195,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     setSetores(prev => prev.map(s => {
       if (s.id !== setorId) return s;
       const currentData = s.periodos[periodo] ?? getOrCreatePeriodoData(s, periodo);
-      const updated = {
+      const updatedSetor = {
         ...s,
         periodos: {
           ...s.periodos,
@@ -192,8 +205,8 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
           }
         }
       };
-      syncItem('setores', updated);
-      return updated;
+      syncItem('setores', updatedSetor);
+      return updatedSetor;
     }));
   }, [syncItem]);
 
