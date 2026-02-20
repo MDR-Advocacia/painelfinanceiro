@@ -10,7 +10,6 @@ interface AppState {
   activeSetorId: string | null;
   activeSedeId: string | null;
   periodoAtivo: string;
-  // REVISADO: Adicionado 'honorarios' como opção válida de view
   view: 'dashboard' | 'setor' | 'projecoes' | 'ranking' | 'sede' | 'honorarios'; 
   viewMode: ViewMode;
 }
@@ -58,7 +57,6 @@ function getOrCreateSedeCustos(sede: Sede, periodo: string): CustoItem[] {
   return [];
 }
 
-// Debounced DB sync helper
 function useDebouncedSync<T>(syncFn: (items: T[]) => Promise<void>, delay = 1000) {
   const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const latestRef = useRef<T[]>([]);
@@ -84,14 +82,14 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
   const [loading, setLoading] = useState(true);
   const initialLoadDone = useRef(false);
 
-  // Load data from DB on mount
   useEffect(() => {
     if (!user) { setLoading(false); return; }
 
     const loadData = async () => {
+      // CORREÇÃO: Removido o filtro .eq('user_id') para carregar TUDO do banco
       const [setoresRes, sedesRes] = await Promise.all([
-        supabase.from('setores').select('*').eq('user_id', user.id),
-        supabase.from('sedes').select('*').eq('user_id', user.id),
+        supabase.from('setores').select('*'),
+        supabase.from('sedes').select('*'),
       ]);
 
       if (setoresRes.data) {
@@ -119,7 +117,6 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     loadData();
   }, [user]);
 
-  // Sync setores to DB
   const syncSetores = useCallback(async (items: Setor[]) => {
     if (!user || !initialLoadDone.current) return;
     const rows = items.map(s => ({
@@ -134,15 +131,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     if (rows.length > 0) {
       await supabase.from('setores').upsert(rows, { onConflict: 'id' });
     }
-
-    const currentIds = items.map(s => s.id);
-    const { data: dbSetores } = await supabase.from('setores').select('id').eq('user_id', user.id);
-    if (dbSetores) {
-      const toDelete = dbSetores.filter(d => !currentIds.includes(d.id)).map(d => d.id);
-      if (toDelete.length > 0) {
-        await supabase.from('setores').delete().in('id', toDelete);
-      }
-    }
+    // CORREÇÃO: Removido o bloco que deletava dados de outros usuários
   }, [user]);
 
   const syncSedes = useCallback(async (items: Sede[]) => {
@@ -156,15 +145,6 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
 
     if (rows.length > 0) {
       await supabase.from('sedes').upsert(rows, { onConflict: 'id' });
-    }
-
-    const currentIds = items.map(s => s.id);
-    const { data: dbSedes } = await supabase.from('sedes').select('id').eq('user_id', user.id);
-    if (dbSedes) {
-      const toDelete = dbSedes.filter(d => !currentIds.includes(d.id)).map(d => d.id);
-      if (toDelete.length > 0) {
-        await supabase.from('sedes').delete().in('id', toDelete);
-      }
     }
   }, [user]);
 
