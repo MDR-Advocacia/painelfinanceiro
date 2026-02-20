@@ -57,7 +57,7 @@ function getOrCreateSedeCustos(sede: Sede, periodo: string): CustoItem[] {
   return [];
 }
 
-function useDebouncedSync<T>(syncFn: (items: T[]) => Promise<void>, delay = 1000) {
+function useDebouncedSync<T>(syncFn: (items: T[]) => Promise<void>, delay = 100) {
   const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const latestRef = useRef<T[]>([]);
 
@@ -83,10 +83,13 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
   const initialLoadDone = useRef(false);
 
   useEffect(() => {
-    if (!user) { setLoading(false); return; }
+    if (!user) {
+      setLoading(false);
+      return;
+  }
 
     const loadData = async () => {
-      // CORREÇÃO: Removido o filtro .eq('user_id') para carregar TUDO do banco
+      // Carregamento inicial de todos os dados
       const [setoresRes, sedesRes] = await Promise.all([
         supabase.from('setores').select('*'),
         supabase.from('sedes').select('*'),
@@ -115,7 +118,74 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     };
 
     loadData();
-  }, [user]);
+
+  // --- CONFIGURAÇÃO DO REALTIME ---
+  // Inscreve-se para mudanças em qualquer linha das tabelas 'setores' e 'sedes'
+  const channel = supabase
+    .channel('db-changes')
+    .on(
+      'postgres_changes',
+      { event: '*', schema: 'public', table: 'setores' },
+      (payload) => {
+        if (payload.eventType === 'INSERT' || payload.eventType === 'UPDATE') {
+          const newData = payload.new as any;
+          setSetores((prev) => {
+            const exists = prev.find((s) => s.id === newData.id);
+            if (exists) {
+              return prev.map((s) => (s.id === newData.id ? {
+                ...s,
+                nome: newData.nome,
+                tipo: newData.tipo,
+                sedeId: newData.sede_id,
+                periodos: newData.periodos
+              } : s));
+            }
+            return [...prev, {
+              id: newData.id,
+              nome: newData.nome,
+              tipo: newData.tipo,
+              sedeId: newData.sede_id,
+              periodos: newData.periodos
+            }];
+          });
+        } else if (payload.eventType === 'DELETE') {
+          setSetores((prev) => prev.filter((s) => s.id !== payload.old.id));
+        }
+      }
+    )
+    .on(
+      'postgres_changes',
+      { event: '*', schema: 'public', table: 'sedes' },
+      (payload) => {
+        if (payload.eventType === 'INSERT' || payload.eventType === 'UPDATE') {
+          const newData = payload.new as any;
+          setSedes((prev) => {
+            const exists = prev.find((s) => s.id === newData.id);
+            if (exists) {
+              return prev.map((s) => (s.id === newData.id ? {
+                ...s,
+                nome: newData.nome,
+                periodos: newData.periodos
+              } : s));
+            }
+            return [...prev, {
+              id: newData.id,
+              nome: newData.nome,
+              periodos: newData.periodos
+            }];
+          });
+        } else if (payload.eventType === 'DELETE') {
+          setSedes((prev) => prev.filter((s) => s.id !== payload.old.id));
+        }
+      }
+    )
+    .subscribe();
+
+  // Limpeza: remove a inscrição ao desmontar o componente ou trocar o usuário
+  return () => {
+    supabase.removeChannel(channel);
+  };
+}, [user]);
 
   const syncSetores = useCallback(async (items: Setor[]) => {
     if (!user || !initialLoadDone.current) return;
