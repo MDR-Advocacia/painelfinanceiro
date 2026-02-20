@@ -38,10 +38,10 @@ interface AppContextType extends AppState {
 const APP_CTX_KEY = '__APP_CONTEXT__';
 const AppContext = ((globalThis as any)[APP_CTX_KEY] ??= createContext<AppContextType | null>(null)) as React.Context<AppContextType | null>;
 
-// Funções auxiliares de dados
+// Auxiliares de inicialização com proteção contra nulos
 function getOrCreatePeriodoData(setor: Setor, periodo: string): PeriodoData {
-  if (setor.periodos[periodo]) return setor.periodos[periodo];
-  const sorted = Object.keys(setor.periodos).sort();
+  if (setor.periodos && setor.periodos[periodo]) return setor.periodos[periodo];
+  const sorted = Object.keys(setor.periodos || {}).sort();
   const prev = sorted.filter(p => p < periodo);
   if (prev.length > 0) {
     return JSON.parse(JSON.stringify(setor.periodos[prev[prev.length - 1]]));
@@ -50,8 +50,8 @@ function getOrCreatePeriodoData(setor: Setor, periodo: string): PeriodoData {
 }
 
 function getOrCreateSedeCustos(sede: Sede, periodo: string): CustoItem[] {
-  if (sede.periodos[periodo]) return sede.periodos[periodo];
-  const sorted = Object.keys(sede.periodos).sort();
+  if (sede.periodos && sede.periodos[periodo]) return sede.periodos[periodo];
+  const sorted = Object.keys(sede.periodos || {}).sort();
   const prev = sorted.filter(p => p < periodo);
   if (prev.length > 0) {
     return JSON.parse(JSON.stringify(sede.periodos[prev[prev.length - 1]]));
@@ -71,86 +71,77 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
   const [loading, setLoading] = useState(true);
   
   const initialLoadDone = useRef(false);
-  const sectorTimers = useRef<Record<string, ReturnType<typeof setTimeout>>>({});
-  const sedeTimers = useRef<Record<string, ReturnType<typeof setTimeout>>>({});
+  const syncTimers = useRef<Record<string, ReturnType<typeof setTimeout>>>({});
 
-  // --- SINCRONIZAÇÃO INDIVIDUAL (UPSERT) ---
-  const syncSingleSetor = useCallback(async (setor: Setor) => {
+  // --- SINCRONIZAÇÃO GRANULAR (Evita Loop Infinito) ---
+  const syncItem = useCallback(async (table: 'setores' | 'sedes', item: any) => {
     if (!user || !initialLoadDone.current) return;
-    
-    // Debounce por ID do setor para não sobrecarregar o banco em campos de digitação
-    if (sectorTimers.current[setor.id]) clearTimeout(sectorTimers.current[setor.id]);
-    
-    sectorTimers.current[setor.id] = setTimeout(async () => {
-      const row = {
-        id: setor.id,
+
+    // Debounce por ID para não sobrecarregar em digitação rápida
+    if (syncTimers.current[item.id]) clearTimeout(syncTimers.current[item.id]);
+
+    syncTimers.current[item.id] = setTimeout(async () => {
+      const row = table === 'setores' ? {
+        id: item.id,
         user_id: user.id,
-        nome: setor.nome,
-        tipo: setor.tipo,
-        sede_id: setor.sedeId ?? null,
-        periodos: setor.periodos as any,
+        nome: item.nome,
+        tipo: item.tipo,
+        sede_id: item.sedeId ?? null,
+        periodos: item.periodos as any,
+      } : {
+        id: item.id,
+        user_id: user.id,
+        nome: item.nome,
+        periodos: item.periodos as any,
       };
-      const { error } = await supabase.from('setores').upsert(row, { onConflict: 'id' });
-      if (error) console.error("Erro ao sincronizar setor:", error);
+
+      const { error } = await supabase.from(table).upsert(row, { onConflict: 'id' });
+      if (error) console.error(`Erro ao sincronizar ${table}:`, error);
     }, 500);
   }, [user]);
 
-  const syncSingleSede = useCallback(async (sede: Sede) => {
-    if (!user || !initialLoadDone.current) return;
-
-    if (sedeTimers.current[sede.id]) clearTimeout(sedeTimers.current[sede.id]);
-
-    sedeTimers.current[sede.id] = setTimeout(async () => {
-      const row = {
-        id: sede.id,
-        user_id: user.id,
-        nome: sede.nome,
-        periodos: sede.periodos as any,
-      };
-      const { error } = await supabase.from('sedes').upsert(row, { onConflict: 'id' });
-      if (error) console.error("Erro ao sincronizar sede:", error);
-    }, 500);
-  }, [user]);
-
-  // --- CARREGAMENTO INICIAL E REALTIME ---
+  // --- CARREGAMENTO E REALTIME ---
   useEffect(() => {
     if (!user) { setLoading(false); return; }
 
     const loadData = async () => {
-      const [setoresRes, sedesRes] = await Promise.all([
-        supabase.from('setores').select('*'),
-        supabase.from('sedes').select('*'),
-      ]);
+      try {
+        const [setoresRes, sedesRes] = await Promise.all([
+          supabase.from('setores').select('*'),
+          supabase.from('sedes').select('*'),
+        ]);
 
-      if (setoresRes.data) {
-        setSetores(setoresRes.data.map((r: any) => ({
-          id: r.id, nome: r.nome, tipo: r.tipo as TipoSetor,
-          sedeId: r.sede_id ?? undefined, periodos: r.periodos ?? {},
-        })));
+        if (setoresRes.data) {
+          setSetores(setoresRes.data.map((r: any) => ({
+            id: r.id, nome: r.nome, tipo: r.tipo as TipoSetor,
+            sedeId: r.sede_id ?? undefined, periodos: r.periodos ?? {},
+          })));
+        }
+
+        if (sedesRes.data) {
+          setSedes(sedesRes.data.map((r: any) => ({
+            id: r.id, nome: r.nome, periodos: r.periodos ?? {},
+          })));
+        }
+        initialLoadDone.current = true;
+      } catch (err) {
+        console.error("Falha no carregamento inicial:", err);
+        toast.error("Erro ao carregar dados do servidor.");
+      } finally {
+        setLoading(false);
       }
-
-      if (sedesRes.data) {
-        setSedes(sedesRes.data.map((r: any) => ({
-          id: r.id, nome: r.nome, periodos: r.periodos ?? {},
-        })));
-      }
-
-      initialLoadDone.current = true;
-      setLoading(false);
     };
 
     loadData();
 
-    // Inscrição Realtime para atualizações externas
     const channel = supabase
-      .channel('db-sync')
+      .channel('db-realtime')
       .on('postgres_changes', { event: '*', schema: 'public', table: 'setores' }, (payload) => {
         if (payload.eventType === 'INSERT' || payload.eventType === 'UPDATE') {
-          const newData = payload.new as any;
+          const r = payload.new as any;
           setSetores(prev => {
-            const exists = prev.find(s => s.id === newData.id);
-            const formatted = { id: newData.id, nome: newData.nome, tipo: newData.tipo, sedeId: newData.sede_id, periodos: newData.periodos };
-            return exists ? prev.map(s => s.id === newData.id ? formatted : s) : [...prev, formatted];
+            const formatted = { id: r.id, nome: r.nome, tipo: r.tipo, sedeId: r.sede_id, periodos: r.periodos ?? {} };
+            return prev.find(s => s.id === r.id) ? prev.map(s => s.id === r.id ? formatted : s) : [...prev, formatted];
           });
         } else if (payload.eventType === 'DELETE') {
           setSetores(prev => prev.filter(s => s.id !== payload.old.id));
@@ -158,11 +149,10 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       })
       .on('postgres_changes', { event: '*', schema: 'public', table: 'sedes' }, (payload) => {
         if (payload.eventType === 'INSERT' || payload.eventType === 'UPDATE') {
-          const newData = payload.new as any;
+          const r = payload.new as any;
           setSedes(prev => {
-            const exists = prev.find(s => s.id === newData.id);
-            const formatted = { id: newData.id, nome: newData.nome, periodos: newData.periodos };
-            return exists ? prev.map(s => s.id === newData.id ? formatted : s) : [...prev, formatted];
+            const formatted = { id: r.id, nome: r.nome, periodos: r.periodos ?? {} };
+            return prev.find(s => s.id === r.id) ? prev.map(s => s.id === r.id ? formatted : s) : [...prev, formatted];
           });
         } else if (payload.eventType === 'DELETE') {
           setSedes(prev => prev.filter(s => s.id !== payload.old.id));
@@ -173,14 +163,14 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     return () => { supabase.removeChannel(channel); };
   }, [user]);
 
-  // --- ACTIONS (SETOR) ---
+  // --- ACTIONS ---
   const addSetor = useCallback((nome: string, tipo: TipoSetor) => {
     const novo = createDefaultSetor(nome, tipo, periodoAtivo);
     setSetores(prev => [...prev, novo]);
     setActiveSetorId(novo.id);
     setView('setor');
-    syncSingleSetor(novo);
-  }, [periodoAtivo, syncSingleSetor]);
+    syncItem('setores', novo);
+  }, [periodoAtivo, syncItem]);
 
   const removeSetor = useCallback((id: string) => {
     setSetores(prev => prev.filter(s => s.id !== id));
@@ -192,33 +182,37 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     setSetores(prev => prev.map(s => {
       if (s.id !== setorId) return s;
       const currentData = s.periodos[periodo] ?? getOrCreatePeriodoData(s, periodo);
-      const newData = {
-        pessoal: updates.pessoal ?? currentData.pessoal,
-        faturamento: updates.faturamento ?? currentData.faturamento,
+      const updated = {
+        ...s,
+        periodos: {
+          ...s.periodos,
+          [periodo]: {
+            pessoal: updates.pessoal ?? currentData.pessoal,
+            faturamento: updates.faturamento ?? currentData.faturamento,
+          }
+        }
       };
-      const updated = { ...s, periodos: { ...s.periodos, [periodo]: newData } };
-      syncSingleSetor(updated);
+      syncItem('setores', updated);
       return updated;
     }));
-  }, [syncSingleSetor]);
+  }, [syncItem]);
 
   const updateSetorSedeId = useCallback((setorId: string, sedeId: string | undefined) => {
     setSetores(prev => prev.map(s => {
       if (s.id !== setorId) return s;
       const updated = { ...s, sedeId };
-      syncSingleSetor(updated);
+      syncItem('setores', updated);
       return updated;
     }));
-  }, [syncSingleSetor]);
+  }, [syncItem]);
 
-  // --- ACTIONS (SEDE) ---
   const addSede = useCallback((nome: string) => {
     const nova = createDefaultSede(nome, periodoAtivo);
     setSedes(prev => [...prev, nova]);
     setActiveSedeId(nova.id);
     setView('sede');
-    syncSingleSede(nova);
-  }, [periodoAtivo, syncSingleSede]);
+    syncItem('sedes', nova);
+  }, [periodoAtivo, syncItem]);
 
   const removeSede = useCallback((id: string) => {
     setSedes(prev => prev.filter(s => s.id !== id));
@@ -231,12 +225,11 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     setSedes(prev => prev.map(s => {
       if (s.id !== sedeId) return s;
       const updated = { ...s, periodos: { ...s.periodos, [periodo]: custos } };
-      syncSingleSede(updated);
+      syncItem('sedes', updated);
       return updated;
     }));
-  }, [syncSingleSede]);
+  }, [syncItem]);
 
-  // --- GETTERS ---
   const setActiveSetor = useCallback((id: string | null) => {
     setActiveSetorId(id); setActiveSedeId(null); setView(id ? 'setor' : 'dashboard');
   }, []);
