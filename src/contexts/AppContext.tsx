@@ -33,12 +33,15 @@ interface AppContextType extends AppState {
   getSetoresForSede: (sedeId: string) => Setor[];
   getRateioPerSetor: (sedeId: string, periodo: string) => number;
   loading: boolean;
+  // Novos controles de salvamento manual
+  hasUnsavedChanges: boolean;
+  isSaving: boolean;
+  saveData: () => Promise<void>;
 }
 
 const APP_CTX_KEY = '__APP_CONTEXT__';
 const AppContext = ((globalThis as any)[APP_CTX_KEY] ??= createContext<AppContextType | null>(null)) as React.Context<AppContextType | null>;
 
-// Funções auxiliares para evitar crashes com dados nulos ou inexistentes
 function getOrCreatePeriodoData(setor: Setor, periodo: string): PeriodoData {
   if (setor.periodos && setor.periodos[periodo]) return setor.periodos[periodo];
   const sorted = Object.keys(setor.periodos || {}).sort();
@@ -70,35 +73,11 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
   const [viewMode, setViewMode] = useState<ViewMode>('mensal');
   const [loading, setLoading] = useState(true);
   
+  // Estados para controle de salvamento
+  const [hasUnsavedChanges, setHasUnsavedChanges] = useState(false);
+  const [isSaving, setIsSaving] = useState(false);
+  
   const initialLoadDone = useRef(false);
-  const syncTimers = useRef<Record<string, ReturnType<typeof setTimeout>>>({});
-
-  // --- SINCRONIZAÇÃO GRANULAR (Salva apenas o item alterado) ---
-  const syncItem = useCallback(async (table: 'setores' | 'sedes', item: any) => {
-    if (!user || !initialLoadDone.current) return;
-
-    // Debounce por ID para evitar múltiplas chamadas durante a digitação
-    if (syncTimers.current[item.id]) clearTimeout(syncTimers.current[item.id]);
-
-    syncTimers.current[item.id] = setTimeout(async () => {
-      const row = table === 'setores' ? {
-        id: item.id,
-        user_id: user.id,
-        nome: item.nome,
-        tipo: item.tipo,
-        sede_id: item.sedeId ?? null,
-        periodos: item.periodos as any,
-      } : {
-        id: item.id,
-        user_id: user.id,
-        nome: item.nome,
-        periodos: item.periodos as any,
-      };
-
-      const { error } = await supabase.from(table).upsert(row, { onConflict: 'id' });
-      if (error) console.error(`Erro ao sincronizar ${table}:`, error);
-    }, 500);
-  }, [user]);
 
   // --- CARREGAMENTO INICIAL E REALTIME ---
   useEffect(() => {
@@ -134,60 +113,105 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
         
         initialLoadDone.current = true;
       } catch (err) {
-        console.error("Falha ao carregar dados iniciais:", err);
-        toast.error("Erro ao sincronizar com o servidor.");
+        console.error("Erro ao carregar dados iniciais:", err);
       } finally {
-        // Garante que o estado de carregamento é removido mesmo em caso de erro
         setLoading(false);
       }
     };
 
     loadData();
 
-    // Configuração do Realtime para refletir mudanças de outros usuários
     const channel = supabase
       .channel('db-realtime-sync')
       .on('postgres_changes', { event: '*', schema: 'public', table: 'setores' }, (payload) => {
-        if (payload.eventType === 'INSERT' || payload.eventType === 'UPDATE') {
-          const r = payload.new as any;
-          setSetores(prev => {
-            const formatted = { id: r.id, nome: r.nome, tipo: r.tipo, sedeId: r.sede_id, periodos: r.periodos ?? {} };
-            return prev.find(s => s.id === r.id) ? prev.map(s => s.id === r.id ? formatted : s) : [...prev, formatted];
-          });
-        } else if (payload.eventType === 'DELETE') {
-          setSetores(prev => prev.filter(s => s.id !== payload.old.id));
-        }
-      })
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'sedes' }, (payload) => {
-        if (payload.eventType === 'INSERT' || payload.eventType === 'UPDATE') {
-          const r = payload.new as any;
-          setSedes(prev => {
-            const formatted = { id: r.id, nome: r.nome, periodos: r.periodos ?? {} };
-            return prev.find(s => s.id === r.id) ? prev.map(s => s.id === r.id ? formatted : s) : [...prev, formatted];
-          });
-        } else if (payload.eventType === 'DELETE') {
-          setSedes(prev => prev.filter(s => s.id !== payload.old.id));
-        }
+        // Só atualiza via realtime se o usuário não estiver com alterações locais pendentes
+        // para evitar que o dado do banco atropele o que ele está digitando
+        setHasUnsavedChanges(prev => {
+          if (!prev) {
+            if (payload.eventType === 'INSERT' || payload.eventType === 'UPDATE') {
+              const r = payload.new as any;
+              setSetores(current => {
+                const formatted = { id: r.id, nome: r.nome, tipo: r.tipo, sedeId: r.sede_id, periodos: r.periodos ?? {} };
+                return current.find(s => s.id === r.id) ? current.map(s => s.id === r.id ? formatted : s) : [...current, formatted];
+              });
+            } else if (payload.eventType === 'DELETE') {
+              setSetores(current => current.filter(s => s.id !== payload.old.id));
+            }
+          }
+          return prev;
+        });
       })
       .subscribe();
 
-    return () => {
-      supabase.removeChannel(channel);
-    };
+    return () => { supabase.removeChannel(channel); };
   }, [user]);
 
-  // --- ACTIONS ---
+  // --- BLOQUEIO DE FECHAMENTO DE ABA ---
+  useEffect(() => {
+    const handleBeforeUnload = (e: BeforeUnloadEvent) => {
+      if (hasUnsavedChanges) {
+        e.preventDefault();
+        e.returnValue = ''; // Exibe alerta padrão do navegador
+      }
+    };
+    window.addEventListener('beforeunload', handleBeforeUnload);
+    return () => window.removeEventListener('beforeunload', handleBeforeUnload);
+  }, [hasUnsavedChanges]);
+
+  // --- FUNÇÃO DE SALVAMENTO MANUAL ---
+  const saveData = async () => {
+    if (!user || !initialLoadDone.current) return;
+    setIsSaving(true);
+    
+    try {
+      const sectorRows = setores.map(s => ({
+        id: s.id,
+        user_id: user.id,
+        nome: s.nome,
+        tipo: s.tipo,
+        sede_id: s.sedeId ?? null,
+        periodos: s.periodos as any,
+      }));
+
+      const sedeRows = sedes.map(s => ({
+        id: s.id,
+        user_id: user.id,
+        nome: s.nome,
+        periodos: s.periodos as any,
+      }));
+
+      const [resSetores, resSedes] = await Promise.all([
+        sectorRows.length > 0 ? supabase.from('setores').upsert(sectorRows, { onConflict: 'id' }) : Promise.resolve({ error: null }),
+        sedeRows.length > 0 ? supabase.from('sedes').upsert(sedeRows, { onConflict: 'id' }) : Promise.resolve({ error: null })
+      ]);
+
+      if (resSetores.error) throw resSetores.error;
+      if (resSedes.error) throw resSedes.error;
+
+      setHasUnsavedChanges(false);
+      toast.success("Dados salvos com segurança no banco!");
+    } catch (error: any) {
+      console.error("Erro ao salvar:", error);
+      toast.error("Falha ao salvar: " + (error.message || "Verifique sua conexão."));
+    } finally {
+      setIsSaving(false);
+    }
+  };
+
+  // --- ACTIONS (MARCANDO COMO PENDENTE) ---
   const addSetor = useCallback((nome: string, tipo: TipoSetor) => {
     const novo = createDefaultSetor(nome, tipo, periodoAtivo);
     setSetores(prev => [...prev, novo]);
+    setHasUnsavedChanges(true);
     setActiveSetorId(novo.id);
     setView('setor');
-    syncItem('setores', novo);
-  }, [periodoAtivo, syncItem]);
+  }, [periodoAtivo]);
 
   const removeSetor = useCallback((id: string) => {
     setSetores(prev => prev.filter(s => s.id !== id));
+    setHasUnsavedChanges(true);
     if (activeSetorId === id) setActiveSetorId(null);
+    // Deletamos direto pois o delete é uma ação destrutiva imediata
     supabase.from('setores').delete().eq('id', id).then();
   }, [activeSetorId]);
 
@@ -195,7 +219,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     setSetores(prev => prev.map(s => {
       if (s.id !== setorId) return s;
       const currentData = s.periodos[periodo] ?? getOrCreatePeriodoData(s, periodo);
-      const updatedSetor = {
+      const updated = {
         ...s,
         periodos: {
           ...s.periodos,
@@ -205,31 +229,31 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
           }
         }
       };
-      syncItem('setores', updatedSetor);
-      return updatedSetor;
+      setHasUnsavedChanges(true);
+      return updated;
     }));
-  }, [syncItem]);
+  }, []);
 
   const updateSetorSedeId = useCallback((setorId: string, sedeId: string | undefined) => {
     setSetores(prev => prev.map(s => {
       if (s.id !== setorId) return s;
-      const updated = { ...s, sedeId };
-      syncItem('setores', updated);
-      return updated;
+      setHasUnsavedChanges(true);
+      return { ...s, sedeId };
     }));
-  }, [syncItem]);
+  }, []);
 
   const addSede = useCallback((nome: string) => {
     const nova = createDefaultSede(nome, periodoAtivo);
     setSedes(prev => [...prev, nova]);
+    setHasUnsavedChanges(true);
     setActiveSedeId(nova.id);
     setView('sede');
-    syncItem('sedes', nova);
-  }, [periodoAtivo, syncItem]);
+  }, [periodoAtivo]);
 
   const removeSede = useCallback((id: string) => {
     setSedes(prev => prev.filter(s => s.id !== id));
     setSetores(prev => prev.map(s => s.sedeId === id ? { ...s, sedeId: undefined } : s));
+    setHasUnsavedChanges(true);
     if (activeSedeId === id) setActiveSedeId(null);
     supabase.from('sedes').delete().eq('id', id).then();
   }, [activeSedeId]);
@@ -237,11 +261,10 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
   const updateSedeCustos = useCallback((sedeId: string, periodo: string, custos: CustoItem[]) => {
     setSedes(prev => prev.map(s => {
       if (s.id !== sedeId) return s;
-      const updated = { ...s, periodos: { ...s.periodos, [periodo]: custos } };
-      syncItem('sedes', updated);
-      return updated;
+      setHasUnsavedChanges(true);
+      return { ...s, periodos: { ...s.periodos, [periodo]: custos } };
     }));
-  }, [syncItem]);
+  }, []);
 
   const setActiveSetor = useCallback((id: string | null) => {
     setActiveSetorId(id); setActiveSedeId(null); setView(id ? 'setor' : 'dashboard');
@@ -273,6 +296,8 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       activeSetor, activePeriodoData,
       addSede, removeSede, setActiveSede, updateSedeCustos,
       getSetoresForSede, getRateioPerSetor, loading,
+      // Novos controles expostos
+      hasUnsavedChanges, isSaving, saveData
     }}>
       {children}
     </AppContext.Provider>
