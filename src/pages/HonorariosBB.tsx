@@ -49,25 +49,34 @@ export default function HonorariosBB() {
   const [faturasFiles, setFaturasFiles] = useState<File[]>([]);
   const [showMapeador, setShowMapeador] = useState(false);
   const [colunasDisponiveis, setColunasDisponiveis] = useState<string[]>([]);
+  const [previewData, setPreviewData] = useState<any[]>([]); // Adicionado para exibir as linhas no modal
   const [arquivosReferencia, setArquivosReferencia] = useState<File[]>([]);
   const [stats, setStats] = useState({ total: 0, autor: 0, reu: 0 });
 
+  // CONSERTADO: Contador agora usa o banco para contar, sem limite de 1000 linhas
   const fetchStats = async () => {
     try {
-      const { data, error } = await supabase.from('base_referencia').select('polo');
-      if (error) throw error;
-      
-      const total = data.length;
-      let countAutor = 0;
-      let countReu = 0;
-      
-      data.forEach(r => {
-          const polo = r.polo || '';
-          if (/AUTOR|REQUERENTE|EXEQUENTE|EMBARGANTE|IMPUGNANTE|ATIVO/i.test(polo)) countAutor++;
-          else if (/RÉU|REU|REQUERIDO|EXECUTADO|EMBARGADO|IMPUGNADO|PASSIVO/i.test(polo)) countReu++;
-      });
+      const { count: total, error: errTotal } = await supabase
+        .from('base_referencia')
+        .select('*', { count: 'exact', head: true });
 
-      setStats({ total, autor: countAutor, reu: countReu });
+      const { count: autor, error: errAutor } = await supabase
+        .from('base_referencia')
+        .select('*', { count: 'exact', head: true })
+        .or('polo.ilike.%AUTOR%,polo.ilike.%REQUERENTE%,polo.ilike.%EXEQUENTE%,polo.ilike.%EMBARGANTE%,polo.ilike.%IMPUGNANTE%,polo.ilike.%ATIVO%');
+
+      const { count: reu, error: errReu } = await supabase
+        .from('base_referencia')
+        .select('*', { count: 'exact', head: true })
+        .or('polo.ilike.%RÉU%,polo.ilike.%REU%,polo.ilike.%REQUERIDO%,polo.ilike.%EXECUTADO%,polo.ilike.%EMBARGADO%,polo.ilike.%IMPUGNADO%,polo.ilike.%PASSIVO%');
+
+      if (errTotal) throw errTotal;
+
+      setStats({ 
+        total: total || 0, 
+        autor: autor || 0, 
+        reu: reu || 0 
+      });
     } catch (err) {
       console.error("Erro ao carregar estatísticas:", err);
     }
@@ -102,6 +111,7 @@ export default function HonorariosBB() {
           const json = XLSX.utils.sheet_to_json(wb.Sheets[wb.SheetNames[0]], { defval: "" });
           if (json.length > 0) {
             setColunasDisponiveis(Object.keys(json[0] as object));
+            setPreviewData(json); // Salva as linhas para mostrar no modal
             setShowMapeador(true);
           } else {
             toast.error("O primeiro arquivo parece estar vazio.");
@@ -146,10 +156,15 @@ export default function HonorariosBB() {
           };
         }).filter(r => r.npj_limpo !== "");
 
+        // CONSERTADO: Envio em lotes de 500 para não engasgar a AWS
         if (rows.length > 0) {
-          const { error } = await supabase.from('base_referencia').upsert(rows, { onConflict: 'npj_limpo' });
-          if (error) throw error;
-          totalSalvo += rows.length;
+          const TAMANHO_LOTE = 500; 
+          for (let j = 0; j < rows.length; j += TAMANHO_LOTE) {
+            const lote = rows.slice(j, j + TAMANHO_LOTE);
+            const { error } = await supabase.from('base_referencia').upsert(lote, { onConflict: 'npj_limpo' });
+            if (error) throw error;
+            totalSalvo += lote.length;
+          }
         }
       }
       toast.success(`${totalSalvo} processos salvos com sucesso!`);
@@ -200,7 +215,7 @@ export default function HonorariosBB() {
       await delay(300);
 
       let baseRef: any[] = [];
-      const TAMANHO_LOTE = 50; // REDUZIDO PARA 50! Evita estourar a API do Supabase.
+      const TAMANHO_LOTE = 50; 
       
       for (let i = 0; i < npjsFatura.length; i += TAMANHO_LOTE) {
         const lote = npjsFatura.slice(i, i + TAMANHO_LOTE);
@@ -383,7 +398,7 @@ export default function HonorariosBB() {
         open={showMapeador} 
         onOpenChange={setShowMapeador}
         colunas={colunasDisponiveis}
-        previewData={[]} 
+        previewData={previewData} 
         onConfirm={salvarNoBanco}
       />
     </div>
