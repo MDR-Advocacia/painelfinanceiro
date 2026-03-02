@@ -35,6 +35,7 @@ export interface Faturamento {
 export interface PeriodoData {
   pessoal: Pessoal;
   faturamento: Faturamento;
+  despesasEventuais?: CustoItem[];
 }
 
 export interface Setor {
@@ -57,21 +58,22 @@ export interface ImpostosCalculados {
 }
 
 /** * Configuração de VPD (Valor Padrão de Despesas)
- * Baseado no método de rateio por número de funcionários [cite: 31, 33]
+ * Baseado no método de rateio por número de funcionários
  */
 export interface VpdConfig {
   id: string;
   periodo: string; // key: "2026-02"
-  valor: number;   // Sugestão inicial: R$ 2.472,85 [cite: 36, 46]
+  valor: number;   // Sugestão inicial: R$ 2.472,85
 }
 
 /**
  * Resumo Estratégico do Setor
- * Integra indicadores de eficiência operacional e lucro líquido (ROF) [cite: 3, 6, 9]
+ * Integra indicadores de eficiência operacional e lucro líquido (ROF)
  */
 export interface ResumoSetor {
   custosPorCargo: Record<string, number>;
   totalCustoPessoal: number;
+  totalDespesasEventuais: number;
   faturamentoBruto: number;
   impostos: ImpostosCalculados;
   cargaTributaria: number;
@@ -81,10 +83,10 @@ export interface ResumoSetor {
   status: 'excelente' | 'saudavel' | 'atencao' | 'critico';
   
   // Novos Indicadores Estratégicos (Estudo MDR)
-  headcount: number;          // Total de profissionais no setor [cite: 31]
-  custoVPD: number;           // headcount * valor do VPD do período [cite: 33, 46]
-  lucroLiquidoReal: number;   // ROF: Resultado Operacional Final [cite: 4, 9, 11]
-  margemLiquidaPercent: number; // Eficiência operacional (Lucro Líquido / Receita Total) [cite: 13, 15, 17]
+  headcount: number;          // Total de profissionais no setor
+  custoVPD: number;           // headcount * valor do VPD do período
+  lucroLiquidoReal: number;   // ROF: Resultado Operacional Final
+  margemLiquidaPercent: number; // Eficiência operacional (Lucro Líquido / Receita Total)
 }
 
 // Defaults
@@ -127,6 +129,7 @@ export function createDefaultPeriodoData(tipo: TipoSetor): PeriodoData {
   return {
     pessoal: createDefaultPessoal(tipo),
     faturamento: defaultFaturamento(),
+    despesasEventuais: [],
   };
 }
 

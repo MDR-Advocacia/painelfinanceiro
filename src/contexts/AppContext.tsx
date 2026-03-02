@@ -1,10 +1,12 @@
 import React, { createContext, useContext, useState, useEffect, useCallback, useRef } from 'react';
 import type { Setor, TipoSetor, PeriodoData, ViewMode, Sede, CustoItem, VpdConfig } from '@/types/sector';
 import { createDefaultSetor, createDefaultPeriodoData, getCurrentPeriodo, createDefaultSede } from '@/types/sector';
-import { supabase } from '@/integrations/supabase/client';
 import { useAuth } from '@/hooks/useAuth';
 import { toast } from "sonner";
 import { getVpdValor } from '@/utils/calculations';
+
+// A URL DA NOSSA NOVA API DJANGO!
+const API_URL = 'http://localhost:8000/api';
 
 interface AppState {
   setores: Setor[];
@@ -44,7 +46,6 @@ interface AppContextType extends AppState {
 
 const AppContext = createContext<AppContextType | null>(null);
 
-// Funções auxiliares para buscar ou criar dados de períodos (Previne quebra de UI)
 function getOrCreatePeriodoDataLocal(setor: Setor, periodo: string): PeriodoData {
   if (setor.periodos && setor.periodos[periodo]) return setor.periodos[periodo];
   const sorted = Object.keys(setor.periodos || {}).sort();
@@ -77,33 +78,40 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
   const [isSaving, setIsSaving] = useState(false);
   const initialLoadDone = useRef(false);
 
-  // --- 1. CARREGAMENTO INICIAL DO BANCO ---
+  // --- 1. CARREGAMENTO INICIAL DO BANCO (VIA DJANGO API) ---
   useEffect(() => {
     if (!user) { setLoading(false); return; }
 
     const loadData = async () => {
       try {
         const [setoresRes, sedesRes, vpdRes] = await Promise.all([
-          supabase.from('setores').select('*'),
-          supabase.from('sedes').select('*'),
-          supabase.from('vpd_configs').select('*')
+          fetch(`${API_URL}/setores/`).then(res => res.json()),
+          fetch(`${API_URL}/sedes/`).then(res => res.json()),
+          fetch(`${API_URL}/vpd_configs/`).then(res => res.json())
         ]);
 
-        if (setoresRes.data) setSetores(setoresRes.data.map((r: any) => ({
-          id: r.id, nome: r.nome, tipo: r.tipo, sedeId: r.sede_id ?? undefined, periodos: r.periodos ?? {}
-        })));
+        if (Array.isArray(setoresRes)) {
+          setSetores(setoresRes.map((r: any) => ({
+            id: r.id, nome: r.nome, tipo: r.tipo, sedeId: r.sedeId ?? undefined, periodos: r.periodos ?? {}
+          })));
+        }
 
-        if (sedesRes.data) setSedes(sedesRes.data.map((r: any) => ({
-          id: r.id, nome: r.nome, periodos: r.periodos ?? {}
-        })));
+        if (Array.isArray(sedesRes)) {
+          setSedes(sedesRes.map((r: any) => ({
+            id: r.id, nome: r.nome, periodos: r.periodos ?? {}
+          })));
+        }
 
-        if (vpdRes.data) setVpdConfigs(vpdRes.data.map((r: any) => ({
-          id: r.id, periodo: r.periodo, valor: r.valor
-        })));
+        if (Array.isArray(vpdRes)) {
+          setVpdConfigs(vpdRes.map((r: any) => ({
+            id: r.id, periodo: r.periodo, valor: r.valor
+          })));
+        }
         
         initialLoadDone.current = true;
       } catch (err) {
-        console.error("Erro ao carregar dados:", err);
+        console.error("Erro ao carregar dados da API:", err);
+        toast.error("Falha ao conectar com o servidor local.");
       } finally {
         setLoading(false);
       }
@@ -111,32 +119,55 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     loadData();
   }, [user]);
 
-  // --- 2. SALVAMENTO MANUAL (ÚNICA FONTE DE SINCRONIZAÇÃO) ---
+  // --- 2. SALVAMENTO MANUAL (VIA DJANGO API) ---
   const saveData = async () => {
     if (!user || !initialLoadDone.current) return;
     setIsSaving(true);
+    
+    // Lógica para Criar (POST) ou Atualizar (PUT) os dados na API
+    const upsertToAPI = async (endpoint: string, items: any[]) => {
+      for (const item of items) {
+        const payload = { ...item, user_id: user.id };
+        const check = await fetch(`${API_URL}/${endpoint}/${item.id}/`);
+        
+        if (check.ok) {
+          await fetch(`${API_URL}/${endpoint}/${item.id}/`, {
+            method: 'PUT',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(payload)
+          });
+        } else {
+          await fetch(`${API_URL}/${endpoint}/`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(payload)
+          });
+        }
+      }
+    };
+
     try {
       const sectorRows = setores.map(s => ({
-        id: s.id, user_id: user.id, nome: s.nome, tipo: s.tipo,
-        sede_id: s.sedeId ?? null, periodos: s.periodos
+        id: s.id, nome: s.nome, tipo: s.tipo, sedeId: s.sedeId ?? null, periodos: s.periodos
       }));
       const sedeRows = sedes.map(s => ({
-        id: s.id, user_id: user.id, nome: s.nome, periodos: s.periodos
+        id: s.id, nome: s.nome, periodos: s.periodos
       }));
       const vpdRows = vpdConfigs.map(v => ({
-        id: v.id, user_id: user.id, periodo: v.periodo, valor: v.valor
+        id: v.id, periodo: v.periodo, valor: v.valor
       }));
 
       await Promise.all([
-        sectorRows.length > 0 && supabase.from('setores').upsert(sectorRows),
-        sedeRows.length > 0 && supabase.from('sedes').upsert(sedeRows),
-        vpdRows.length > 0 && supabase.from('vpd_configs').upsert(vpdRows)
+        upsertToAPI('setores', sectorRows),
+        upsertToAPI('sedes', sedeRows),
+        upsertToAPI('vpd_configs', vpdRows)
       ]);
 
       setHasUnsavedChanges(false);
-      toast.success("Dados salvos com segurança!");
+      toast.success("Dados salvos com segurança no servidor local!");
     } catch (error) {
-      toast.error("Erro ao sincronizar dados.");
+      console.error(error);
+      toast.error("Erro ao sincronizar dados com o servidor.");
     } finally {
       setIsSaving(false);
     }
@@ -165,7 +196,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     if (!confirm("Excluir setor permanentemente?")) return;
     setSetores(prev => prev.filter(s => s.id !== id));
     setHasUnsavedChanges(true);
-    supabase.from('setores').delete().eq('id', id).then();
+    fetch(`${API_URL}/setores/${id}/`, { method: 'DELETE' }).catch(console.error);
   }, []);
 
   const updatePeriodoData = useCallback((setorId: string, periodo: string, updates: Partial<PeriodoData>) => {
@@ -179,7 +210,8 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
           ...s.periodos,
           [periodo]: {
             pessoal: updates.pessoal ?? current.pessoal,
-            faturamento: updates.faturamento ?? current.faturamento
+            faturamento: updates.faturamento ?? current.faturamento,
+            despesasEventuais: updates.despesasEventuais ?? current.despesasEventuais ?? [] // <-- AQUI GARANTIMOS OS GASTOS EVENTUAIS
           }
         }
       };
@@ -202,7 +234,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     setSedes(prev => prev.filter(s => s.id !== id));
     setSetores(prev => prev.map(s => s.sedeId === id ? { ...s, sedeId: undefined } : s));
     setHasUnsavedChanges(true);
-    supabase.from('sedes').delete().eq('id', id).then();
+    fetch(`${API_URL}/sedes/${id}/`, { method: 'DELETE' }).catch(console.error);
   }, []);
 
   const updateSedeCustos = useCallback((sedeId: string, periodo: string, custos: CustoItem[]) => {
@@ -221,7 +253,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
 
   // --- 5. CALCULADOS E GETTERS ---
   const activeSetor = setores.find(s => s.id === activeSetorId) || null;
-  const currentVpdValor = getVpdValor(vpdConfigs, periodoAtivo); // Puxa do utils com o padrão de R$ 2.472,85 
+  const currentVpdValor = getVpdValor(vpdConfigs, periodoAtivo); 
 
   return (
     <AppContext.Provider value={{
