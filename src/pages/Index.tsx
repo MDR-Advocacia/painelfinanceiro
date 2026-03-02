@@ -5,8 +5,9 @@ import { SectorView } from "@/components/SectorView";
 import { Projections } from "@/components/Projections";
 import { RankingAnalysis } from "@/components/RankingAnalysis";
 import { SedeView } from "@/components/SedeView";
-// --- REVISÃO: Importação da nova funcionalidade ---
 import HonorariosBB from "./HonorariosBB"; 
+import { StrategicConfig } from "@/components/StrategicConfig"; // <-- Importação da nova tela
+import { SaveIndicator } from "@/components/SaveIndicator"; 
 
 const MainContent = () => {
   const { view, loading } = useApp();
@@ -15,7 +16,6 @@ const MainContent = () => {
     return (
       <main className="flex-1 min-h-screen bg-secondary flex items-center justify-center">
         <div className="flex flex-col items-center gap-2">
-          {/* Adicionando um feedback visual mais profissional */}
           <div className="h-8 w-8 animate-spin rounded-full border-4 border-primary border-t-transparent"></div>
           <p className="text-muted-foreground animate-pulse">Carregando ecossistema MDR...</p>
         </div>
@@ -30,17 +30,21 @@ const MainContent = () => {
       {view === 'projecoes' && <Projections />}
       {view === 'ranking' && <RankingAnalysis />}
       {view === 'sede' && <SedeView />}
-      
-      {/* --- REVISÃO: Integração da nova View de Honorários --- */}
       {view === 'honorarios' && <HonorariosBB />}
+      
+      {/* <-- Nova rota para a Gestão Estratégica (VPD) --> */}
+      {view === 'config-estrategica' && <StrategicConfig />}
     </main>
   );
 };
 
 const Index = () => (
-  <div className="flex min-h-screen bg-background">
+  <div className="flex min-h-screen bg-background relative">
     <Sidebar />
     <MainContent />
+    
+    {/* O indicador flutuante de salvamento manual */}
+    <SaveIndicator /> 
   </div>
 );
 

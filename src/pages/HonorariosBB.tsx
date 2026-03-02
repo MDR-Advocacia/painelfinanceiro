@@ -12,12 +12,12 @@ import { saveAs } from 'file-saver';
 import { MapeadorColunas } from "@/components/MapeadorColunas";
 import { supabase } from "@/integrations/supabase/client";
 
-// --- REGRAS DE NEGÓCIO (IDÊNTICAS AO PYTHON) ---
+// --- REGRAS DE NEGÓCIO (ATUALIZADAS COM A SEPARAÇÃO POR SETOR) ---
 const MAPA_CENTRO_CUSTO: Record<string, string[]> = {
-  'BB Réu Cadastro': ['PAG HON - CERTIFICACAO', 'PAG HON - REGULARIZAÇÃO DE REPRESENTAÇÃO E ANÁLISE INICIAL DO PROCESSO'],
-  'BB Réu Acordos': ['PAG HON - ACORDO PROTOCOLADO', 'PAG HON - ACORDO PROTOCOLADO - EXTRA CAMPANHA', 'PAG HON - ECONOMIA ACORDO'],
-  'BB Réu Defesa': ['PAG HON - IMPROCEDÊNCIA TOTAL DA AÇÃO', 'PAG HON - SENTENCA'],
-  'BB Réu Encerramento': ['PAG HON - ENCERRAMENTO DO PROCESSO']
+  'Cadastro Técnico': ['PAG HON - CERTIFICACAO', 'PAG HON - REGULARIZAÇÃO DE REPRESENTAÇÃO E ANÁLISE INICIAL DO PROCESSO'],
+  'Acordos BB Réu': ['PAG HON - ACORDO PROTOCOLADO', 'PAG HON - ACORDO PROTOCOLADO - EXTRA CAMPANHA', 'PAG HON - ECONOMIA ACORDO'],
+  'Defesa BB Réu': ['PAG HON - IMPROCEDÊNCIA TOTAL DA AÇÃO', 'PAG HON - SENTENCA'],
+  'Encerramentos BB Réu': ['PAG HON - ENCERRAMENTO DO PROCESSO']
 };
 
 const normalizar_chave = (valor: any): string => {
@@ -27,7 +27,7 @@ const normalizar_chave = (valor: any): string => {
   if (v.includes('-')) v = v.split('-')[0]; // Corta o final após o hífen
   
   v = v.replace(/\D/g, ''); // Remove barras, pontos, etc
-  v = v.replace(/^0+/, ''); // Substitui o int(v) do Python: remove zeros à esquerda mantendo como texto puro
+  v = v.replace(/^0+/, ''); // Remove zeros à esquerda mantendo como texto puro
   
   return v;
 };
@@ -49,11 +49,10 @@ export default function HonorariosBB() {
   const [faturasFiles, setFaturasFiles] = useState<File[]>([]);
   const [showMapeador, setShowMapeador] = useState(false);
   const [colunasDisponiveis, setColunasDisponiveis] = useState<string[]>([]);
-  const [previewData, setPreviewData] = useState<any[]>([]); // Adicionado para exibir as linhas no modal
+  const [previewData, setPreviewData] = useState<any[]>([]); 
   const [arquivosReferencia, setArquivosReferencia] = useState<File[]>([]);
   const [stats, setStats] = useState({ total: 0, autor: 0, reu: 0 });
 
-  // CONSERTADO: Contador agora usa o banco para contar, sem limite de 1000 linhas
   const fetchStats = async () => {
     try {
       const { count: total, error: errTotal } = await supabase
@@ -111,7 +110,7 @@ export default function HonorariosBB() {
           const json = XLSX.utils.sheet_to_json(wb.Sheets[wb.SheetNames[0]], { defval: "" });
           if (json.length > 0) {
             setColunasDisponiveis(Object.keys(json[0] as object));
-            setPreviewData(json); // Salva as linhas para mostrar no modal
+            setPreviewData(json);
             setShowMapeador(true);
           } else {
             toast.error("O primeiro arquivo parece estar vazio.");
@@ -156,7 +155,6 @@ export default function HonorariosBB() {
           };
         }).filter(r => r.npj_limpo !== "");
 
-        // CONSERTADO: Envio em lotes de 500 para não engasgar a AWS
         if (rows.length > 0) {
           const TAMANHO_LOTE = 500; 
           for (let j = 0; j < rows.length; j += TAMANHO_LOTE) {
@@ -178,7 +176,6 @@ export default function HonorariosBB() {
     setLoading(true);
 
     try {
-      // --- PASSO 1 ---
       toast.info("⏳ Passo 1/4: Lendo o arquivo da fatura...", { duration: 3000 });
       await delay(300);
 
@@ -210,7 +207,6 @@ export default function HonorariosBB() {
          throw new Error("A coluna 'NPJ' não foi encontrada. Verifique o arquivo da fatura.");
       }
 
-      // --- PASSO 2 ---
       toast.info(`🔍 Passo 2/4: Cruzando ${npjsFatura.length} NPJs únicos com o banco de dados...`, { duration: 3000 });
       await delay(300);
 
@@ -226,7 +222,6 @@ export default function HonorariosBB() {
 
       const refMap = new Map(baseRef?.map(r => [r.npj_limpo, r.polo]));
       
-      // --- PASSO 3 ---
       toast.info("📊 Passo 3/4: Classificando Centro de Custo e montando Excel...", { duration: 3000 });
       await delay(300);
 
@@ -245,8 +240,15 @@ export default function HonorariosBB() {
 
       [sheetAutor, sheetReu, sheetPendentes].forEach(s => s.columns = cols);
 
+      // --- ACUMULADORES DE VALORES POR SETOR ---
       let somaAutor = 0;
-      let somaReu = 0;
+      let somaReuPorCC: Record<string, number> = {
+        'Cadastro Técnico': 0,
+        'Acordos BB Réu': 0,
+        'Defesa BB Réu': 0,
+        'Encerramentos BB Réu': 0,
+        'Outros Eventos (Réu)': 0
+      };
 
       todosHonorarios.forEach(item => {
         const npjOriginal = item[colunaNpjFatura];
@@ -267,13 +269,19 @@ export default function HonorariosBB() {
             diagnosticoOuCC = polo;
         } else if (isReu) {
             targetSheet = sheetReu;
-            somaReu += valorNum;
             const evento = String(item.Evento || '').toUpperCase().trim();
-            diagnosticoOuCC = 'Outros Eventos';
+            diagnosticoOuCC = 'Outros Eventos (Réu)';
+            
             for (const [cc, lista] of Object.entries(MAPA_CENTRO_CUSTO)) {
                 if (lista.some(term => evento === term.toUpperCase().trim())) {
-                    diagnosticoOuCC = cc; break;
+                    diagnosticoOuCC = cc; 
+                    break;
                 }
+            }
+            
+            // Soma no setor correto do Réu
+            if (somaReuPorCC[diagnosticoOuCC] !== undefined) {
+              somaReuPorCC[diagnosticoOuCC] += valorNum;
             }
         } else {
             diagnosticoOuCC = polo === 'NAN' ? 'NPJ NAO ENCONTRADO' : `POLO DESCONHECIDO: ${polo}`;
@@ -297,16 +305,27 @@ export default function HonorariosBB() {
         sheet.getColumn('Valor').numFmt = '"R$" #,##0.00';
       });
 
+      // --- ABA RESUMO DETALHADA ---
       const sheetResumo = workbook.addWorksheet('Resumo');
       sheetResumo.columns = [
-          { header: 'Categoria', key: 'cat', width: 25 },
+          { header: 'Setor / Categoria', key: 'cat', width: 45 },
           { header: 'Valor Total', key: 'val', width: 25 }
       ];
       
-      sheetResumo.addRow({ cat: 'Autor', val: somaAutor });
-      sheetResumo.addRow({ cat: 'Réu', val: somaReu });
+      // Adiciona total do Autor
+      sheetResumo.addRow({ cat: 'Polo Ativo (AUTOR)', val: somaAutor });
       
-      const rowTotal = sheetResumo.addRow({ cat: 'Total Geral', val: somaAutor + somaReu });
+      // Adiciona detalhamento do Réu por Centro de Custo
+      let somaTotalReu = 0;
+      for (const [cc, valor] of Object.entries(somaReuPorCC)) {
+        if (valor > 0 || cc !== 'Outros Eventos (Réu)') {
+          sheetResumo.addRow({ cat: `Polo Passivo (RÉU) — ${cc}`, val: valor });
+          somaTotalReu += valor;
+        }
+      }
+      
+      // Total Geral
+      const rowTotal = sheetResumo.addRow({ cat: 'Total Geral', val: somaAutor + somaTotalReu });
       rowTotal.fill = { type: 'pattern', pattern:'solid', fgColor:{argb:'92D050'} };
       rowTotal.font = { bold: true };
 
@@ -316,7 +335,6 @@ export default function HonorariosBB() {
           cell.font = { color: { argb: 'FFFFFF' }, bold: true };
       });
 
-      // --- PASSO 4 ---
       toast.info("💾 Passo 4/4: Salvando o relatório na sua máquina...", { duration: 3000 });
       await delay(300);
 

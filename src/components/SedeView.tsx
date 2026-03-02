@@ -6,10 +6,18 @@ import { Input } from "@/components/ui/input";
 import { NumberField } from "@/components/NumberField";
 import { PeriodSelector } from "@/components/PeriodSelector";
 import { Badge } from "@/components/ui/badge";
-import { Building, Plus, Trash2, Calendar, Users } from "lucide-react";
+import { Building, Plus, Trash2, Calendar, Users, CopyPlus } from "lucide-react";
 import { formatCurrency, formatPercent } from "@/utils/calculations";
 import { MONTH_NAMES } from "@/types/sector";
 import type { CustoItem } from "@/types/sector";
+import { toast } from "sonner";
+
+// Função auxiliar para calcular o próximo mês no formato YYYY-MM
+function getNextMonth(periodo: string): string {
+  const [year, month] = periodo.split('-').map(Number);
+  const nextDate = new Date(year, month, 1); 
+  return `${nextDate.getFullYear()}-${String(nextDate.getMonth() + 1).padStart(2, '0')}`;
+}
 
 export function SedeView() {
   const { sedes, activeSedeId, periodoAtivo, setPeriodoAtivo, updateSedeCustos, getSetoresForSede, getRateioPerSetor } = useApp();
@@ -47,6 +55,15 @@ export function SedeView() {
     updateSedeCustos(sede.id, periodoAtivo, custos.filter(c => c.id !== itemId));
   };
 
+  const handleReplicateToNextMonth = () => {
+    const nextMonth = getNextMonth(periodoAtivo);
+    // Cria novas IDs para os itens clonados, para evitar duplicatas de chave no React se houver edições futuras
+    const clonedCustos = custos.map(c => ({ ...c, id: crypto.randomUUID() }));
+    updateSedeCustos(sede.id, nextMonth, clonedCustos);
+    setPeriodoAtivo(nextMonth);
+    toast.success(`Custos da Sede clonados para ${nextMonth}! Lembre-se de salvar.`);
+  };
+
   const hasPeriodData = !!sede.periodos[periodoAtivo];
   const availablePeriods = Object.keys(sede.periodos).sort();
 
@@ -60,11 +77,24 @@ export function SedeView() {
             <p className="text-sm text-muted-foreground mt-0.5">Custos de Estrutura / Patrimônio</p>
           </div>
         </div>
-        <div className="flex items-center gap-3">
+        
+        <div className="flex items-center gap-3 flex-wrap">
           <div className="flex items-center gap-2 bg-muted/50 rounded-lg px-3 py-1.5">
             <Calendar className="w-4 h-4 text-muted-foreground" />
             <PeriodSelector value={periodoAtivo} onChange={setPeriodoAtivo} />
           </div>
+
+          <Button 
+            variant="outline" 
+            size="sm" 
+            className="h-10 gap-2 border-primary/20 hover:bg-primary/10 transition-colors"
+            onClick={handleReplicateToNextMonth}
+            disabled={custos.length === 0}
+          >
+            <CopyPlus className="w-4 h-4 text-primary" />
+            <span className="hidden sm:inline">Clonar para Mês Seguinte</span>
+          </Button>
+
           {!hasPeriodData && custos.length > 0 && (
             <Badge variant="secondary" className="text-[10px]">
               Dados herdados do período anterior

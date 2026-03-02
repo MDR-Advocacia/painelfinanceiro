@@ -56,6 +56,19 @@ export interface ImpostosCalculados {
   total: number;
 }
 
+/** * Configuração de VPD (Valor Padrão de Despesas)
+ * Baseado no método de rateio por número de funcionários [cite: 31, 33]
+ */
+export interface VpdConfig {
+  id: string;
+  periodo: string; // key: "2026-02"
+  valor: number;   // Sugestão inicial: R$ 2.472,85 [cite: 36, 46]
+}
+
+/**
+ * Resumo Estratégico do Setor
+ * Integra indicadores de eficiência operacional e lucro líquido (ROF) [cite: 3, 6, 9]
+ */
 export interface ResumoSetor {
   custosPorCargo: Record<string, number>;
   totalCustoPessoal: number;
@@ -66,6 +79,12 @@ export interface ResumoSetor {
   margemBruta: number;
   margemBrutaPercent: number;
   status: 'excelente' | 'saudavel' | 'atencao' | 'critico';
+  
+  // Novos Indicadores Estratégicos (Estudo MDR)
+  headcount: number;          // Total de profissionais no setor [cite: 31]
+  custoVPD: number;           // headcount * valor do VPD do período [cite: 33, 46]
+  lucroLiquidoReal: number;   // ROF: Resultado Operacional Final [cite: 4, 9, 11]
+  margemLiquidaPercent: number; // Eficiência operacional (Lucro Líquido / Receita Total) [cite: 13, 15, 17]
 }
 
 // Defaults

@@ -13,7 +13,8 @@ import {
   Building, 
   LogOut, 
   Users,
-  FileSpreadsheet // Ícone para os Honorários
+  FileSpreadsheet, // Ícone para os Honorários
+  Target // Ícone para a Gestão Estratégica (VPD)
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -40,7 +41,8 @@ export function Sidebar() {
     removeSede, 
     setView, 
     view, 
-    periodoAtivo 
+    periodoAtivo,
+    currentVpdValor // Puxamos o valor atual para repassar ao cálculo do resumo na barra lateral
   } = useApp();
   
   const { isAdmin, signOut } = useAuth();
@@ -118,7 +120,7 @@ export function Sidebar() {
           <BarChart3 className="w-4 h-4" /> Rentabilidade
         </button>
 
-        {/* NOVA FUNCIONALIDADE: HONORÁRIOS BB */}
+        {/* HONORÁRIOS BB */}
         <button
           onClick={() => { setActiveSetor(null); setView('honorarios'); }}
           className={`w-full flex items-center gap-3 px-4 py-3 rounded-lg text-sm font-medium transition-colors ${
@@ -126,6 +128,16 @@ export function Sidebar() {
           }`}
         >
           <FileSpreadsheet className="w-4 h-4" /> Honorários BB
+        </button>
+
+        {/* NOVA FUNCIONALIDADE: GESTÃO ESTRATÉGICA (VPD) */}
+        <button
+          onClick={() => { setActiveSetor(null); setView('config-estrategica'); }}
+          className={`w-full flex items-center gap-3 px-4 py-3 rounded-lg text-sm font-medium transition-colors ${
+            view === 'config-estrategica' ? 'bg-sidebar-accent text-sidebar-accent-foreground' : 'text-sidebar-foreground/70 hover:bg-sidebar-accent/50 hover:text-sidebar-accent-foreground'
+          }`}
+        >
+          <Target className="w-4 h-4" /> Gestão Estratégica
         </button>
 
         {/* Sedes */}
@@ -184,7 +196,8 @@ export function Sidebar() {
         </div>
 
         {setores.map((setor) => {
-          const resumo = getSetorResumo(setor, periodoAtivo);
+          // Passando currentVpdValor para que os cálculos de status (Excelente, Crítico) usem a métrica atualizada de ROF
+          const resumo = getSetorResumo(setor, periodoAtivo, currentVpdValor);
           const isActive = setor.id === activeSetorId && view === 'setor';
           const TipoIcon = setor.tipo === 'operacional' ? Factory : Landmark;
           const hasData = resumo.faturamentoBruto > 0;

@@ -1,4 +1,14 @@
-import type { Setor, Estagiarios, PersonnelGroup, Faturamento, ImpostosCalculados, ResumoSetor, PeriodoData, ViewMode } from "@/types/sector";
+import type { 
+  Setor, 
+  Estagiarios, 
+  PersonnelGroup, 
+  Faturamento, 
+  ImpostosCalculados, 
+  ResumoSetor, 
+  PeriodoData, 
+  ViewMode,
+  VpdConfig
+} from "@/types/sector";
 
 export function calcCustoGrupo(g: PersonnelGroup | Estagiarios): number {
   const plr = (g.plr ?? 0) / 12;
@@ -56,37 +66,72 @@ export function calcImpostos(fat: Faturamento): ImpostosCalculados {
   return { lucroPresumido, irpj, irpjAdicional, csll, pis, cofins, iss, total };
 }
 
-export function calcResumo(data: PeriodoData): ResumoSetor {
+/**
+ * Busca o valor do VPD para um período específico
+ * Caso não exista configuração, utiliza o valor base do estudo de R$ 2.472,85 [cite: 36]
+ */
+export function getVpdValor(configs: VpdConfig[], periodo: string): number {
+  const config = configs.find(c => c.periodo === periodo);
+  return config ? config.valor : 2472.85; // Valor padrão sugerido no PDF [cite: 36, 46]
+}
+
+/**
+ * Calcula o Resumo Estratégico Completo
+ * Integra o rateio por número de funcionários (VPD) e o Lucro Líquido (ROF) [cite: 11, 31]
+ */
+export function calcResumo(data: PeriodoData, vpdValor: number = 2472.85): ResumoSetor {
   const { custosPorCargo, total: totalCustoPessoal } = calcTotalPessoal(data.pessoal as any);
+  const headcount = getTotalProfissionais(data.pessoal as any);
 
   const fb = data.faturamento.bruto;
   const descontos = data.faturamento.descontos ?? 0;
   const premiacaoTotal = data.faturamento.premiacaoTotal ?? 0;
   const impostos = calcImpostos(data.faturamento);
+  
   const cargaTributaria = fb > 0 ? (impostos.total / fb) * 100 : 0;
   const faturamentoLiquido = fb - impostos.total - descontos;
+  
+  // Margem Bruta (antes do rateio das despesas indiretas)
   const margemBruta = faturamentoLiquido - totalCustoPessoal - premiacaoTotal;
   const margemBrutaPercent = fb > 0 ? (margemBruta / fb) * 100 : 0;
 
+  // Resultado Operacional Final (ROF) - Lucro Líquido Real [cite: 4, 9]
+  // Fórmula: Receita Líquida - Impostos - Custos Operacionais (Pessoal) - Despesas Operacionais (VPD) [cite: 11, 12]
+  const custoVPD = headcount * vpdValor;
+  const lucroLiquidoReal = faturamentoLiquido - totalCustoPessoal - premiacaoTotal - custoVPD;
+  const margemLiquidaPercent = fb > 0 ? (lucroLiquidoReal / fb) * 100 : 0;
+
   let status: ResumoSetor['status'] = 'critico';
-  if (margemBrutaPercent > 70) status = 'excelente';
-  else if (margemBrutaPercent > 50) status = 'saudavel';
-  else if (margemBrutaPercent > 30) status = 'atencao';
+  // Interpretação: margens líquidas altas sinalizam boa gestão e saúde financeira [cite: 18]
+  if (margemLiquidaPercent > 25) status = 'excelente';
+  else if (margemLiquidaPercent > 15) status = 'saudavel';
+  else if (margemLiquidaPercent > 5) status = 'atencao';
 
   return {
-    custosPorCargo, totalCustoPessoal, faturamentoBruto: fb, impostos, cargaTributaria,
-    faturamentoLiquido, margemBruta, margemBrutaPercent, status,
+    custosPorCargo,
+    totalCustoPessoal,
+    faturamentoBruto: fb,
+    impostos,
+    cargaTributaria,
+    faturamentoLiquido,
+    margemBruta,
+    margemBrutaPercent,
+    status,
+    headcount,
+    custoVPD,
+    lucroLiquidoReal,
+    margemLiquidaPercent
   };
 }
 
 /** Get the resumo for a setor in a specific period */
-export function getSetorResumo(setor: Setor, periodo: string): ResumoSetor {
+export function getSetorResumo(setor: Setor, periodo: string, vpdValor: number = 2472.85): ResumoSetor {
   const data = setor.periodos[periodo];
   if (!data) return emptyResumo();
-  return calcResumo(data);
+  return calcResumo(data, vpdValor);
 }
 
-/** Aggregate resumos by summing values */
+/** Aggregate resumos by summing values and weighted averaging percentages */
 export function aggregateResumos(resumos: ResumoSetor[]): ResumoSetor {
   if (resumos.length === 0) return emptyResumo();
 
@@ -94,6 +139,10 @@ export function aggregateResumos(resumos: ResumoSetor[]): ResumoSetor {
   let totalCustoPessoal = 0;
   let faturamentoBruto = 0;
   let totalImpostos = 0;
+  let headcount = 0;
+  let custoVPD = 0;
+  let lucroLiquidoReal = 0;
+  let faturamentoLiquido = 0;
 
   for (const r of resumos) {
     for (const [k, v] of Object.entries(r.custosPorCargo)) {
@@ -102,19 +151,21 @@ export function aggregateResumos(resumos: ResumoSetor[]): ResumoSetor {
     totalCustoPessoal += r.totalCustoPessoal;
     faturamentoBruto += r.faturamentoBruto;
     totalImpostos += r.impostos.total;
+    headcount += r.headcount;
+    custoVPD += r.custoVPD;
+    lucroLiquidoReal += r.lucroLiquidoReal;
+    faturamentoLiquido += r.faturamentoLiquido;
   }
 
-  const cargaTributaria = faturamentoBruto > 0 ? (totalImpostos / faturamentoBruto) * 100 : 0;
-  const faturamentoLiquido = faturamentoBruto - totalImpostos;
   const margemBruta = faturamentoLiquido - totalCustoPessoal;
   const margemBrutaPercent = faturamentoBruto > 0 ? (margemBruta / faturamentoBruto) * 100 : 0;
+  const margemLiquidaPercent = faturamentoBruto > 0 ? (lucroLiquidoReal / faturamentoBruto) * 100 : 0;
 
   let status: ResumoSetor['status'] = 'critico';
-  if (margemBrutaPercent > 70) status = 'excelente';
-  else if (margemBrutaPercent > 50) status = 'saudavel';
-  else if (margemBrutaPercent > 30) status = 'atencao';
+  if (margemLiquidaPercent > 25) status = 'excelente';
+  else if (margemLiquidaPercent > 15) status = 'saudavel';
+  else if (margemLiquidaPercent > 5) status = 'atencao';
 
-  // Sum impostos
   const impostos: ImpostosCalculados = {
     lucroPresumido: resumos.reduce((a, r) => a + r.impostos.lucroPresumido, 0),
     irpj: resumos.reduce((a, r) => a + r.impostos.irpj, 0),
@@ -127,8 +178,10 @@ export function aggregateResumos(resumos: ResumoSetor[]): ResumoSetor {
   };
 
   return {
-    custosPorCargo, totalCustoPessoal, faturamentoBruto, impostos, cargaTributaria,
+    custosPorCargo, totalCustoPessoal, faturamentoBruto, impostos, 
+    cargaTributaria: faturamentoBruto > 0 ? (totalImpostos / faturamentoBruto) * 100 : 0,
     faturamentoLiquido, margemBruta, margemBrutaPercent, status,
+    headcount, custoVPD, lucroLiquidoReal, margemLiquidaPercent
   };
 }
 
@@ -137,6 +190,7 @@ function emptyResumo(): ResumoSetor {
     custosPorCargo: {}, totalCustoPessoal: 0, faturamentoBruto: 0,
     impostos: { lucroPresumido: 0, irpj: 0, irpjAdicional: 0, csll: 0, pis: 0, cofins: 0, iss: 0, total: 0 },
     cargaTributaria: 0, faturamentoLiquido: 0, margemBruta: 0, margemBrutaPercent: 0, status: 'critico',
+    headcount: 0, custoVPD: 0, lucroLiquidoReal: 0, margemLiquidaPercent: 0
   };
 }
 
@@ -161,11 +215,11 @@ export function getMonthsForPeriod(periodo: string, mode: ViewMode): string[] {
 }
 
 /** Get aggregated resumo for a setor in a period range */
-export function getSetorResumoForPeriod(setor: Setor, periodo: string, mode: ViewMode): ResumoSetor {
+export function getSetorResumoForPeriod(setor: Setor, periodo: string, mode: ViewMode, vpdValor: number = 2472.85): ResumoSetor {
   const months = getMonthsForPeriod(periodo, mode);
   const resumos = months
     .filter(m => setor.periodos[m])
-    .map(m => calcResumo(setor.periodos[m]));
+    .map(m => calcResumo(setor.periodos[m], vpdValor));
   return resumos.length > 0 ? aggregateResumos(resumos) : emptyResumo();
 }
 
