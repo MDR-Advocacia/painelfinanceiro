@@ -30,7 +30,6 @@ export function calcTotalPessoal(pessoal: Record<string, PersonnelGroup | Estagi
   return { custosPorCargo, total };
 }
 
-/** Calcula ISS no modo sociedade de advogados (bimestral por profissional, rateado mensalmente) */
 export function calcISSSociedade(numProfissionais: number): number {
   if (numProfissionais <= 0) return 0;
   let totalBimestral = 0;
@@ -41,7 +40,7 @@ export function calcISSSociedade(numProfissionais: number): number {
     else if (i <= 12) totalBimestral += 707;
     else totalBimestral += 792;
   }
-  return totalBimestral / 2; // bimestral → mensal
+  return totalBimestral / 2;
 }
 
 export function calcImpostos(fat: Faturamento): ImpostosCalculados {
@@ -66,22 +65,17 @@ export function calcImpostos(fat: Faturamento): ImpostosCalculados {
   return { lucroPresumido, irpj, irpjAdicional, csll, pis, cofins, iss, total };
 }
 
-/**
- * Busca o valor do VPD para um período específico
- * Caso não exista configuração, utiliza o valor base do estudo de R$ 2.472,85 [cite: 36]
- */
 export function getVpdValor(configs: VpdConfig[], periodo: string): number {
   const config = configs.find(c => c.periodo === periodo);
-  return config ? config.valor : 2472.85; // Valor padrão sugerido no PDF [cite: 36, 46]
+  return config ? config.valor : 2472.85; [cite_start]// [cite: 36, 46]
 }
 
-/**
- * Calcula o Resumo Estratégico Completo
- * Integra o rateio por número de funcionários (VPD) e o Lucro Líquido (ROF) [cite: 11, 31]
- */
 export function calcResumo(data: PeriodoData, vpdValor: number = 2472.85): ResumoSetor {
   const { custosPorCargo, total: totalCustoPessoal } = calcTotalPessoal(data.pessoal as any);
   const headcount = getTotalProfissionais(data.pessoal as any);
+
+  // NOVA LINHA: Soma das despesas eventuais
+  const totalDespesasEventuais = (data.despesasEventuais || []).reduce((sum, item) => sum + item.valor, 0);
 
   const fb = data.faturamento.bruto;
   const descontos = data.faturamento.descontos ?? 0;
@@ -91,25 +85,24 @@ export function calcResumo(data: PeriodoData, vpdValor: number = 2472.85): Resum
   const cargaTributaria = fb > 0 ? (impostos.total / fb) * 100 : 0;
   const faturamentoLiquido = fb - impostos.total - descontos;
   
-  // Margem Bruta (antes do rateio das despesas indiretas)
-  const margemBruta = faturamentoLiquido - totalCustoPessoal - premiacaoTotal;
+  // ATUALIZAÇÃO: Descontando gastos eventuais da Margem Bruta
+  const margemBruta = faturamentoLiquido - totalCustoPessoal - premiacaoTotal - totalDespesasEventuais;
   const margemBrutaPercent = fb > 0 ? (margemBruta / fb) * 100 : 0;
 
-  // Resultado Operacional Final (ROF) - Lucro Líquido Real [cite: 4, 9]
-  // Fórmula: Receita Líquida - Impostos - Custos Operacionais (Pessoal) - Despesas Operacionais (VPD) [cite: 11, 12]
+  [cite_start]// ATUALIZAÇÃO: Descontando gastos eventuais do ROF [cite: 4, 9, 11]
   const custoVPD = headcount * vpdValor;
-  const lucroLiquidoReal = faturamentoLiquido - totalCustoPessoal - premiacaoTotal - custoVPD;
+  const lucroLiquidoReal = faturamentoLiquido - totalCustoPessoal - premiacaoTotal - totalDespesasEventuais - custoVPD;
   const margemLiquidaPercent = fb > 0 ? (lucroLiquidoReal / fb) * 100 : 0;
 
   let status: ResumoSetor['status'] = 'critico';
-  // Interpretação: margens líquidas altas sinalizam boa gestão e saúde financeira [cite: 18]
   if (margemLiquidaPercent > 25) status = 'excelente';
   else if (margemLiquidaPercent > 15) status = 'saudavel';
-  else if (margemLiquidaPercent > 5) status = 'atencao';
+  else if (margemLiquidaPercent > 5) status = 'atencao'; [cite_start]// [cite: 18]
 
   return {
     custosPorCargo,
     totalCustoPessoal,
+    totalDespesasEventuais, // Adicionado ao retorno
     faturamentoBruto: fb,
     impostos,
     cargaTributaria,
@@ -124,19 +117,18 @@ export function calcResumo(data: PeriodoData, vpdValor: number = 2472.85): Resum
   };
 }
 
-/** Get the resumo for a setor in a specific period */
 export function getSetorResumo(setor: Setor, periodo: string, vpdValor: number = 2472.85): ResumoSetor {
   const data = setor.periodos[periodo];
   if (!data) return emptyResumo();
   return calcResumo(data, vpdValor);
 }
 
-/** Aggregate resumos by summing values and weighted averaging percentages */
 export function aggregateResumos(resumos: ResumoSetor[]): ResumoSetor {
   if (resumos.length === 0) return emptyResumo();
 
   const custosPorCargo: Record<string, number> = {};
   let totalCustoPessoal = 0;
+  let totalDespesasEventuais = 0; // NOVA LINHA
   let faturamentoBruto = 0;
   let totalImpostos = 0;
   let headcount = 0;
@@ -149,6 +141,7 @@ export function aggregateResumos(resumos: ResumoSetor[]): ResumoSetor {
       custosPorCargo[k] = (custosPorCargo[k] ?? 0) + v;
     }
     totalCustoPessoal += r.totalCustoPessoal;
+    totalDespesasEventuais += r.totalDespesasEventuais; // NOVA LINHA
     faturamentoBruto += r.faturamentoBruto;
     totalImpostos += r.impostos.total;
     headcount += r.headcount;
@@ -157,7 +150,8 @@ export function aggregateResumos(resumos: ResumoSetor[]): ResumoSetor {
     faturamentoLiquido += r.faturamentoLiquido;
   }
 
-  const margemBruta = faturamentoLiquido - totalCustoPessoal;
+  // ATUALIZAÇÃO NO AGREGADOR
+  const margemBruta = faturamentoLiquido - totalCustoPessoal - totalDespesasEventuais;
   const margemBrutaPercent = faturamentoBruto > 0 ? (margemBruta / faturamentoBruto) * 100 : 0;
   const margemLiquidaPercent = faturamentoBruto > 0 ? (lucroLiquidoReal / faturamentoBruto) * 100 : 0;
 
@@ -178,7 +172,7 @@ export function aggregateResumos(resumos: ResumoSetor[]): ResumoSetor {
   };
 
   return {
-    custosPorCargo, totalCustoPessoal, faturamentoBruto, impostos, 
+    custosPorCargo, totalCustoPessoal, totalDespesasEventuais, faturamentoBruto, impostos, 
     cargaTributaria: faturamentoBruto > 0 ? (totalImpostos / faturamentoBruto) * 100 : 0,
     faturamentoLiquido, margemBruta, margemBrutaPercent, status,
     headcount, custoVPD, lucroLiquidoReal, margemLiquidaPercent
@@ -187,14 +181,13 @@ export function aggregateResumos(resumos: ResumoSetor[]): ResumoSetor {
 
 function emptyResumo(): ResumoSetor {
   return {
-    custosPorCargo: {}, totalCustoPessoal: 0, faturamentoBruto: 0,
+    custosPorCargo: {}, totalCustoPessoal: 0, totalDespesasEventuais: 0, faturamentoBruto: 0, // Atualizado
     impostos: { lucroPresumido: 0, irpj: 0, irpjAdicional: 0, csll: 0, pis: 0, cofins: 0, iss: 0, total: 0 },
     cargaTributaria: 0, faturamentoLiquido: 0, margemBruta: 0, margemBrutaPercent: 0, status: 'critico',
     headcount: 0, custoVPD: 0, lucroLiquidoReal: 0, margemLiquidaPercent: 0
   };
 }
 
-/** Get month keys for a given period */
 export function getMonthsForPeriod(periodo: string, mode: ViewMode): string[] {
   const [year, month] = periodo.split('-').map(Number);
   switch (mode) {
@@ -214,7 +207,6 @@ export function getMonthsForPeriod(periodo: string, mode: ViewMode): string[] {
   }
 }
 
-/** Get aggregated resumo for a setor in a period range */
 export function getSetorResumoForPeriod(setor: Setor, periodo: string, mode: ViewMode, vpdValor: number = 2472.85): ResumoSetor {
   const months = getMonthsForPeriod(periodo, mode);
   const resumos = months

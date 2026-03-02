@@ -44,7 +44,6 @@ interface AppContextType extends AppState {
 
 const AppContext = createContext<AppContextType | null>(null);
 
-// Funções auxiliares para buscar ou criar dados de períodos (Previne quebra de UI)
 function getOrCreatePeriodoDataLocal(setor: Setor, periodo: string): PeriodoData {
   if (setor.periodos && setor.periodos[periodo]) return setor.periodos[periodo];
   const sorted = Object.keys(setor.periodos || {}).sort();
@@ -77,7 +76,6 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
   const [isSaving, setIsSaving] = useState(false);
   const initialLoadDone = useRef(false);
 
-  // --- 1. CARREGAMENTO INICIAL DO BANCO ---
   useEffect(() => {
     if (!user) { setLoading(false); return; }
 
@@ -111,7 +109,6 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     loadData();
   }, [user]);
 
-  // --- 2. SALVAMENTO MANUAL (ÚNICA FONTE DE SINCRONIZAÇÃO) ---
   const saveData = async () => {
     if (!user || !initialLoadDone.current) return;
     setIsSaving(true);
@@ -142,7 +139,6 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     }
   };
 
-  // --- 3. BLOQUEIO DE FECHAMENTO ACIDENTAL ---
   useEffect(() => {
     const handleBeforeUnload = (e: BeforeUnloadEvent) => {
       if (hasUnsavedChanges) {
@@ -154,7 +150,6 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     return () => window.removeEventListener('beforeunload', handleBeforeUnload);
   }, [hasUnsavedChanges]);
 
-  // --- 4. FUNÇÕES DE ALTERAÇÃO (SETTERS) ---
   const addSetor = useCallback((nome: string, tipo: TipoSetor) => {
     setSetores(prev => [...prev, createDefaultSetor(nome, tipo, periodoAtivo)]);
     setHasUnsavedChanges(true);
@@ -179,7 +174,8 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
           ...s.periodos,
           [periodo]: {
             pessoal: updates.pessoal ?? current.pessoal,
-            faturamento: updates.faturamento ?? current.faturamento
+            faturamento: updates.faturamento ?? current.faturamento,
+            despesasEventuais: updates.despesasEventuais ?? current.despesasEventuais ?? [] // NOVA LINHA
           }
         }
       };
@@ -219,9 +215,8 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     setHasUnsavedChanges(true);
   }, []);
 
-  // --- 5. CALCULADOS E GETTERS ---
   const activeSetor = setores.find(s => s.id === activeSetorId) || null;
-  const currentVpdValor = getVpdValor(vpdConfigs, periodoAtivo); // Puxa do utils com o padrão de R$ 2.472,85 
+  const currentVpdValor = getVpdValor(vpdConfigs, periodoAtivo); 
 
   return (
     <AppContext.Provider value={{

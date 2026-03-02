@@ -32,9 +32,17 @@ export interface Faturamento {
   premiacaoTotal: number; // soma total da premiação mensal do centro de custo
 }
 
+// === Sedes (Estrutura/Patrimônio) e Gastos Eventuais ===
+export interface CustoItem {
+  id: string;
+  descricao: string;
+  valor: number;
+}
+
 export interface PeriodoData {
   pessoal: Pessoal;
   faturamento: Faturamento;
+  despesasEventuais?: CustoItem[]; // NOVA LINHA: Adicionando o campo para os gastos eventuais
 }
 
 export interface Setor {
@@ -57,21 +65,22 @@ export interface ImpostosCalculados {
 }
 
 /** * Configuração de VPD (Valor Padrão de Despesas)
- * Baseado no método de rateio por número de funcionários [cite: 31, 33]
+ * [cite_start]Baseado no método de rateio por número de funcionários [cite: 31, 33]
  */
 export interface VpdConfig {
   id: string;
   periodo: string; // key: "2026-02"
-  valor: number;   // Sugestão inicial: R$ 2.472,85 [cite: 36, 46]
+  valor: number;   [cite_start]// Sugestão inicial: R$ 2.472,85 [cite: 36, 46]
 }
 
 /**
  * Resumo Estratégico do Setor
- * Integra indicadores de eficiência operacional e lucro líquido (ROF) [cite: 3, 6, 9]
+ * [cite_start]Integra indicadores de eficiência operacional e lucro líquido (ROF) [cite: 3, 6, 9]
  */
 export interface ResumoSetor {
   custosPorCargo: Record<string, number>;
   totalCustoPessoal: number;
+  totalDespesasEventuais: number; // NOVA LINHA: Totalizador de gastos eventuais
   faturamentoBruto: number;
   impostos: ImpostosCalculados;
   cargaTributaria: number;
@@ -81,10 +90,10 @@ export interface ResumoSetor {
   status: 'excelente' | 'saudavel' | 'atencao' | 'critico';
   
   // Novos Indicadores Estratégicos (Estudo MDR)
-  headcount: number;          // Total de profissionais no setor [cite: 31]
-  custoVPD: number;           // headcount * valor do VPD do período [cite: 33, 46]
-  lucroLiquidoReal: number;   // ROF: Resultado Operacional Final [cite: 4, 9, 11]
-  margemLiquidaPercent: number; // Eficiência operacional (Lucro Líquido / Receita Total) [cite: 13, 15, 17]
+  headcount: number;          [cite_start]// Total de profissionais no setor [cite: 31]
+  custoVPD: number;           [cite_start]// headcount * valor do VPD do período [cite: 33, 46]
+  lucroLiquidoReal: number;   [cite_start]// ROF: Resultado Operacional Final [cite: 4, 9, 11]
+  margemLiquidaPercent: number; [cite_start]// Eficiência operacional (Lucro Líquido / Receita Total) [cite: 13, 15, 17]
 }
 
 // Defaults
@@ -127,6 +136,7 @@ export function createDefaultPeriodoData(tipo: TipoSetor): PeriodoData {
   return {
     pessoal: createDefaultPessoal(tipo),
     faturamento: defaultFaturamento(),
+    despesasEventuais: [], // NOVA LINHA: Inicializando vazio
   };
 }
 
@@ -172,14 +182,6 @@ export const MONTH_NAMES = [
 ];
 
 export type ViewMode = 'mensal' | 'trimestral' | 'semestral' | 'anual';
-
-// === Sedes (Estrutura/Patrimônio) ===
-
-export interface CustoItem {
-  id: string;
-  descricao: string;
-  valor: number;
-}
 
 export interface Sede {
   id: string;

@@ -4,15 +4,13 @@ import { calcResumo, formatCurrency, formatPercent, getStatusLabel, getStatusCol
 import { Badge } from "@/components/ui/badge";
 
 export function SectorSummary() {
-  // Puxamos o currentVpdValor configurado na tela de Gestão Estratégica
   const { activePeriodoData, activeSetor, currentVpdValor } = useApp();
   
   if (!activePeriodoData || !activeSetor) return null;
 
-  // O cálculo agora considera o VPD (ex: R$ 2.472,85) para achar o ROF real
   const r = calcResumo(activePeriodoData, currentVpdValor);
 
-  if (r.faturamentoBruto === 0 && r.totalCustoPessoal === 0) return null;
+  if (r.faturamentoBruto === 0 && r.totalCustoPessoal === 0 && r.totalDespesasEventuais === 0) return null;
 
   return (
     <Card className="border-primary/20 bg-primary/[0.02]">
@@ -24,7 +22,6 @@ export function SectorSummary() {
           </Badge>
         </h3>
         
-        {/* Transformamos o grid em 5 colunas para mostrar a "Cascata" completa */}
         <div className="grid grid-cols-2 md:grid-cols-5 gap-4">
           <Metric 
             label="Faturamento Bruto" 
@@ -38,14 +35,14 @@ export function SectorSummary() {
             color="text-warning"
           />
           
+          {/* ATUALIZADO: Mostrando se existem gastos eventuais embutidos aqui */}
           <Metric 
-            label="Custos Diretos (Pessoal)" 
-            value={formatCurrency(r.totalCustoPessoal)} 
-            sub={`${r.headcount} colab.`}
+            label="Custos Diretos" 
+            value={formatCurrency(r.totalCustoPessoal + r.totalDespesasEventuais)} 
+            sub={r.totalDespesasEventuais > 0 ? `Inc. ${formatCurrency(r.totalDespesasEventuais)} extras` : `${r.headcount} colab.`}
             color="text-destructive"
           />
           
-          {/* Nova métrica que reflete as despesas indiretas baseadas no VPD */}
           <Metric 
             label="Despesas Indiretas (VPD)" 
             value={formatCurrency(r.custoVPD)} 
@@ -53,7 +50,6 @@ export function SectorSummary() {
             color="text-destructive"
           />
           
-          {/* O Resultado Operacional Final (Lucro Líquido) com destaque */}
           <div className="col-span-2 md:col-span-1 border-l pl-4 border-primary/20">
             <Metric
               label="Lucro Líquido (ROF)"
@@ -68,7 +64,6 @@ export function SectorSummary() {
   );
 }
 
-// Pequeno ajuste no Metric para aceitar a propriedade 'color' e facilitar a leitura visual
 function Metric({ label, value, sub, highlight, color }: { label: string; value: string; sub?: string; highlight?: 'positive' | 'negative', color?: string }) {
   return (
     <div>

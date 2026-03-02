@@ -2,6 +2,7 @@ import { useApp } from "@/contexts/AppContext";
 import { PersonnelForm } from "@/components/PersonnelForm";
 import { BillingForm } from "@/components/BillingForm";
 import { SectorSummary } from "@/components/SectorSummary";
+import { ExpensesForm } from "@/components/ExpensesForm"; // <-- IMPORTAÇÃO NOVA
 import { PeriodSelector } from "@/components/PeriodSelector";
 import { Badge } from "@/components/ui/badge";
 import { Factory, Landmark, Calendar, Building, CopyPlus } from "lucide-react";
@@ -12,10 +13,8 @@ import {
 } from "@/components/ui/select";
 import { toast } from "sonner";
 
-// Função auxiliar para calcular o próximo mês no formato YYYY-MM
 function getNextMonth(periodo: string): string {
   const [year, month] = periodo.split('-').map(Number);
-  // No JavaScript os meses começam em 0. Então passar o 'month' atual já pega o mês seguinte
   const nextDate = new Date(year, month, 1); 
   return `${nextDate.getFullYear()}-${String(nextDate.getMonth() + 1).padStart(2, '0')}`;
 }
@@ -31,9 +30,7 @@ export function SectorView() {
 
   const handleReplicateToNextMonth = () => {
     const nextMonth = getNextMonth(periodoAtivo);
-    // Copia os dados atuais para o próximo mês
     updatePeriodoData(activeSetor.id, nextMonth, activePeriodoData);
-    // Muda a visualização para o próximo mês
     setPeriodoAtivo(nextMonth);
     toast.success(`Dados clonados com sucesso para ${nextMonth}! Lembre-se de salvar.`);
   };
@@ -55,8 +52,6 @@ export function SectorView() {
         </div>
 
         <div className="flex items-center gap-3 flex-wrap">
-          
-          {/* Sede selector */}
           <div className="flex items-center gap-2 bg-muted/50 rounded-lg px-3 py-1.5">
             <Building className="w-4 h-4 text-muted-foreground" />
             <Select
@@ -75,13 +70,11 @@ export function SectorView() {
             </Select>
           </div>
 
-          {/* Seletor de Período */}
           <div className="flex items-center gap-2 bg-muted/50 rounded-lg px-3 py-1.5">
             <Calendar className="w-4 h-4 text-muted-foreground" />
             <PeriodSelector value={periodoAtivo} onChange={setPeriodoAtivo} />
           </div>
 
-          {/* Botão de Clonagem Rápida */}
           <Button 
             variant="outline" 
             size="sm" 
@@ -100,7 +93,6 @@ export function SectorView() {
         </div>
       </div>
 
-      {/* Histórico de Períodos Rápidos */}
       {availablePeriods.length > 1 && (
         <div className="flex items-center gap-2 flex-wrap">
           <span className="text-xs text-muted-foreground">Períodos com dados:</span>
@@ -130,11 +122,16 @@ export function SectorView() {
           </h3>
           <PersonnelForm />
         </div>
-        <div>
-          <h3 className="font-heading text-sm font-semibold text-muted-foreground uppercase tracking-wider mb-3">
-            Faturamento & Impostos
-          </h3>
-          <BillingForm />
+        <div className="space-y-6">
+          <div>
+            <h3 className="font-heading text-sm font-semibold text-muted-foreground uppercase tracking-wider mb-3">
+              Faturamento & Impostos
+            </h3>
+            <BillingForm />
+          </div>
+          
+          {/* AQUI ENTRA O NOVO FORMULÁRIO DE GASTOS EXTRAS */}
+          <ExpensesForm />
         </div>
       </div>
     </div>
