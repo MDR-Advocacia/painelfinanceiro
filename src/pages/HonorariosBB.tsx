@@ -11,7 +11,7 @@ import ExcelJS from 'exceljs';
 import { saveAs } from 'file-saver';
 import { MapeadorColunas } from "@/components/MapeadorColunas";
 
-const API_URL = 'http://localhost:8000/api';
+const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:8000/api';
 
 // --- REGRAS DE NEGÓCIO (ATUALIZADAS COM A SEPARAÇÃO POR SETOR) ---
 const MAPA_CENTRO_CUSTO: Record<string, string[]> = {
@@ -90,7 +90,6 @@ export default function HonorariosBB() {
     if (!confirm("⚠️ ATENÇÃO: Deseja apagar TODOS os processos salvos na base de referência?")) return;
     setLoading(true);
     try {
-      // Como o Django REST default não tem endpoint pra limpar tudo fácil, vamos deletar um a um (ou você pode criar uma action customizada depois se for muito lento)
       const response = await fetch(`${API_URL}/base_referencia/`);
       const data = await response.json();
       
@@ -139,12 +138,13 @@ export default function HonorariosBB() {
   const salvarNoBanco = async (mapa: { npj: string; polo: string }) => {
     setLoading(true);
     setShowMapeador(false);
-    let totalSalvo = 0;
 
     try {
+      let todosOsProcessos = [];
+
       for (let i = 0; i < arquivosReferencia.length; i++) {
         const file = arquivosReferencia[i];
-        toast.info(`Processando base de referência ${i + 1}...`, { duration: 2000 });
+        toast.info(`Lendo arquivo ${i + 1} de ${arquivosReferencia.length}...`);
         await delay(100);
         
         const data = await new Promise<any[]>((resolve, reject) => {
@@ -169,33 +169,32 @@ export default function HonorariosBB() {
           };
         }).filter(r => r.npj_limpo !== "");
 
-        if (rows.length > 0) {
-          const TAMANHO_LOTE = 500; 
-          for (let j = 0; j < rows.length; j += TAMANHO_LOTE) {
-            const lote = rows.slice(j, j + TAMANHO_LOTE);
-            
-            // Upsert manual chamando a API
-            for (const item of lote) {
-                // Checa se existe
-                // Numa aplicação real, a API deveria suportar batch upsert, aqui faremos um POST simples para simplificar a transição
-                try {
-                     await fetch(`${API_URL}/base_referencia/`, {
-                        method: 'POST',
-                        headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify(item)
-                    });
-                    totalSalvo++;
-                } catch (e) {
-                    console.warn(`Erro ao salvar NPJ ${item.npj_limpo}: `, e);
-                }
-            }
-          }
-        }
+        todosOsProcessos = [...todosOsProcessos, ...rows];
       }
-      toast.success(`${totalSalvo} processos salvos com sucesso!`);
-      fetchStats();
-    } catch (err: any) { toast.error(`Erro: ${err.message}`); }
-    finally { setLoading(false); setArquivosReferencia([]); }
+
+      if (todosOsProcessos.length > 0) {
+        toast.info(`⏳ Enviando ${todosOsProcessos.length} processos para o servidor (Isso levará alguns segundos)...`);
+        
+        // AQUI ESTÁ A MÁGICA: Manda TUDO num único POST para a rota de Bulk Upsert!
+        const response = await fetch(`${API_URL}/base_referencia/bulk_upsert/`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(todosOsProcessos)
+        });
+
+        if (!response.ok) throw new Error("Falha ao salvar lote no servidor.");
+        
+        const result = await response.json();
+        toast.success(`✅ ${result.sucesso}`);
+        fetchStats();
+      }
+
+    } catch (err: any) { 
+      toast.error(`❌ Erro: ${err.message}`); 
+    } finally { 
+      setLoading(false); 
+      setArquivosReferencia([]); 
+    }
   };
 
   const processarFaturas = async () => {
