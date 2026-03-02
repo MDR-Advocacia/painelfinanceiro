@@ -1,11 +1,23 @@
 version: '3.8'
 
 services:
+  # O seu backend Django
   web:
     build: .
-    # No desenvolvimento local, usamos o runserver para atualizar em tempo real
+    container_name: painelfinanceiro_back
     command: python manage.py runserver 0.0.0.0:8000
     volumes:
       - .:/app
     ports:
       - "8000:8000"
+
+  # O seu novo frontend em React + Nginx
+  frontend:
+    build:
+      context: ../  # Aponta para a pasta raiz (fora do backend-mdr) onde está o frontend
+      dockerfile: Dockerfile
+    container_name: painelfinanceiro_front
+    ports:
+      - "3000:80"
+    depends_on:
+      - web
