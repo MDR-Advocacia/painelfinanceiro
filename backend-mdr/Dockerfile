@@ -18,4 +18,4 @@ COPY . .
 EXPOSE 8080
 
 # Comando padrão (em produção o Coolify vai usar o gunicorn)
-CMD ["gunicorn", "--bind", "0.0.0.0:8000", "backend.wsgi:application"]
+CMD ["gunicorn", "--bind", "0.0.0.0:8080", "backend.wsgi:application"]
