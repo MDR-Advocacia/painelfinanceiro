@@ -10,6 +10,6 @@ services:
       context: .
     container_name: painelfinanceiro_front
     environment:
-      - VITE_API_URL=https://api-painelfinanceiro.mdradvocacia.com/api
+      - VITE_API_URL=https://painelfinanceiro2.mdradvocacia.com/api
     depends_on:
       - backend
