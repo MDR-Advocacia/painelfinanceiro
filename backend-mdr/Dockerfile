@@ -15,7 +15,7 @@ RUN pip install --no-cache-dir -r requirements.txt
 COPY . .
 
 # Expõe a porta que o Django vai rodar
-EXPOSE 8000
+EXPOSE 8080
 
 # Comando padrão (em produção o Coolify vai usar o gunicorn)
 CMD ["gunicorn", "--bind", "0.0.0.0:8000", "backend.wsgi:application"]

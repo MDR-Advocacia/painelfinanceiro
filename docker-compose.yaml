@@ -3,13 +3,17 @@ services:
     build: 
       context: ./backend-mdr
     container_name: painelfinanceiro_back
-    command: python manage.py runserver 0.0.0.0:8000
+    # Garante que o Django suba na 8080 se não usar gunicorn
+    command: python manage.py runserver 0.0.0.0:8080 
+    # No Coolify, você vai mapear o domínio da API para a porta 8080 deste container
 
   frontend:
     build: 
       context: .
+      args:
+        # URL definitiva da sua API (Sem a porta, pois o proxy do Coolify cuida disso via HTTPS)
+        - VITE_API_URL=https://painelfinanceiro2.mdradvocacia.com/api
     container_name: painelfinanceiro_front
-    environment:
-      - VITE_API_URL=https://painelfinanceiro2.mdradvocacia.com/api
     depends_on:
       - backend
+    # No Coolify, você vai mapear o domínio do painel para a porta 80 deste container
