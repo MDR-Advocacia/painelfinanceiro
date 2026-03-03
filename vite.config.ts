@@ -9,11 +9,13 @@ export default defineConfig(({ mode }) => ({
     host: "0.0.0.0",
     port: 8080,
     allowedHosts: [
+      "lab-painelfinanceiro.mdradvocacia.com",
       "painelfinanceiro.mdradvocacia.com",
       "jcokc0c4gc4swgsgkgcsgo44.3.21.60.254.sslip.io",
       "mdrpainelfinanceiro.mdradvocacia.com",
       "https://painelfinanceiro.mdradvocacia.com",
       "https://api-painelfinanceiro.mdradvocacia.com",
+      "https://lab-painelfinanceiro.mdradvocacia.com",
     ],
     hmr: {
       overlay: false,
