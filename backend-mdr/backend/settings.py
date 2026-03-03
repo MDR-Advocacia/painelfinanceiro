@@ -25,7 +25,7 @@ SECRET_KEY = 'django-insecure-h#-@@_@vhi9g=rpqoi=7(&t8+4g8ugd61w01p&#tnq33i2#sem
 # SECURITY WARNING: don't run with debug turned on in production!
 DEBUG = True
 
-ALLOWED_HOSTS = []
+ALLOWED_HOSTS = ['painelfinanceiro2.mdradvocacia.com', 'localhost', '127.0.0.1', '*']
 
 
 # Application definition
