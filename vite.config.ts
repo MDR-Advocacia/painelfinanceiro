@@ -15,6 +15,7 @@ export default defineConfig(({ mode }) => ({
       "mdrpainelfinanceiro.mdradvocacia.com",
       "https://painelfinanceiro.mdradvocacia.com",
       "https://api-painelfinanceiro.mdradvocacia.com",
+      "https://lab-painelfinanceiro.mdradvocacia.com",
     ],
     hmr: {
       overlay: false,
