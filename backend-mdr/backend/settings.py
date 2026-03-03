@@ -27,6 +27,9 @@ DEBUG = True
 
 ALLOWED_HOSTS = ['painelfinanceiro2.mdradvocacia.com', 'localhost', '127.0.0.1', '*']
 
+CSRF_TRUSTED_ORIGINS = [
+    'https://painelfinanceiro2.mdradvocacia.com',
+]
 
 # Application definition
 
