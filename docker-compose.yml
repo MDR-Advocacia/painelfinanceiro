@@ -1,0 +1,19 @@
+services:
+  # 1. Nosso Backend Django
+  backend:
+    build: 
+      context: ./backend-mdr
+    container_name: painelfinanceiro_back
+    command: python manage.py runserver 0.0.0.0:8080
+    ports:
+      - "8080:8080"
+
+  # 2. Nosso Frontend React + Nginx
+  frontend:
+    build: 
+      context: .
+    container_name: painelfinanceiro_front
+    ports:
+      - "3000:80"
+    depends_on:
+      - backend
