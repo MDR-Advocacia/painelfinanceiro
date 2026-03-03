@@ -24,6 +24,9 @@ export default function Login() {
     
     if (error) {
       toast.error("Usuário ou senha inválidos. Tente novamente.");
+    } else {
+      // O PULO DO GATO: Se não deu erro, joga o usuário para dentro do sistema!
+      window.location.href = "/";
     }
     
     setLoading(false);
