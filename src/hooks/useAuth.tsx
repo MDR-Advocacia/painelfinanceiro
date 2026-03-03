@@ -10,6 +10,9 @@ export interface Session {
   access_token: string;
 }
 
+// Puxa o domínio oficial que configuramos no docker-compose (ou .env)
+const API_URL = import.meta.env.VITE_API_URL || 'https://painelfinanceiro2.mdradvocacia.com/api';
+
 export function useAuth() {
   const [user, setUser] = useState<User | null>(null);
   const [session, setSession] = useState<Session | null>(null);
@@ -36,7 +39,8 @@ export function useAuth() {
   const signIn = async (username: string, password: string) => {
     setLoading(true);
     try {
-      const res = await fetch('http://localhost:8000/api/login/', {
+      // AJUSTE 1: Bate na rota oficial do nosso domínio (/token/)
+      const res = await fetch(`${API_URL}/token/`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ username, password })
@@ -46,12 +50,18 @@ export function useAuth() {
 
       const data = await res.json();
       
-      // Salva o token e o usuário no navegador
-      localStorage.setItem('django_token', data.token);
-      localStorage.setItem('django_user', JSON.stringify(data.user));
+      // AJUSTE 2: O SimpleJWT do Django devolve "data.access" e "data.refresh"
+      const tokenJWT = data.access;
       
-      setSession({ access_token: data.token });
-      setUser(data.user);
+      // Montamos um usuário básico (já que o token padrão não traz o objeto do user)
+      const userData = { id: '1', email: username };
+      
+      // Salva o token e o usuário no navegador
+      localStorage.setItem('django_token', tokenJWT);
+      localStorage.setItem('django_user', JSON.stringify(userData));
+      
+      setSession({ access_token: tokenJWT });
+      setUser(userData);
       setIsAdmin(true);
       
       return { error: null };
