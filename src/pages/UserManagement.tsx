@@ -2,9 +2,16 @@ import { Card, CardContent } from "@/components/ui/card";
 import { ShieldCheck, ArrowLeft } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { useNavigate } from "react-router-dom";
+import { ADMIN_URL } from "@/hooks/useAuth"; 
 
 export default function UserManagement() {
   const navigate = useNavigate();
+
+  // Puxa a URL da API do ambiente
+  const apiUrl = import.meta.env.VITE_API_URL || "";
+  
+  // Remove o sufixo "/api" e garante que termina com "/admin/"
+  const adminUrl = apiUrl.replace(/\/api$/, "") + "/admin/";
 
   return (
     <div className="min-h-screen bg-secondary p-6 md:p-8">
@@ -27,7 +34,7 @@ export default function UserManagement() {
             </div>
 
             <a 
-              href="http://localhost:8000/admin/" 
+              href={adminUrl}
               target="_blank" 
               rel="noopener noreferrer"
               className="mt-4 inline-flex items-center justify-center whitespace-nowrap rounded-md text-sm font-medium ring-offset-background transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 bg-primary text-primary-foreground hover:bg-primary/90 h-11 px-8 py-2"

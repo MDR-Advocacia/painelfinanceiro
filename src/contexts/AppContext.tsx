@@ -6,7 +6,7 @@ import { toast } from "sonner";
 import { getVpdValor } from '@/utils/calculations';
 
 // A URL DA NOSSA NOVA API DJANGO!
-const API_URL = import.meta.env.VITE_API_URL || 'https://painelfinanceiro2.mdradvocacia.com/api';
+const API_URL = import.meta.env.VITE_API_URL;
 
 interface AppState {
   setores: Setor[];

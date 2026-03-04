@@ -11,7 +11,7 @@ import ExcelJS from 'exceljs';
 import { saveAs } from 'file-saver';
 import { MapeadorColunas } from "@/components/MapeadorColunas";
 
-const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:8000/api';
+const API_URL = import.meta.env.VITE_API_URL;
 
 // --- REGRAS DE NEGÓCIO (ATUALIZADAS COM A SEPARAÇÃO POR SETOR) ---
 const MAPA_CENTRO_CUSTO: Record<string, string[]> = {

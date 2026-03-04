@@ -10,8 +10,9 @@ export interface Session {
   access_token: string;
 }
 
-// Puxa o domínio oficial que configuramos no docker-compose (ou .env)
-const API_URL = import.meta.env.VITE_API_URL || 'https://painelfinanceiro2.mdradvocacia.com/api';
+// Puxa o domínio oficial que configuramos no .env
+export const API_URL = import.meta.env.VITE_API_URL;
+export const ADMIN_URL = import.meta.env.VITE_ADMIN_URL || API_URL?.replace('/api', '/admin');
 
 export function useAuth() {
   const [user, setUser] = useState<User | null>(null);
