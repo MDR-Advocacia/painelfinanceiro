@@ -5,15 +5,27 @@ import { componentTagger } from "lovable-tagger";
 
 // https://vitejs.dev/config/
 export default defineConfig(({ mode }) => {
- // Carrega as variáveis do .env
+  // Carrega as variáveis do .env
   const env = loadEnv(mode, process.cwd(), '');
 
   const protocol = env.PROTOCOL || 'http';
   const domain = env.URL_BASE || 'localhost';
   const backPort = env.BACKEND_PORT || '8080';
 
-  // Montagem automática: http://localhost:8080/api
-  const fullApiUrl = `${protocol}://${domain}:${backPort}/api`;
+  let fullApiUrl = '';
+
+  // 1. Se o Coolify mandar a variável pronta, usamos ela com o /api
+  if (env.VITE_API_URL) {
+    fullApiUrl = `${env.VITE_API_URL}/api`;
+  } 
+  // 2. Se o domínio for diferente de localhost, montamos SEM a porta
+  else if (domain !== 'localhost') {
+    fullApiUrl = `${protocol}://${domain}/api`;
+  } 
+  // 3. Se for localhost (seu ambiente local), montamos COM a porta
+  else {
+    fullApiUrl = `${protocol}://${domain}:${backPort}/api`;
+  }
 
   // Injetamos a variável montada para que o código fonte (React) a receba
   process.env.VITE_API_URL = fullApiUrl;
@@ -21,7 +33,7 @@ export default defineConfig(({ mode }) => {
   return {
     server: {
       host: "0.0.0.0",
-      // Usa a porta do .env ou a 8080 como padrão de segurança
+      // Usa a porta do .env ou a 3123 como padrão de segurança
       port: parseInt(env.FRONTEND_PORT) || 3123,
       allowedHosts: true,
       hmr: {
@@ -35,7 +47,9 @@ export default defineConfig(({ mode }) => {
     define: {
       // Isso garante que o valor montado esteja disponível em 'import.meta.env.VITE_API_URL'
       'import.meta.env.VITE_API_URL': JSON.stringify(fullApiUrl),
-      'import.meta.env.VITE_ADMIN_URL': JSON.stringify(`${protocol}://${domain}:${backPort}/admin/`),
+      
+      // Usa a URL já corrigida (com ou sem porta) e só troca o final para acessar o painel do Django
+      'import.meta.env.VITE_ADMIN_URL': JSON.stringify(fullApiUrl.replace('/api', '/admin/')),
     },
     plugins: [
       react(),
