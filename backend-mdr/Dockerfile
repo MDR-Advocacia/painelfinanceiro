@@ -14,6 +14,9 @@ RUN pip install --no-cache-dir -r requirements.txt
 # Copia o resto do código
 COPY . .
 
+# JUNTAR OS ARQUIVOS CSS/JS ANTES DE RODAR 
+RUN python manage.py collectstatic --noinput
+
 # Expõe a porta que o Django vai rodar
 EXPOSE 8080
 
