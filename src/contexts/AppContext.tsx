@@ -80,6 +80,9 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
   const autosaveTimer = useRef<number | null>(null);
   const lastChangeRef = useRef(0);
   const lastAutosaveAttemptRef = useRef(0);
+  const persistedSetorIdsRef = useRef<Set<string>>(new Set());
+  const persistedSedeIdsRef = useRef<Set<string>>(new Set());
+  const persistedVpdIdsRef = useRef<Set<string>>(new Set());
 
   const markUnsaved = useCallback(() => {
     lastChangeRef.current = Date.now();
@@ -99,21 +102,27 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
         ]);
 
         if (Array.isArray(setoresRes)) {
-          setSetores(setoresRes.map((r: any) => ({
+          const setoresData = setoresRes.map((r: any) => ({
             id: r.id, nome: r.nome, tipo: r.tipo, sedeId: r.sedeId ?? undefined, periodos: r.periodos ?? {}
-          })));
+          }));
+          setSetores(setoresData);
+          persistedSetorIdsRef.current = new Set(setoresData.map(s => s.id));
         }
 
         if (Array.isArray(sedesRes)) {
-          setSedes(sedesRes.map((r: any) => ({
+          const sedesData = sedesRes.map((r: any) => ({
             id: r.id, nome: r.nome, periodos: r.periodos ?? {}
-          })));
+          }));
+          setSedes(sedesData);
+          persistedSedeIdsRef.current = new Set(sedesData.map(s => s.id));
         }
 
         if (Array.isArray(vpdRes)) {
-          setVpdConfigs(vpdRes.map((r: any) => ({
+          const vpdData = vpdRes.map((r: any) => ({
             id: r.id, periodo: r.periodo, valor: r.valor
-          })));
+          }));
+          setVpdConfigs(vpdData);
+          persistedVpdIdsRef.current = new Set(vpdData.map(v => v.id));
         }
         
         initialLoadDone.current = true;
@@ -142,26 +151,35 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       return res;
     };
 
-    const upsertToAPI = async (endpoint: string, items: any[]) => {
+    const upsertToAPI = async (endpoint: string, items: any[], persistedRef: React.MutableRefObject<Set<string>>) => {
       for (const item of items) {
         const payload = { ...item, user_id: user.id };
-        const check = await fetch(`${API_URL}/${endpoint}/${item.id}/`);
-        
-        if (check.ok) {
+        const isPersisted = persistedRef.current.has(item.id);
+
+        if (isPersisted) {
           await requestOrThrow(`${API_URL}/${endpoint}/${item.id}/`, {
             method: 'PUT',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify(payload)
           });
-        } else if (check.status === 404) {
+          continue;
+        }
+
+        try {
           await requestOrThrow(`${API_URL}/${endpoint}/`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify(payload)
           });
-        } else {
-          const body = await check.text().catch(() => '');
-          throw new Error(`Falha ao verificar ${endpoint}: ${check.status} ${check.statusText}${body ? `: ${body}` : ''}`);
+          persistedRef.current.add(item.id);
+        } catch (err) {
+          // Se o POST falhar por já existir, tentamos PUT para garantir consistência.
+          await requestOrThrow(`${API_URL}/${endpoint}/${item.id}/`, {
+            method: 'PUT',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(payload)
+          });
+          persistedRef.current.add(item.id);
         }
       }
     };
@@ -180,9 +198,9 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       if (!API_URL) throw new Error('API_URL não configurada');
 
       await Promise.all([
-        upsertToAPI('setores', sectorRows),
-        upsertToAPI('sedes', sedeRows),
-        upsertToAPI('vpd_configs', vpdRows)
+        upsertToAPI('setores', sectorRows, persistedSetorIdsRef),
+        upsertToAPI('sedes', sedeRows, persistedSedeIdsRef),
+        upsertToAPI('vpd_configs', vpdRows, persistedVpdIdsRef)
       ]);
 
       setHasUnsavedChanges(false);
@@ -248,6 +266,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     if (!confirm("Excluir setor permanentemente?")) return;
     setSetores(prev => prev.filter(s => s.id !== id));
     markUnsaved();
+    persistedSetorIdsRef.current.delete(id);
     fetch(`${API_URL}/setores/${id}/`, { method: 'DELETE' }).catch(console.error);
   }, [markUnsaved]);
 
@@ -286,6 +305,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     setSedes(prev => prev.filter(s => s.id !== id));
     setSetores(prev => prev.map(s => s.sedeId === id ? { ...s, sedeId: undefined } : s));
     markUnsaved();
+    persistedSedeIdsRef.current.delete(id);
     fetch(`${API_URL}/sedes/${id}/`, { method: 'DELETE' }).catch(console.error);
   }, [markUnsaved]);
 
