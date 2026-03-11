@@ -125,23 +125,35 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     setIsSaving(true);
     
     // Lógica para Criar (POST) ou Atualizar (PUT) os dados na API
+    const requestOrThrow = async (url: string, options?: RequestInit) => {
+      const res = await fetch(url, options);
+      if (!res.ok) {
+        const body = await res.text().catch(() => '');
+        throw new Error(`${res.status} ${res.statusText}${body ? `: ${body}` : ''}`);
+      }
+      return res;
+    };
+
     const upsertToAPI = async (endpoint: string, items: any[]) => {
       for (const item of items) {
         const payload = { ...item, user_id: user.id };
         const check = await fetch(`${API_URL}/${endpoint}/${item.id}/`);
         
         if (check.ok) {
-          await fetch(`${API_URL}/${endpoint}/${item.id}/`, {
+          await requestOrThrow(`${API_URL}/${endpoint}/${item.id}/`, {
             method: 'PUT',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify(payload)
           });
-        } else {
-          await fetch(`${API_URL}/${endpoint}/`, {
+        } else if (check.status === 404) {
+          await requestOrThrow(`${API_URL}/${endpoint}/`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify(payload)
           });
+        } else {
+          const body = await check.text().catch(() => '');
+          throw new Error(`Falha ao verificar ${endpoint}: ${check.status} ${check.statusText}${body ? `: ${body}` : ''}`);
         }
       }
     };
@@ -156,6 +168,8 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       const vpdRows = vpdConfigs.map(v => ({
         id: v.id, periodo: v.periodo, valor: v.valor
       }));
+
+      if (!API_URL) throw new Error('API_URL não configurada');
 
       await Promise.all([
         upsertToAPI('setores', sectorRows),

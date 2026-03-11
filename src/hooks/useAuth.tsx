@@ -40,8 +40,10 @@ export function useAuth() {
   const signIn = async (username: string, password: string) => {
     setLoading(true);
     try {
-      // AJUSTE 1: Bate na rota oficial do nosso domínio (/token/)
-      const res = await fetch(`${API_URL}/token/`, {
+      if (!API_URL) throw new Error('API_URL não configurada');
+
+      // Autentica via rota oficial do Django (retorna token + user)
+      const res = await fetch(`${API_URL}/login/`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ username, password })
@@ -51,17 +53,17 @@ export function useAuth() {
 
       const data = await res.json();
       
-      // AJUSTE 2: O SimpleJWT do Django devolve "data.access" e "data.refresh"
-      const tokenJWT = data.access;
-      
-      // Montamos um usuário básico (já que o token padrão não traz o objeto do user)
-      const userData = { id: '1', email: username };
+      const token = data.token ?? data.access ?? data.access_token;
+      const userData = data.user ?? { id: data.user_id, email: username };
+
+      if (!token) throw new Error('Token ausente no login');
+      if (!userData?.id) throw new Error('Usuário sem ID válido no login');
       
       // Salva o token e o usuário no navegador
-      localStorage.setItem('django_token', tokenJWT);
+      localStorage.setItem('django_token', token);
       localStorage.setItem('django_user', JSON.stringify(userData));
       
-      setSession({ access_token: tokenJWT });
+      setSession({ access_token: token });
       setUser(userData);
       setIsAdmin(true);
       

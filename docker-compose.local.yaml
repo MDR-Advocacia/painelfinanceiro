@@ -1,0 +1,26 @@
+services:
+  backend:
+    build: 
+      context: ./backend-mdr
+    container_name: painelfinanceiro_back_local
+    environment:
+      - DJANGO_SECRET_KEY=${DJANGO_SECRET_KEY}
+      - DJANGO_DEBUG=${DJANGO_DEBUG}
+      - DJANGO_ALLOWED_HOSTS=${DJANGO_ALLOWED_HOSTS}
+      - TZ=America/Fortaleza
+    # Aqui devolvemos o mapeamento para a sua máquina enxergar o Gunicorn
+    ports:
+      - "${BACKEND_PORT}:8080"
+
+  frontend:
+    build: 
+      context: .
+      # Removemos o 'args' com VITE_API_URL aqui!
+      # Como ele não será enviado no build local, o seu vite.config.ts 
+      # vai cair no 'else' e montar a URL de localhost perfeitamente.
+    container_name: painelfinanceiro_front_local
+    depends_on:
+      - backend
+    # Aqui devolvemos o mapeamento para a sua máquina enxergar o Nginx
+    ports:
+      - "${FRONTEND_PORT}:80"
