@@ -7,6 +7,9 @@ ENV PYTHONUNBUFFERED 1
 # Pasta de trabalho dentro do container
 WORKDIR /app
 
+# Cria a pasta do banco
+RUN mkdir -p /app/data
+
 # Instala as dependências
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt

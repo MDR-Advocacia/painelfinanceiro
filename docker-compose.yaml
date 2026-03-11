@@ -9,6 +9,8 @@ services:
       - DJANGO_ALLOWED_HOSTS=${DJANGO_ALLOWED_HOSTS}
       - TZ=America/Fortaleza
     # O Gunicorn definido no seu Dockerfile vai rodar na porta 8080 internamente
+    volumes:
+      - sqlite_data:/app/data
 
   frontend:
     build: 
@@ -20,3 +22,5 @@ services:
     depends_on:
       - backend
     # O Nginx definido no seu Dockerfile vai rodar na porta 80 internamente
+volumes:
+  sqlite_data:
