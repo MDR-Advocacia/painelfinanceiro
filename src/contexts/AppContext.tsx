@@ -77,6 +77,14 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
   const [hasUnsavedChanges, setHasUnsavedChanges] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
   const initialLoadDone = useRef(false);
+  const autosaveTimer = useRef<number | null>(null);
+  const lastChangeRef = useRef(0);
+  const lastAutosaveAttemptRef = useRef(0);
+
+  const markUnsaved = useCallback(() => {
+    lastChangeRef.current = Date.now();
+    setHasUnsavedChanges(true);
+  }, []);
 
   // --- 1. CARREGAMENTO INICIAL DO BANCO (VIA DJANGO API) ---
   useEffect(() => {
@@ -120,7 +128,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
   }, [user]);
 
   // --- 2. SALVAMENTO MANUAL (VIA DJANGO API) ---
-  const saveData = async () => {
+  const saveData = useCallback(async () => {
     if (!user || !initialLoadDone.current) return;
     setIsSaving(true);
     
@@ -185,7 +193,37 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     } finally {
       setIsSaving(false);
     }
-  };
+  }, [user, setores, sedes, vpdConfigs]);
+
+  // --- 2.1 AUTOSAVE COM DEBOUNCE ---
+  useEffect(() => {
+    if (!hasUnsavedChanges || isSaving || !user || !initialLoadDone.current) return;
+
+    const AUTOSAVE_DELAY_MS = 1500;
+    const AUTOSAVE_RETRY_MS = 30000;
+    const now = Date.now();
+    const lastChange = lastChangeRef.current;
+    const lastAttempt = lastAutosaveAttemptRef.current;
+    const hasNewChange = lastChange > lastAttempt;
+
+    if (!hasNewChange && now - lastAttempt < AUTOSAVE_RETRY_MS) return;
+
+    const elapsed = now - lastChange;
+    const delay = Math.max(AUTOSAVE_DELAY_MS - elapsed, 0);
+
+    if (autosaveTimer.current) window.clearTimeout(autosaveTimer.current);
+    autosaveTimer.current = window.setTimeout(() => {
+      lastAutosaveAttemptRef.current = Date.now();
+      saveData();
+    }, delay);
+
+    return () => {
+      if (autosaveTimer.current) {
+        window.clearTimeout(autosaveTimer.current);
+        autosaveTimer.current = null;
+      }
+    };
+  }, [hasUnsavedChanges, isSaving, user, saveData]);
 
   // --- 3. BLOQUEIO DE FECHAMENTO ACIDENTAL ---
   useEffect(() => {
@@ -202,22 +240,22 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
   // --- 4. FUNÇÕES DE ALTERAÇÃO (SETTERS) ---
   const addSetor = useCallback((nome: string, tipo: TipoSetor) => {
     setSetores(prev => [...prev, createDefaultSetor(nome, tipo, periodoAtivo)]);
-    setHasUnsavedChanges(true);
+    markUnsaved();
     setView('setor');
-  }, [periodoAtivo]);
+  }, [periodoAtivo, markUnsaved]);
 
   const removeSetor = useCallback((id: string) => {
     if (!confirm("Excluir setor permanentemente?")) return;
     setSetores(prev => prev.filter(s => s.id !== id));
-    setHasUnsavedChanges(true);
+    markUnsaved();
     fetch(`${API_URL}/setores/${id}/`, { method: 'DELETE' }).catch(console.error);
-  }, []);
+  }, [markUnsaved]);
 
   const updatePeriodoData = useCallback((setorId: string, periodo: string, updates: Partial<PeriodoData>) => {
+    markUnsaved();
     setSetores(prev => prev.map(s => {
       if (s.id !== setorId) return s;
       const current = getOrCreatePeriodoDataLocal(s, periodo);
-      setHasUnsavedChanges(true);
       return {
         ...s,
         periodos: {
@@ -230,31 +268,31 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
         }
       };
     }));
-  }, []);
+  }, [markUnsaved]);
 
   const updateSetorSedeId = useCallback((setorId: string, sedeId: string | undefined) => {
     setSetores(prev => prev.map(s => s.id === setorId ? { ...s, sedeId } : s));
-    setHasUnsavedChanges(true);
-  }, []);
+    markUnsaved();
+  }, [markUnsaved]);
 
   const addSede = useCallback((nome: string) => {
     setSedes(prev => [...prev, createDefaultSede(nome, periodoAtivo)]);
-    setHasUnsavedChanges(true);
+    markUnsaved();
     setView('sede');
-  }, [periodoAtivo]);
+  }, [periodoAtivo, markUnsaved]);
 
   const removeSede = useCallback((id: string) => {
     if (!confirm("Excluir sede permanentemente?")) return;
     setSedes(prev => prev.filter(s => s.id !== id));
     setSetores(prev => prev.map(s => s.sedeId === id ? { ...s, sedeId: undefined } : s));
-    setHasUnsavedChanges(true);
+    markUnsaved();
     fetch(`${API_URL}/sedes/${id}/`, { method: 'DELETE' }).catch(console.error);
-  }, []);
+  }, [markUnsaved]);
 
   const updateSedeCustos = useCallback((sedeId: string, periodo: string, custos: CustoItem[]) => {
     setSedes(prev => prev.map(s => s.id === sedeId ? { ...s, periodos: { ...s.periodos, [periodo]: custos } } : s));
-    setHasUnsavedChanges(true);
-  }, []);
+    markUnsaved();
+  }, [markUnsaved]);
 
   const updateVpdValor = useCallback((periodo: string, valor: number) => {
     setVpdConfigs(prev => {
@@ -262,8 +300,8 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       if (exists) return prev.map(v => v.periodo === periodo ? { ...v, valor } : v);
       return [...prev, { id: crypto.randomUUID(), periodo, valor }];
     });
-    setHasUnsavedChanges(true);
-  }, []);
+    markUnsaved();
+  }, [markUnsaved]);
 
   // --- 5. CALCULADOS E GETTERS ---
   const activeSetor = setores.find(s => s.id === activeSetorId) || null;
