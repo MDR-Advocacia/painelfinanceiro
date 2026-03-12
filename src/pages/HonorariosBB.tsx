@@ -10,7 +10,8 @@ import * as XLSX from 'xlsx';
 import ExcelJS from 'exceljs';
 import { saveAs } from 'file-saver';
 import { MapeadorColunas } from "@/components/MapeadorColunas";
-import { supabase } from "@/integrations/supabase/client";
+
+const API_URL = import.meta.env.VITE_API_URL;
 
 // --- REGRAS DE NEGÓCIO (ATUALIZADAS COM A SEPARAÇÃO POR SETOR) ---
 const MAPA_CENTRO_CUSTO: Record<string, string[]> = {
@@ -55,29 +56,31 @@ export default function HonorariosBB() {
 
   const fetchStats = async () => {
     try {
-      const { count: total, error: errTotal } = await supabase
-        .from('base_referencia')
-        .select('*', { count: 'exact', head: true });
-
-      const { count: autor, error: errAutor } = await supabase
-        .from('base_referencia')
-        .select('*', { count: 'exact', head: true })
-        .or('polo.ilike.%AUTOR%,polo.ilike.%REQUERENTE%,polo.ilike.%EXEQUENTE%,polo.ilike.%EMBARGANTE%,polo.ilike.%IMPUGNANTE%,polo.ilike.%ATIVO%');
-
-      const { count: reu, error: errReu } = await supabase
-        .from('base_referencia')
-        .select('*', { count: 'exact', head: true })
-        .or('polo.ilike.%RÉU%,polo.ilike.%REU%,polo.ilike.%REQUERIDO%,polo.ilike.%EXECUTADO%,polo.ilike.%EMBARGADO%,polo.ilike.%IMPUGNADO%,polo.ilike.%PASSIVO%');
-
-      if (errTotal) throw errTotal;
+      const response = await fetch(`${API_URL}/base_referencia/`);
+      if (!response.ok) throw new Error('Falha ao carregar dados');
+      
+      const data = await response.json();
+      
+      let autor = 0;
+      let reu = 0;
+      
+      data.forEach((item: any) => {
+          const poloUpper = (item.polo || '').toUpperCase();
+          if (/AUTOR|REQUERENTE|EXEQUENTE|EMBARGANTE|IMPUGNANTE|ATIVO/i.test(poloUpper)) {
+              autor++;
+          } else if (/RÉU|REU|REQUERIDO|EXECUTADO|EMBARGADO|IMPUGNADO|PASSIVO/i.test(poloUpper)) {
+              reu++;
+          }
+      });
 
       setStats({ 
-        total: total || 0, 
-        autor: autor || 0, 
-        reu: reu || 0 
+        total: data.length, 
+        autor: autor, 
+        reu: reu 
       });
     } catch (err) {
       console.error("Erro ao carregar estatísticas:", err);
+      toast.error("Erro ao carregar estatísticas do banco.");
     }
   };
 
@@ -87,11 +90,21 @@ export default function HonorariosBB() {
     if (!confirm("⚠️ ATENÇÃO: Deseja apagar TODOS os processos salvos na base de referência?")) return;
     setLoading(true);
     try {
-      const { error } = await supabase.from('base_referencia').delete().neq('npj_limpo', '0');
-      if (error) throw error;
+      const response = await fetch(`${API_URL}/base_referencia/`);
+      const data = await response.json();
+      
+      const deletePromises = data.map((item: any) => 
+        fetch(`${API_URL}/base_referencia/${item.id}/`, { method: 'DELETE' })
+      );
+      
+      await Promise.all(deletePromises);
+      
       toast.success("Base limpa com sucesso!");
       fetchStats();
-    } catch (err) { toast.error("Erro ao limpar base."); }
+    } catch (err) { 
+        toast.error("Erro ao limpar base."); 
+        console.error(err);
+    }
     finally { setLoading(false); }
   };
 
@@ -125,12 +138,13 @@ export default function HonorariosBB() {
   const salvarNoBanco = async (mapa: { npj: string; polo: string }) => {
     setLoading(true);
     setShowMapeador(false);
-    let totalSalvo = 0;
 
     try {
+      let todosOsProcessos = [];
+
       for (let i = 0; i < arquivosReferencia.length; i++) {
         const file = arquivosReferencia[i];
-        toast.info(`Processando base de referência ${i + 1}...`, { duration: 2000 });
+        toast.info(`Lendo arquivo ${i + 1} de ${arquivosReferencia.length}...`);
         await delay(100);
         
         const data = await new Promise<any[]>((resolve, reject) => {
@@ -155,20 +169,32 @@ export default function HonorariosBB() {
           };
         }).filter(r => r.npj_limpo !== "");
 
-        if (rows.length > 0) {
-          const TAMANHO_LOTE = 500; 
-          for (let j = 0; j < rows.length; j += TAMANHO_LOTE) {
-            const lote = rows.slice(j, j + TAMANHO_LOTE);
-            const { error } = await supabase.from('base_referencia').upsert(lote, { onConflict: 'npj_limpo' });
-            if (error) throw error;
-            totalSalvo += lote.length;
-          }
-        }
+        todosOsProcessos = [...todosOsProcessos, ...rows];
       }
-      toast.success(`${totalSalvo} processos salvos com sucesso!`);
-      fetchStats();
-    } catch (err: any) { toast.error(`Erro: ${err.message}`); }
-    finally { setLoading(false); setArquivosReferencia([]); }
+
+      if (todosOsProcessos.length > 0) {
+        toast.info(`⏳ Enviando ${todosOsProcessos.length} processos para o servidor (Isso levará alguns segundos)...`);
+        
+        // AQUI ESTÁ A MÁGICA: Manda TUDO num único POST para a rota de Bulk Upsert!
+        const response = await fetch(`${API_URL}/base_referencia/bulk_upsert/`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(todosOsProcessos)
+        });
+
+        if (!response.ok) throw new Error("Falha ao salvar lote no servidor.");
+        
+        const result = await response.json();
+        toast.success(`✅ ${result.sucesso}`);
+        fetchStats();
+      }
+
+    } catch (err: any) { 
+      toast.error(`❌ Erro: ${err.message}`); 
+    } finally { 
+      setLoading(false); 
+      setArquivosReferencia([]); 
+    }
   };
 
   const processarFaturas = async () => {
@@ -210,17 +236,11 @@ export default function HonorariosBB() {
       toast.info(`🔍 Passo 2/4: Cruzando ${npjsFatura.length} NPJs únicos com o banco de dados...`, { duration: 3000 });
       await delay(300);
 
-      let baseRef: any[] = [];
-      const TAMANHO_LOTE = 50; 
-      
-      for (let i = 0; i < npjsFatura.length; i += TAMANHO_LOTE) {
-        const lote = npjsFatura.slice(i, i + TAMANHO_LOTE);
-        const { data, error } = await supabase.from('base_referencia').select('npj_limpo, polo').in('npj_limpo', lote);
-        if (error) throw error;
-        if (data) baseRef = [...baseRef, ...data];
-      }
+      // Busca TUDO do banco uma vez para cruzar (em bases grandes isso seria ideal fazer na API, mas mantemos sua lógica original aqui)
+      const resBanco = await fetch(`${API_URL}/base_referencia/`);
+      const baseRef = await resBanco.json();
 
-      const refMap = new Map(baseRef?.map(r => [r.npj_limpo, r.polo]));
+      const refMap = new Map(baseRef?.map((r: any) => [r.npj_limpo, r.polo]));
       
       toast.info("📊 Passo 3/4: Classificando Centro de Custo e montando Excel...", { duration: 3000 });
       await delay(300);

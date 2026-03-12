@@ -1,10 +1,9 @@
 import { useState } from "react";
-import { supabase } from "@/integrations/supabase/client";
+import { useAuth } from "@/hooks/useAuth"; // <-- Importamos o seu novo hook!
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Card, CardContent } from "@/components/ui/card";
 import { toast } from "sonner";
-import { mapAuthError } from "@/utils/security";
 import logoMdr from "@/assets/logo-mdr.png";
 
 export default function Login() {
@@ -12,34 +11,36 @@ export default function Login() {
   const [password, setPassword] = useState("");
   const [loading, setLoading] = useState(false);
   const [mode, setMode] = useState<"login" | "recovery">("login");
+  
+  // Puxamos a função signIn da nossa API Django
+  const { signIn } = useAuth();
 
   const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();
     setLoading(true);
-    const { error } = await supabase.auth.signInWithPassword({ email, password });
+    
+    // Chama o login do Django
+    const { error } = await signIn(email, password);
+    
     if (error) {
-      toast.error(mapAuthError(error.message));
+      toast.error("Usuário ou senha inválidos. Tente novamente.");
+    } else {
+      // O PULO DO GATO: Se não deu erro, joga o usuário para dentro do sistema!
+      window.location.href = "/";
     }
+    
     setLoading(false);
   };
 
   const handleRecovery = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!email.trim()) {
-      toast.error("Informe seu e-mail");
+      toast.error("Informe seu e-mail ou usuário");
       return;
     }
-    setLoading(true);
-    const { error } = await supabase.auth.resetPasswordForEmail(email, {
-      redirectTo: window.location.origin,
-    });
-    if (error) {
-      toast.error(mapAuthError(error.message));
-    } else {
-      toast.success("Link de recuperação enviado para seu e-mail");
-      setMode("login");
-    }
-    setLoading(false);
+    // Como a infraestrutura agora é interna (Django), a recuperação é feita pelo Admin.
+    toast.info("Por favor, solicite a redefinição de senha ao administrador do sistema (MDR).");
+    setMode("login");
   };
 
   return (
@@ -57,12 +58,12 @@ export default function Login() {
           {mode === "login" ? (
             <form onSubmit={handleLogin} className="space-y-4">
               <div>
-                <label className="text-xs font-medium text-muted-foreground">E-mail</label>
+                <label className="text-xs font-medium text-muted-foreground">Usuário ou E-mail</label>
                 <Input
-                  type="email"
+                  type="text" // <-- Mudamos para text para aceitar "admin" ou "seu@email.com"
                   value={email}
                   onChange={(e) => setEmail(e.target.value)}
-                  placeholder="seu@email.com"
+                  placeholder="Seu usuário ou e-mail"
                   required
                   autoFocus
                 />
@@ -91,21 +92,21 @@ export default function Login() {
           ) : (
             <form onSubmit={handleRecovery} className="space-y-4">
               <p className="text-sm text-muted-foreground text-center mb-2">
-                Informe seu e-mail para receber o link de recuperação de senha.
+                Esqueceu a senha?
               </p>
               <div>
-                <label className="text-xs font-medium text-muted-foreground">E-mail</label>
+                <label className="text-xs font-medium text-muted-foreground">Usuário ou E-mail</label>
                 <Input
-                  type="email"
+                  type="text"
                   value={email}
                   onChange={(e) => setEmail(e.target.value)}
-                  placeholder="seu@email.com"
+                  placeholder="Seu usuário ou e-mail"
                   required
                   autoFocus
                 />
               </div>
               <Button type="submit" className="w-full" disabled={loading}>
-                {loading ? "Enviando..." : "Enviar Link de Recuperação"}
+                Solicitar Recuperação
               </Button>
               <button
                 type="button"

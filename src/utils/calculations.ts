@@ -68,20 +68,22 @@ export function calcImpostos(fat: Faturamento): ImpostosCalculados {
 
 /**
  * Busca o valor do VPD para um período específico
- * Caso não exista configuração, utiliza o valor base do estudo de R$ 2.472,85 [cite: 36]
+ * Caso não exista configuração, utiliza o valor base do estudo de R$ 2.472,85
  */
 export function getVpdValor(configs: VpdConfig[], periodo: string): number {
   const config = configs.find(c => c.periodo === periodo);
-  return config ? config.valor : 2472.85; // Valor padrão sugerido no PDF [cite: 36, 46]
+  return config ? config.valor : 2472.85; // Valor padrão sugerido no PDF
 }
 
 /**
  * Calcula o Resumo Estratégico Completo
- * Integra o rateio por número de funcionários (VPD) e o Lucro Líquido (ROF) [cite: 11, 31]
+ * Integra o rateio por número de funcionários (VPD) e o Lucro Líquido (ROF)
  */
 export function calcResumo(data: PeriodoData, vpdValor: number = 2472.85): ResumoSetor {
   const { custosPorCargo, total: totalCustoPessoal } = calcTotalPessoal(data.pessoal as any);
   const headcount = getTotalProfissionais(data.pessoal as any);
+
+  const totalDespesasEventuais = (data.despesasEventuais || []).reduce((sum, item) => sum + item.valor, 0);
 
   const fb = data.faturamento.bruto;
   const descontos = data.faturamento.descontos ?? 0;
@@ -92,17 +94,17 @@ export function calcResumo(data: PeriodoData, vpdValor: number = 2472.85): Resum
   const faturamentoLiquido = fb - impostos.total - descontos;
   
   // Margem Bruta (antes do rateio das despesas indiretas)
-  const margemBruta = faturamentoLiquido - totalCustoPessoal - premiacaoTotal;
+  const margemBruta = faturamentoLiquido - totalCustoPessoal - premiacaoTotal - totalDespesasEventuais;
   const margemBrutaPercent = fb > 0 ? (margemBruta / fb) * 100 : 0;
 
-  // Resultado Operacional Final (ROF) - Lucro Líquido Real [cite: 4, 9]
-  // Fórmula: Receita Líquida - Impostos - Custos Operacionais (Pessoal) - Despesas Operacionais (VPD) [cite: 11, 12]
+  // Resultado Operacional Final (ROF) - Lucro Líquido Real
+  // Fórmula: Receita Líquida - Impostos - Custos Operacionais (Pessoal) - Despesas Operacionais (VPD)
   const custoVPD = headcount * vpdValor;
-  const lucroLiquidoReal = faturamentoLiquido - totalCustoPessoal - premiacaoTotal - custoVPD;
+  const lucroLiquidoReal = faturamentoLiquido - totalCustoPessoal - premiacaoTotal - totalDespesasEventuais - custoVPD;
   const margemLiquidaPercent = fb > 0 ? (lucroLiquidoReal / fb) * 100 : 0;
 
   let status: ResumoSetor['status'] = 'critico';
-  // Interpretação: margens líquidas altas sinalizam boa gestão e saúde financeira [cite: 18]
+  // Interpretação: margens líquidas altas sinalizam boa gestão e saúde financeira
   if (margemLiquidaPercent > 25) status = 'excelente';
   else if (margemLiquidaPercent > 15) status = 'saudavel';
   else if (margemLiquidaPercent > 5) status = 'atencao';
@@ -110,6 +112,7 @@ export function calcResumo(data: PeriodoData, vpdValor: number = 2472.85): Resum
   return {
     custosPorCargo,
     totalCustoPessoal,
+    totalDespesasEventuais,
     faturamentoBruto: fb,
     impostos,
     cargaTributaria,
@@ -137,6 +140,7 @@ export function aggregateResumos(resumos: ResumoSetor[]): ResumoSetor {
 
   const custosPorCargo: Record<string, number> = {};
   let totalCustoPessoal = 0;
+  let totalDespesasEventuais = 0;
   let faturamentoBruto = 0;
   let totalImpostos = 0;
   let headcount = 0;
@@ -149,6 +153,7 @@ export function aggregateResumos(resumos: ResumoSetor[]): ResumoSetor {
       custosPorCargo[k] = (custosPorCargo[k] ?? 0) + v;
     }
     totalCustoPessoal += r.totalCustoPessoal;
+    totalDespesasEventuais += r.totalDespesasEventuais;
     faturamentoBruto += r.faturamentoBruto;
     totalImpostos += r.impostos.total;
     headcount += r.headcount;
@@ -157,7 +162,7 @@ export function aggregateResumos(resumos: ResumoSetor[]): ResumoSetor {
     faturamentoLiquido += r.faturamentoLiquido;
   }
 
-  const margemBruta = faturamentoLiquido - totalCustoPessoal;
+  const margemBruta = faturamentoLiquido - totalCustoPessoal - totalDespesasEventuais;
   const margemBrutaPercent = faturamentoBruto > 0 ? (margemBruta / faturamentoBruto) * 100 : 0;
   const margemLiquidaPercent = faturamentoBruto > 0 ? (lucroLiquidoReal / faturamentoBruto) * 100 : 0;
 
@@ -178,7 +183,7 @@ export function aggregateResumos(resumos: ResumoSetor[]): ResumoSetor {
   };
 
   return {
-    custosPorCargo, totalCustoPessoal, faturamentoBruto, impostos, 
+    custosPorCargo, totalCustoPessoal, totalDespesasEventuais, faturamentoBruto, impostos, 
     cargaTributaria: faturamentoBruto > 0 ? (totalImpostos / faturamentoBruto) * 100 : 0,
     faturamentoLiquido, margemBruta, margemBrutaPercent, status,
     headcount, custoVPD, lucroLiquidoReal, margemLiquidaPercent
@@ -187,7 +192,7 @@ export function aggregateResumos(resumos: ResumoSetor[]): ResumoSetor {
 
 function emptyResumo(): ResumoSetor {
   return {
-    custosPorCargo: {}, totalCustoPessoal: 0, faturamentoBruto: 0,
+    custosPorCargo: {}, totalCustoPessoal: 0, totalDespesasEventuais: 0, faturamentoBruto: 0,
     impostos: { lucroPresumido: 0, irpj: 0, irpjAdicional: 0, csll: 0, pis: 0, cofins: 0, iss: 0, total: 0 },
     cargaTributaria: 0, faturamentoLiquido: 0, margemBruta: 0, margemBrutaPercent: 0, status: 'critico',
     headcount: 0, custoVPD: 0, lucroLiquidoReal: 0, margemLiquidaPercent: 0
