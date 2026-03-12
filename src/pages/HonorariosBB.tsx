@@ -261,7 +261,13 @@ export default function HonorariosBB() {
       [sheetAutor, sheetReu, sheetPendentes].forEach(s => s.columns = cols);
 
       // --- ACUMULADORES DE VALORES POR SETOR ---
+      const EVENTO_BONUS = "PAG HON - BÔNUS - SATISFAÇÃO COM O ATENDIMENTO";
       let somaAutor = 0;
+      let somaBonusAutor = 0;
+      let somaBonusReu = 0;
+      let somaBonusInteressado = 0;
+      let somaInteressadoResto = 0;
+
       let somaReuPorCC: Record<string, number> = {
         'Cadastro Técnico': 0,
         'Acordos BB Réu': 0,
@@ -276,6 +282,8 @@ export default function HonorariosBB() {
         const polo = refMap.get(npjLimpo) || 'NAN';
         
         const valorNum = limpar_moeda(item.Valor);
+        const eventoOriginal = String(item.Evento || '').trim();
+        const isBonus = eventoOriginal === EVENTO_BONUS;
         
         const isAutor = /AUTOR|REQUERENTE|EXEQUENTE|EMBARGANTE|IMPUGNANTE|ATIVO/i.test(polo);
         const isReu = /RÉU|REU|REQUERIDO|EXECUTADO|EMBARGADO|IMPUGNADO|PASSIVO/i.test(polo);
@@ -285,26 +293,38 @@ export default function HonorariosBB() {
 
         if (isAutor) {
             targetSheet = sheetAutor;
-            somaAutor += valorNum;
             diagnosticoOuCC = polo;
+            if (isBonus) {
+                somaBonusAutor += valorNum;
+            } else {
+                somaAutor += valorNum;
+            }
         } else if (isReu) {
             targetSheet = sheetReu;
-            const evento = String(item.Evento || '').toUpperCase().trim();
-            diagnosticoOuCC = 'Outros Eventos (Réu)';
+            const eventoNorm = eventoOriginal.toUpperCase().trim();
             
-            for (const [cc, lista] of Object.entries(MAPA_CENTRO_CUSTO)) {
-                if (lista.some(term => evento === term.toUpperCase().trim())) {
-                    diagnosticoOuCC = cc; 
-                    break;
+            if (isBonus) {
+                somaBonusReu += valorNum;
+                diagnosticoOuCC = 'BÔNUS - SATISFAÇÃO';
+            } else {
+                diagnosticoOuCC = 'Outros Eventos (Réu)';
+                for (const [cc, lista] of Object.entries(MAPA_CENTRO_CUSTO)) {
+                    if (lista.some(term => eventoNorm === term.toUpperCase().trim())) {
+                        diagnosticoOuCC = cc; 
+                        break;
+                    }
                 }
-            }
-            
-            // Soma no setor correto do Réu
-            if (somaReuPorCC[diagnosticoOuCC] !== undefined) {
-              somaReuPorCC[diagnosticoOuCC] += valorNum;
+                if (somaReuPorCC[diagnosticoOuCC] !== undefined) {
+                    somaReuPorCC[diagnosticoOuCC] += valorNum;
+                }
             }
         } else {
             diagnosticoOuCC = polo === 'NAN' ? 'NPJ NAO ENCONTRADO' : `POLO DESCONHECIDO: ${polo}`;
+            if (isBonus) {
+                somaBonusInteressado += valorNum;
+            } else {
+                somaInteressadoResto += valorNum;
+            }
         }
 
         targetSheet.addRow({
@@ -316,6 +336,7 @@ export default function HonorariosBB() {
         });
       });
 
+      // Estilização das planilhas de dados
       [sheetAutor, sheetReu, sheetPendentes].forEach(sheet => {
         sheet.getRow(1).eachCell(cell => {
           cell.fill = { type: 'pattern', pattern:'solid', fgColor:{argb:'002060'} };
@@ -328,24 +349,38 @@ export default function HonorariosBB() {
       // --- ABA RESUMO DETALHADA ---
       const sheetResumo = workbook.addWorksheet('Resumo');
       sheetResumo.columns = [
-          { header: 'Setor / Categoria', key: 'cat', width: 45 },
+          { header: 'Setor / Categoria', key: 'cat', width: 50 },
           { header: 'Valor Total', key: 'val', width: 25 }
       ];
       
-      // Adiciona total do Autor
+      // 1. Honorários Normais
       sheetResumo.addRow({ cat: 'Polo Ativo (AUTOR)', val: somaAutor });
       
-      // Adiciona detalhamento do Réu por Centro de Custo
-      let somaTotalReu = 0;
+      let somaTotalReuNorm = 0;
       for (const [cc, valor] of Object.entries(somaReuPorCC)) {
         if (valor > 0 || cc !== 'Outros Eventos (Réu)') {
           sheetResumo.addRow({ cat: `Polo Passivo (RÉU) — ${cc}`, val: valor });
-          somaTotalReu += valor;
+          somaTotalReuNorm += valor;
         }
       }
+
+      if (somaInteressadoResto > 0) {
+        sheetResumo.addRow({ cat: 'Polo Desconhecido (INTERESSADO)', val: somaInteressadoResto });
+      }
+
+      // 2. Linhas Separadoras do Bônus (se houver valores)
+      if (somaBonusAutor > 0 || somaBonusReu > 0 || somaBonusInteressado > 0) {
+          const rowEspacador = sheetResumo.addRow({ cat: '--- MOVIMENTAÇÕES PONTUAIS (BÔNUS) ---', val: null });
+          rowEspacador.font = { italic: true, color: { argb: '777777' } };
+
+          if (somaBonusAutor > 0) sheetResumo.addRow({ cat: 'BÔNUS - SATISFAÇÃO (AUTOR)', val: somaBonusAutor });
+          if (somaBonusReu > 0) sheetResumo.addRow({ cat: 'BÔNUS - SATISFAÇÃO (RÉU)', val: somaBonusReu });
+          if (somaBonusInteressado > 0) sheetResumo.addRow({ cat: 'BÔNUS - SATISFAÇÃO (INTERESSADO)', val: somaBonusInteressado });
+      }
       
-      // Total Geral
-      const rowTotal = sheetResumo.addRow({ cat: 'Total Geral', val: somaAutor + somaTotalReu });
+      // 3. Total Geral
+      const totalGeral = somaAutor + somaTotalReuNorm + somaInteressadoResto + somaBonusAutor + somaBonusReu + somaBonusInteressado;
+      const rowTotal = sheetResumo.addRow({ cat: 'Total Geral', val: totalGeral });
       rowTotal.fill = { type: 'pattern', pattern:'solid', fgColor:{argb:'92D050'} };
       rowTotal.font = { bold: true };
 
