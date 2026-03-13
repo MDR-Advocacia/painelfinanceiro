@@ -1,12 +1,13 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { useApp } from "@/contexts/AppContext";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { NumberField } from "@/components/NumberField";
 import { PeriodSelector } from "@/components/PeriodSelector";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
-import { Target, Calendar, Calculator, Save, Plus, Trash2, Building, Users, Receipt } from "lucide-react";
+import { Target, Calendar, Save, Plus, Trash2, Building, Users, Receipt, Copy } from "lucide-react";
 import { formatCurrency } from "@/utils/calculations";
+import { toast } from "sonner";
 
 // Tipagem local para os itens dinâmicos
 interface CustoDinamico {
@@ -16,21 +17,53 @@ interface CustoDinamico {
 }
 
 export function StrategicConfig() {
-  const { periodoAtivo, setPeriodoAtivo, currentVpdValor, updateVpdValor } = useApp();
+  const { periodoAtivo, setPeriodoAtivo, currentVpdValor, updateVpdValor, vpdConfigs } = useApp();
 
-  // 1. DESPESAS BASE (Dinâmicas)
-  const [despesasBase, setDespesasBase] = useState<CustoDinamico[]>([
-    { id: '1', nome: 'Total para Planejamento Financeiro', valor: 374054.80 },
-    { id: '2', nome: 'Provisão Mensal de Impostos', valor: 0.00 },
-  ]);
+  // 1. DESPESAS BASE
+  const [despesasBase, setDespesasBase] = useState<CustoDinamico[]>([]);
 
-  // 2. PESSOAL DE APOIO (Dinâmico)
-  const [pessoalApoio, setPessoalApoio] = useState<CustoDinamico[]>([
-    { id: '3', nome: 'Total Pessoal ADM, DP, RH, TI, Marketing, Recepção, ASG', valor: 46330.00 },
-  ]);
+  // 2. PESSOAL DE APOIO
+  const [pessoalApoio, setPessoalApoio] = useState<CustoDinamico[]>([]);
 
   // 3. HEADCOUNT
-  const [headcountGlobal, setHeadcountGlobal] = useState(170);
+  const [headcountGlobal, setHeadcountGlobal] = useState(0);
+
+  // --- SINCRONIZAÇÃO E CLONAGEM DO BANCO DE DADOS ---
+  const configAtual = vpdConfigs.find(v => v.periodo === periodoAtivo);
+  
+  // Verifica se existe algum mês anterior no banco para habilitar o botão
+  const hasPreviousData = vpdConfigs.some(v => v.periodo < periodoAtivo && v.despesasBase && v.despesasBase.length > 0);
+
+  useEffect(() => {
+    if (configAtual && configAtual.despesasBase && configAtual.despesasBase.length > 0) {
+      // 1. Se o mês atual JÁ TEM dados salvos, exibe eles com os valores preenchidos
+      setDespesasBase(configAtual.despesasBase);
+      setPessoalApoio(configAtual.pessoalApoio || []);
+      setHeadcountGlobal(configAtual.headcount || 0);
+    } else {
+      // 2. PADRÃO: Se não tem dados neste mês, inicia 100% vazio e zerado
+      setDespesasBase([]);
+      setPessoalApoio([]);
+      setHeadcountGlobal(0);
+    }
+  }, [periodoAtivo, configAtual]);
+
+  // --- FUNÇÃO DE CLONAGEM MANUAL ---
+  const handleCloneFromPrevious = () => {
+    const sortedConfigs = [...vpdConfigs].sort((a, b) => a.periodo.localeCompare(b.periodo));
+    const prevConfigs = sortedConfigs.filter(v => v.periodo < periodoAtivo && v.despesasBase && v.despesasBase.length > 0);
+    const lastConfig = prevConfigs.length > 0 ? prevConfigs[prevConfigs.length - 1] : null;
+
+    if (lastConfig && lastConfig.despesasBase) {
+      // Clona dados do mês anterior
+      setDespesasBase(lastConfig.despesasBase.map((d: any) => ({ ...d, id: crypto.randomUUID() })));
+      setPessoalApoio((lastConfig.pessoalApoio || []).map((a: any) => ({ ...a, id: crypto.randomUUID() })));
+      setHeadcountGlobal(lastConfig.headcount || 0);
+      toast.success(`Dados clonados de ${lastConfig.periodo} com sucesso! Ajuste os valores e clique em salvar.`);
+    } else {
+      toast.error("Nenhum mês anterior com dados encontrado para clonar.");
+    }
+  };
 
   // --- MOTOR DE CÁLCULO ---
   const totalDespesasBase = despesasBase.reduce((acc, curr) => acc + curr.valor, 0);
@@ -42,7 +75,7 @@ export function StrategicConfig() {
 
   // --- FUNÇÕES DE MANIPULAÇÃO DAS LISTAS ---
   const addDespesa = (tipo: 'base' | 'apoio') => {
-    const novoItem = { id: crypto.randomUUID(), nome: 'Nova Despesa', valor: 0 };
+    const novoItem = { id: crypto.randomUUID(), nome: '', valor: 0 };
     if (tipo === 'base') setDespesasBase([...despesasBase, novoItem]);
     else setPessoalApoio([...pessoalApoio, novoItem]);
   };
@@ -61,7 +94,8 @@ export function StrategicConfig() {
   };
 
   const handleAplicarVpd = () => {
-    updateVpdValor(periodoAtivo, vpdCalculado);
+    // Envia tudo para o AppContext
+    updateVpdValor(periodoAtivo, vpdCalculado, headcountGlobal, despesasBase, pessoalApoio);
   };
 
   return (
@@ -71,17 +105,31 @@ export function StrategicConfig() {
           <h2 className="font-heading text-2xl font-bold text-foreground">Construtor Estratégico de VPD</h2>
           <p className="text-sm text-muted-foreground mt-1">Configure detalhadamente as variáveis de despesa do escritório.</p>
         </div>
-        <div className="flex items-center gap-2 bg-muted/50 rounded-lg px-3 py-1.5 border border-border">
-          <Calendar className="w-4 h-4 text-muted-foreground" />
-          <PeriodSelector value={periodoAtivo} onChange={setPeriodoAtivo} />
+        
+        <div className="flex items-center gap-2 flex-wrap">
+          {/* Botão de clonar só aparece se as listas estiverem vazias */}
+          {despesasBase.length === 0 && pessoalApoio.length === 0 && (
+            <Button 
+              variant="outline" 
+              onClick={handleCloneFromPrevious}
+              disabled={!hasPreviousData}
+              className="gap-2 h-9 text-sm"
+            >
+              <Copy className="w-4 h-4" />
+              Clonar Mês Anterior
+            </Button>
+          )}
+
+          <div className="flex items-center gap-2 bg-muted/50 rounded-lg px-3 py-1.5 border border-border">
+            <Calendar className="w-4 h-4 text-muted-foreground" />
+            <PeriodSelector value={periodoAtivo} onChange={setPeriodoAtivo} />
+          </div>
         </div>
       </div>
 
       <div className="grid lg:grid-cols-12 gap-6">
-        {/* COLUNA ESQUERDA: O Construtor (Inputs Dinâmicos) */}
         <div className="lg:col-span-7 space-y-6">
           
-          {/* Seção 1: Despesas Base */}
           <Card className="border-primary/20 shadow-sm">
             <CardHeader className="bg-muted/30 border-b pb-4 flex flex-row items-center justify-between">
               <div>
@@ -93,12 +141,16 @@ export function StrategicConfig() {
               </Button>
             </CardHeader>
             <CardContent className="pt-4 space-y-3">
+              {despesasBase.length === 0 && (
+                <p className="text-sm text-muted-foreground text-center py-2">Nenhuma despesa base adicionada.</p>
+              )}
               {despesasBase.map((item) => (
                 <div key={item.id} className="flex gap-2 items-start">
                   <div className="flex-1">
                     <Input 
                       value={item.nome} 
                       onChange={(e) => updateDespesa('base', item.id, 'nome', e.target.value)}
+                      placeholder="Ex: Aluguel"
                       className="h-9 text-sm"
                     />
                   </div>
@@ -116,7 +168,6 @@ export function StrategicConfig() {
             </CardContent>
           </Card>
 
-          {/* Seção 2: Pessoal de Apoio */}
           <Card className="border-primary/20 shadow-sm">
             <CardHeader className="bg-muted/30 border-b pb-4 flex flex-row items-center justify-between">
               <div>
@@ -128,12 +179,16 @@ export function StrategicConfig() {
               </Button>
             </CardHeader>
             <CardContent className="pt-4 space-y-3">
+              {pessoalApoio.length === 0 && (
+                <p className="text-sm text-muted-foreground text-center py-2">Nenhum pessoal de apoio adicionado.</p>
+              )}
               {pessoalApoio.map((item) => (
                 <div key={item.id} className="flex gap-2 items-start">
                   <div className="flex-1">
                     <Input 
                       value={item.nome} 
                       onChange={(e) => updateDespesa('apoio', item.id, 'nome', e.target.value)}
+                      placeholder="Ex: Equipe de TI"
                       className="h-9 text-sm"
                     />
                   </div>
@@ -151,7 +206,6 @@ export function StrategicConfig() {
             </CardContent>
           </Card>
 
-          {/* Seção 3: Headcount */}
           <Card className="border-primary/20 shadow-sm">
             <CardContent className="pt-6 flex items-center justify-between gap-4">
               <div className="flex-1">
@@ -166,7 +220,6 @@ export function StrategicConfig() {
 
         </div>
 
-        {/* COLUNA DIREITA: O Recibo / Resumo Analítico */}
         <div className="lg:col-span-5">
           <Card className="bg-sidebar border-sidebar-border shadow-xl sticky top-6">
             <CardHeader className="border-b border-sidebar-border/50 pb-4">
@@ -180,7 +233,6 @@ export function StrategicConfig() {
             
             <CardContent className="pt-6 space-y-5">
               
-              {/* Espelho exato da Tabela do Documento */}
               <div className="space-y-3 text-sm">
                 <div className="flex justify-between items-center text-sidebar-foreground/80">
                   <span>1. Despesas Base</span>
@@ -229,10 +281,10 @@ export function StrategicConfig() {
                 <Button 
                   onClick={handleAplicarVpd} 
                   className="w-full gap-2 font-bold py-6 text-base shadow-lg hover:scale-[1.02] transition-transform"
-                  disabled={currentVpdValor === vpdCalculado}
+                  disabled={headcountGlobal === 0}
                 >
                   <Save className="w-5 h-5" />
-                  {currentVpdValor === vpdCalculado ? "VPD Atualizado" : "Salvar VPD no Período"}
+                  Salvar VPD no Período
                 </Button>
               </div>
 

@@ -65,6 +65,9 @@ export interface VpdConfig {
   id: string;
   periodo: string; // key: "2026-02"
   valor: number;   // Sugestão inicial: R$ 2.472,85
+  headcount?: number;
+  despesasBase?: any[];
+  pessoalApoio?: any[];
 }
 
 /**
