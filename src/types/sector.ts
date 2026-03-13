@@ -29,7 +29,8 @@ export interface Faturamento {
   aliquotaISS: number;
   modoISS: ModoISS;
   profissionaisISS: number;
-  premiacaoTotal: number; // soma total da premiação mensal do centro de custo
+  premiacaoTotal: number;
+  diversosTotal: number; 
 }
 
 export interface PeriodoData {
@@ -64,6 +65,9 @@ export interface VpdConfig {
   id: string;
   periodo: string; // key: "2026-02"
   valor: number;   // Sugestão inicial: R$ 2.472,85
+  headcount?: number;
+  despesasBase?: any[];
+  pessoalApoio?: any[];
 }
 
 /**
@@ -74,6 +78,9 @@ export interface ResumoSetor {
   custosPorCargo: Record<string, number>;
   totalCustoPessoal: number;
   totalDespesasEventuais: number;
+  premiacaoTotal: number;
+  diversosTotal: number;
+  totalVariaveis: number;
   faturamentoBruto: number;
   impostos: ImpostosCalculados;
   cargaTributaria: number;
@@ -99,7 +106,7 @@ const defaultEstagiario = (): Estagiarios => ({
 });
 
 const defaultFaturamento = (): Faturamento => ({
-  bruto: 0, descontos: 0, aliquotaLucroPresumido: 0.32, aliquotaISS: 0.02, modoISS: 'sociedade', profissionaisISS: 0, premiacaoTotal: 0,
+  bruto: 0, descontos: 0, aliquotaLucroPresumido: 0.32, aliquotaISS: 0.02, modoISS: 'sociedade', profissionaisISS: 0, premiacaoTotal: 0, diversosTotal: 0,
 });
 
 export function createDefaultPessoal(tipo: TipoSetor): Pessoal {

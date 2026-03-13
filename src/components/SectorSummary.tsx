@@ -25,7 +25,7 @@ export function SectorSummary() {
         </h3>
         
         {/* Transformamos o grid em 5 colunas para mostrar a "Cascata" completa */}
-        <div className="grid grid-cols-2 md:grid-cols-5 gap-4">
+        <div className="grid grid-cols-2 md:grid-cols-6 gap-4">
           <Metric 
             label="Faturamento Bruto" 
             value={formatCurrency(r.faturamentoBruto)} 
@@ -51,6 +51,12 @@ export function SectorSummary() {
             value={formatCurrency(r.custoVPD)} 
             sub={`Rateio Estrutural`}
             color="text-destructive"
+          />
+
+          <Metric 
+            label="Variáveis do C. Custo" 
+            value={formatCurrency(r.totalVariaveis)} 
+            color="text-destructive" 
           />
           
           {/* O Resultado Operacional Final (Lucro Líquido) com destaque */}

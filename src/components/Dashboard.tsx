@@ -5,6 +5,8 @@ import { Badge } from "@/components/ui/badge";
 import { PeriodSelector } from "@/components/PeriodSelector";
 import { MONTH_NAMES } from "@/types/sector";
 import type { ViewMode } from "@/types/sector";
+import { useState } from "react";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import {
   Table, TableBody, TableCell, TableHead, TableHeader, TableRow,
 } from "@/components/ui/table";
@@ -12,7 +14,7 @@ import {
   BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip as RTooltip,
   ResponsiveContainer, PieChart, Pie, Cell, Legend,
 } from "recharts";
-import { DollarSign, TrendingUp, Users, AlertTriangle, Building2 } from "lucide-react";
+import { DollarSign, TrendingUp, Users, AlertTriangle, Building2, Award } from "lucide-react"; // <-- Adicionado o ícone Award
 
 const CHART_COLORS = ["#1F4E78", "#27AE60", "#F39C12", "#E74C3C", "#8B5CF6", "#06B6D4"];
 
@@ -24,22 +26,43 @@ const VIEW_MODE_LABELS: Record<ViewMode, string> = {
 };
 
 export function Dashboard() {
-  const { setores, setActiveSetor, periodoAtivo, setPeriodoAtivo, viewMode, setViewMode } = useApp();
+  const { setores, sedes, setActiveSetor, periodoAtivo, setPeriodoAtivo, viewMode, setViewMode, currentVpdValor } = useApp();
+  
+  // Estados dos filtros
+  const [filtroSede, setFiltroSede] = useState<string>("todas");
+  const [filtroSetor, setFiltroSetor] = useState<string>("todos");
+  
+  // 1. Aplica os filtros na lista de setores ANTES de calcular os resumos
+  const setoresFiltrados = setores.filter(s => {
+    const passaSede = filtroSede === "todas" || s.sedeId === filtroSede;
+    const passaSetor = filtroSetor === "todos" || s.id === filtroSetor;
+    return passaSede && passaSetor;
+  });
 
-  const resumos = setores.map(s => ({
+  // 2. Gera os resumos usando apenas os setores filtrados
+  const resumos = setoresFiltrados.map(s => ({
     setor: s,
-    resumo: getSetorResumoForPeriod(s, periodoAtivo, viewMode),
+    resumo: getSetorResumoForPeriod(s, periodoAtivo, viewMode, currentVpdValor),
   }));
 
+  // 3. Cálculos Originais
   const totalFaturamento = resumos.reduce((a, r) => a + r.resumo.faturamentoBruto, 0);
   const totalImpostos = resumos.reduce((a, r) => a + r.resumo.impostos.total, 0);
   const totalCustos = resumos.reduce((a, r) => a + r.resumo.totalCustoPessoal, 0);
-  const margemConsolidada = totalFaturamento - totalImpostos - totalCustos;
-  const margemPercent = totalFaturamento > 0 ? (margemConsolidada / totalFaturamento) * 100 : 0;
-  const totalProfissionais = setores.reduce((a, s) => {
+  const lucroLiquidoConsolidado = resumos.reduce((a, r) => a + r.resumo.lucroLiquidoReal, 0);
+  const margemLiquidaPercent = totalFaturamento > 0 ? (lucroLiquidoConsolidado / totalFaturamento) * 100 : 0;
+  
+  // Obs: Ajustado para contar os profissionais apenas dos setores filtrados
+  const totalProfissionais = setoresFiltrados.reduce((a, s) => {
     const data = s.periodos[periodoAtivo];
     return a + (data ? getTotalProfissionais(data.pessoal as any) : 0);
   }, 0);
+
+  // 4. Novos Cálculos (Lucro Bruto, VPD, Variáveis)
+  const totalVariaveis = resumos.reduce((a, r) => a + r.resumo.totalVariaveis, 0);
+  const totalVPD = resumos.reduce((a, r) => a + r.resumo.custoVPD, 0);
+  const lucroBrutoConsolidado = resumos.reduce((a, r) => a + r.resumo.margemBruta, 0);
+  const margemBrutaPercent = totalFaturamento > 0 ? (lucroBrutoConsolidado / totalFaturamento) * 100 : 0;
 
   const [year, month] = periodoAtivo.split('-').map(Number);
   const periodLabel = viewMode === 'mensal' ? `${MONTH_NAMES[month - 1]} ${year}`
@@ -82,6 +105,36 @@ export function Dashboard() {
               </button>
             ))}
           </div>
+
+          {/* Novos Filtros de Sede e Setor */}
+          <div className="flex gap-2 ml-2">
+            <Select value={filtroSede} onValueChange={(v) => { setFiltroSede(v); setFiltroSetor('todos'); }}>
+              <SelectTrigger className="w-[140px] h-9 text-xs">
+                <SelectValue placeholder="Todas as Sedes" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="todas">Todas as Sedes</SelectItem>
+                {sedes?.map(sede => (
+                  <SelectItem key={sede.id} value={sede.id}>{sede.nome}</SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+
+            <Select value={filtroSetor} onValueChange={setFiltroSetor}>
+              <SelectTrigger className="w-[140px] h-9 text-xs">
+                <SelectValue placeholder="Todos os Setores" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="todos">Todos os Setores</SelectItem>
+                {setores
+                  .filter(s => filtroSede === "todas" || s.sedeId === filtroSede)
+                  .map(s => (
+                  <SelectItem key={s.id} value={s.id}>{s.nome}</SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+
           <PeriodSelector value={periodoAtivo} onChange={setPeriodoAtivo} />
         </div>
       </div>
@@ -96,11 +149,16 @@ export function Dashboard() {
         </Card>
       ) : (
         <>
-          <div className="grid grid-cols-2 lg:grid-cols-5 gap-4">
+          {/* Grade alterada para 4 colunas em telas médias/grandes para comportar os 8 cards em 2 linhas */}
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
             <KPICard icon={DollarSign} label="Faturamento Total" value={formatCurrency(totalFaturamento)} />
             <KPICard icon={AlertTriangle} label="Total Impostos" value={formatCurrency(totalImpostos)} color="text-warning" />
-            <KPICard icon={Users} label="Custos de Pessoal" value={formatCurrency(totalCustos)} />
-            <KPICard icon={TrendingUp} label="Margem Bruta" value={formatCurrency(margemConsolidada)} sub={formatPercent(margemPercent)} color={margemConsolidada >= 0 ? 'text-success' : 'text-destructive'} />
+            <KPICard icon={Users} label="Custos de Pessoal" value={formatCurrency(totalCustos)} color="text-destructive" />
+            <KPICard icon={Award} label="Var. Centro de Custo" value={formatCurrency(totalVariaveis)} color="text-destructive" />
+            
+            <KPICard icon={DollarSign} label="Lucro Bruto" value={formatCurrency(lucroBrutoConsolidado)} sub={formatPercent(margemBrutaPercent)} color={lucroBrutoConsolidado >= 0 ? 'text-success' : 'text-destructive'} />
+            <KPICard icon={Building2} label="Despesas Ind. (VPD)" value={formatCurrency(totalVPD)} color="text-destructive" />
+            <KPICard icon={TrendingUp} label="Margem Líquida Real" value={formatCurrency(lucroLiquidoConsolidado)} sub={formatPercent(margemLiquidaPercent)} color={lucroLiquidoConsolidado >= 0 ? 'text-success' : 'text-destructive'} />
             <KPICard icon={Users} label="Total Profissionais" value={String(totalProfissionais)} />
           </div>
 
@@ -155,8 +213,8 @@ export function Dashboard() {
                       <TableHead className="text-xs text-right">Faturamento</TableHead>
                       <TableHead className="text-xs text-right">Impostos</TableHead>
                       <TableHead className="text-xs text-right">Custos Pessoal</TableHead>
-                      <TableHead className="text-xs text-right">Margem (R$)</TableHead>
-                      <TableHead className="text-xs text-right">Margem (%)</TableHead>
+                      <TableHead className="text-xs text-right">Margem Líquida (R$)</TableHead>
+                      <TableHead className="text-xs text-right">Margem Líquida (%)</TableHead>
                       <TableHead className="text-xs text-center">Status</TableHead>
                     </TableRow>
                   </TableHeader>
@@ -172,10 +230,10 @@ export function Dashboard() {
                         <TableCell className="text-right font-mono text-xs">{formatCurrency(resumo.faturamentoBruto)}</TableCell>
                         <TableCell className="text-right font-mono text-xs">{formatCurrency(resumo.impostos.total)}</TableCell>
                         <TableCell className="text-right font-mono text-xs">{formatCurrency(resumo.totalCustoPessoal)}</TableCell>
-                        <TableCell className={`text-right font-mono text-xs ${resumo.margemBruta >= 0 ? 'text-success' : 'text-destructive'}`}>
-                          {formatCurrency(resumo.margemBruta)}
+                        <TableCell className={`text-right font-mono text-xs ${resumo.lucroLiquidoReal >= 0 ? 'text-success' : 'text-destructive'}`}>
+                          {formatCurrency(resumo.lucroLiquidoReal)}
                         </TableCell>
-                        <TableCell className="text-right font-mono text-xs">{formatPercent(resumo.margemBrutaPercent)}</TableCell>
+                        <TableCell className="text-right font-mono text-xs">{formatPercent(resumo.margemLiquidaPercent)}</TableCell>
                         <TableCell className="text-center">
                           <Badge variant="outline" className={`text-[10px] ${getStatusColor(resumo.status)}`}>
                             {getStatusLabel(resumo.status)}

@@ -88,19 +88,21 @@ export function calcResumo(data: PeriodoData, vpdValor: number = 2472.85): Resum
   const fb = data.faturamento.bruto;
   const descontos = data.faturamento.descontos ?? 0;
   const premiacaoTotal = data.faturamento.premiacaoTotal ?? 0;
+  const diversosTotal = data.faturamento.diversosTotal ?? 0;
+  const totalVariaveis = premiacaoTotal + diversosTotal;
   const impostos = calcImpostos(data.faturamento);
   
   const cargaTributaria = fb > 0 ? (impostos.total / fb) * 100 : 0;
   const faturamentoLiquido = fb - impostos.total - descontos;
   
   // Margem Bruta (antes do rateio das despesas indiretas)
-  const margemBruta = faturamentoLiquido - totalCustoPessoal - premiacaoTotal - totalDespesasEventuais;
+  const margemBruta = faturamentoLiquido - totalCustoPessoal - totalVariaveis - totalDespesasEventuais;
   const margemBrutaPercent = fb > 0 ? (margemBruta / fb) * 100 : 0;
 
   // Resultado Operacional Final (ROF) - Lucro Líquido Real
   // Fórmula: Receita Líquida - Impostos - Custos Operacionais (Pessoal) - Despesas Operacionais (VPD)
   const custoVPD = headcount * vpdValor;
-  const lucroLiquidoReal = faturamentoLiquido - totalCustoPessoal - premiacaoTotal - totalDespesasEventuais - custoVPD;
+  const lucroLiquidoReal = faturamentoLiquido - totalCustoPessoal - totalVariaveis - totalDespesasEventuais - custoVPD;
   const margemLiquidaPercent = fb > 0 ? (lucroLiquidoReal / fb) * 100 : 0;
 
   let status: ResumoSetor['status'] = 'critico';
@@ -112,6 +114,9 @@ export function calcResumo(data: PeriodoData, vpdValor: number = 2472.85): Resum
   return {
     custosPorCargo,
     totalCustoPessoal,
+    premiacaoTotal,
+    diversosTotal,
+    totalVariaveis,
     totalDespesasEventuais,
     faturamentoBruto: fb,
     impostos,
@@ -142,6 +147,9 @@ export function aggregateResumos(resumos: ResumoSetor[]): ResumoSetor {
   let totalCustoPessoal = 0;
   let totalDespesasEventuais = 0;
   let faturamentoBruto = 0;
+  let premiacaoTotal = 0;
+  let diversosTotal = 0;
+  let totalVariaveis = 0;
   let totalImpostos = 0;
   let headcount = 0;
   let custoVPD = 0;
@@ -155,6 +163,9 @@ export function aggregateResumos(resumos: ResumoSetor[]): ResumoSetor {
     totalCustoPessoal += r.totalCustoPessoal;
     totalDespesasEventuais += r.totalDespesasEventuais;
     faturamentoBruto += r.faturamentoBruto;
+    premiacaoTotal += r.premiacaoTotal;
+    diversosTotal += r.diversosTotal;
+    totalVariaveis += r.totalVariaveis;
     totalImpostos += r.impostos.total;
     headcount += r.headcount;
     custoVPD += r.custoVPD;
@@ -183,7 +194,7 @@ export function aggregateResumos(resumos: ResumoSetor[]): ResumoSetor {
   };
 
   return {
-    custosPorCargo, totalCustoPessoal, totalDespesasEventuais, faturamentoBruto, impostos, 
+    custosPorCargo, totalCustoPessoal, totalDespesasEventuais, faturamentoBruto, premiacaoTotal, diversosTotal, totalVariaveis, impostos, 
     cargaTributaria: faturamentoBruto > 0 ? (totalImpostos / faturamentoBruto) * 100 : 0,
     faturamentoLiquido, margemBruta, margemBrutaPercent, status,
     headcount, custoVPD, lucroLiquidoReal, margemLiquidaPercent
@@ -192,7 +203,8 @@ export function aggregateResumos(resumos: ResumoSetor[]): ResumoSetor {
 
 function emptyResumo(): ResumoSetor {
   return {
-    custosPorCargo: {}, totalCustoPessoal: 0, totalDespesasEventuais: 0, faturamentoBruto: 0,
+    custosPorCargo: {}, totalCustoPessoal: 0, totalDespesasEventuais: 0, faturamentoBruto: 0, premiacaoTotal: 0,
+    diversosTotal: 0, totalVariaveis:0,
     impostos: { lucroPresumido: 0, irpj: 0, irpjAdicional: 0, csll: 0, pis: 0, cofins: 0, iss: 0, total: 0 },
     cargaTributaria: 0, faturamentoLiquido: 0, margemBruta: 0, margemBrutaPercent: 0, status: 'critico',
     headcount: 0, custoVPD: 0, lucroLiquidoReal: 0, margemLiquidaPercent: 0
