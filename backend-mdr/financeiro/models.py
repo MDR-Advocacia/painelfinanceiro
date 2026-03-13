@@ -10,7 +10,7 @@ class Sede(models.Model):
     updated_at = models.DateTimeField(auto_now=True)
 
     class Meta:
-        db_table = 'sedes' # Força o nome exato da tabela do backup
+        db_table = 'sedes'
 
     def __str__(self):
         return self.nome
@@ -25,7 +25,6 @@ class Setor(models.Model):
     user_id = models.UUIDField()
     nome = models.CharField(max_length=255)
     tipo = models.CharField(max_length=50, choices=TIPO_CHOICES)
-    # db_column='sede_id' garante que o Django crie a coluna com o nome exato do Supabase
     sede = models.ForeignKey(Sede, on_delete=models.SET_NULL, null=True, blank=True, db_column='sede_id')
     periodos = models.JSONField(default=dict, blank=True)
     created_at = models.DateTimeField(auto_now_add=True)
@@ -42,6 +41,12 @@ class VpdConfig(models.Model):
     user_id = models.UUIDField()
     periodo = models.CharField(max_length=7, unique=True)
     valor = models.FloatField()
+    
+    # NOVOS CAMPOS PARA MEMÓRIA DE CÁLCULO
+    headcount = models.IntegerField(null=True, blank=True)
+    despesasBase = models.JSONField(null=True, blank=True)
+    pessoalApoio = models.JSONField(null=True, blank=True)
+
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 
@@ -52,7 +57,6 @@ class VpdConfig(models.Model):
         return f"VPD {self.periodo}: R$ {self.valor}"
 
 class BaseReferencia(models.Model):
-    # A tabela usada no módulo Honorários BB para cruzar NPJ com o Polo
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     npj_original = models.TextField(null=True, blank=True)
     npj_limpo = models.TextField(unique=True)

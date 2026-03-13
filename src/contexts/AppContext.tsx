@@ -40,7 +40,8 @@ interface AppContextType extends AppState {
   hasUnsavedChanges: boolean;
   isSaving: boolean;
   saveData: () => Promise<void>;
-  updateVpdValor: (periodo: string, valor: number) => void;
+  // Atualizado para receber os novos campos
+  updateVpdValor: (periodo: string, valor: number, headcount: number, despesasBase: any[], pessoalApoio: any[]) => void;
   currentVpdValor: number;
 }
 
@@ -118,8 +119,14 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
         }
 
         if (Array.isArray(vpdRes)) {
+          // Atualizado para puxar do banco a memória de cálculo
           const vpdData = vpdRes.map((r: any) => ({
-            id: r.id, periodo: r.periodo, valor: r.valor
+            id: r.id, 
+            periodo: r.periodo, 
+            valor: r.valor,
+            headcount: r.headcount,
+            despesasBase: r.despesasBase,
+            pessoalApoio: r.pessoalApoio
           }));
           setVpdConfigs(vpdData);
           persistedVpdIdsRef.current = new Set(vpdData.map(v => v.id));
@@ -141,7 +148,6 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     if (!user || !initialLoadDone.current) return;
     setIsSaving(true);
     
-    // Lógica para Criar (POST) ou Atualizar (PUT) os dados na API
     const requestOrThrow = async (url: string, options?: RequestInit) => {
       const res = await fetch(url, options);
       if (!res.ok) {
@@ -173,7 +179,6 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
           });
           persistedRef.current.add(item.id);
         } catch (err) {
-          // Se o POST falhar por já existir, tentamos PUT para garantir consistência.
           await requestOrThrow(`${API_URL}/${endpoint}/${item.id}/`, {
             method: 'PUT',
             headers: { 'Content-Type': 'application/json' },
@@ -191,8 +196,14 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       const sedeRows = sedes.map(s => ({
         id: s.id, nome: s.nome, periodos: s.periodos
       }));
+      // Atualizado para enviar os novos campos ao backend
       const vpdRows = vpdConfigs.map(v => ({
-        id: v.id, periodo: v.periodo, valor: v.valor
+        id: v.id, 
+        periodo: v.periodo, 
+        valor: v.valor,
+        headcount: v.headcount,
+        despesasBase: v.despesasBase,
+        pessoalApoio: v.pessoalApoio
       }));
 
       if (!API_URL) throw new Error('API_URL não configurada');
@@ -282,7 +293,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
           [periodo]: {
             pessoal: updates.pessoal ?? current.pessoal,
             faturamento: updates.faturamento ?? current.faturamento,
-            despesasEventuais: updates.despesasEventuais ?? current.despesasEventuais ?? [] // <-- AQUI GARANTIMOS OS GASTOS EVENTUAIS
+            despesasEventuais: updates.despesasEventuais ?? current.despesasEventuais ?? []
           }
         }
       };
@@ -314,11 +325,12 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     markUnsaved();
   }, [markUnsaved]);
 
-  const updateVpdValor = useCallback((periodo: string, valor: number) => {
+  // Atualizado para persistir todos os dados da memória de cálculo do VPD
+  const updateVpdValor = useCallback((periodo: string, valor: number, headcount: number, despesasBase: any[], pessoalApoio: any[]) => {
     setVpdConfigs(prev => {
       const exists = prev.find(v => v.periodo === periodo);
-      if (exists) return prev.map(v => v.periodo === periodo ? { ...v, valor } : v);
-      return [...prev, { id: crypto.randomUUID(), periodo, valor }];
+      if (exists) return prev.map(v => v.periodo === periodo ? { ...v, valor, headcount, despesasBase, pessoalApoio } : v);
+      return [...prev, { id: crypto.randomUUID(), periodo, valor, headcount, despesasBase, pessoalApoio }];
     });
     markUnsaved();
   }, [markUnsaved]);
