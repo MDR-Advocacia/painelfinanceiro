@@ -85,16 +85,24 @@ export function BillingForm() {
         <CardHeader className="pb-3">
           <CardTitle className="text-sm font-heading flex items-center gap-2">
             <Award className="w-4 h-4 text-primary" />
-            Premiação do Centro de Custo
+            Variáveis do Centro de Custo
           </CardTitle>
         </CardHeader>
         <CardContent>
-          <NumberField
-            label="Total Premiação Mensal"
-            value={fat.premiacaoTotal ?? 0}
-            onChange={v => updateFaturamento('premiacaoTotal', v)}
-            tooltip="Soma total das premiações individuais pagas mensalmente neste centro de custo"
-          />
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+            <NumberField
+              label="Premiação Mensal"
+              value={fat.premiacaoTotal ?? 0}
+              onChange={v => updateFaturamento('premiacaoTotal', v)}
+              tooltip="Soma total das premiações individuais pagas mensalmente neste centro de custo"
+            />
+            <NumberField
+              label="Diversos"
+              value={fat.diversosTotal ?? 0}
+              onChange={v => updateFaturamento('diversosTotal', v)}
+              tooltip="Outros custos variáveis do centro de custo"
+            />
+          </div>
         </CardContent>
       </Card>
 
