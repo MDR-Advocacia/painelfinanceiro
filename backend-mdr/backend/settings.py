@@ -137,8 +137,17 @@ CORS_ALLOW_ALL_ORIGINS = True
 
 REST_FRAMEWORK = {
     'DEFAULT_AUTHENTICATION_CLASSES': (
+        # DRF Token (emitido por /api/login/ e /api/sso/). TokenAuthentication
+        # rejeita usuário inativo -> revogar acesso invalida o token na hora.
+        'rest_framework.authentication.TokenAuthentication',
         'rest_framework_simplejwt.authentication.JWTAuthentication',
-    )
+    ),
+    # DEFAULT-DENY: toda a API exige usuário autenticado E ativo (liberado).
+    # Os endpoints de login (/api/login/, /api/token/) e o /api/sso/ têm
+    # permissão própria (AllowAny), então seguem abertos pra autenticar.
+    'DEFAULT_PERMISSION_CLASSES': (
+        'rest_framework.permissions.IsAuthenticated',
+    ),
 }
 
 # --- SSO Microsoft Entra ID (via oauth2-proxy — mesmo approach do Flow/DOC) ---
@@ -152,3 +161,10 @@ SSO_ENABLED = os.getenv('SSO_ENABLED', 'False') == 'True'
 SSO_VALIDATE_URL = os.getenv('SSO_VALIDATE_URL', '')  # https://auth.dunatecnologia.com/oauth2/auth
 SSO_AUTHORIZE_BASE = os.getenv('SSO_AUTHORIZE_BASE', 'https://auth.dunatecnologia.com')
 SSO_EMAIL_HEADER = os.getenv('SSO_EMAIL_HEADER', 'X-Auth-Request-Email')
+
+# E-mails que entram já LIBERADOS e como ADMIN (is_staff) no login SSO — os donos
+# do painel. Separados por vírgula, SEM aspas no Coolify. Ex.:
+# SSO_ADMIN_EMAILS=jonilsonvilela@mdradvocacia.com,ti@mdradvocacia.com
+SSO_ADMIN_EMAILS = [
+    e.strip().lower() for e in os.getenv('SSO_ADMIN_EMAILS', '').split(',') if e.strip()
+]

@@ -1,12 +1,14 @@
 from rest_framework import viewsets
 from .models import Sede, Setor, VpdConfig, BaseReferencia
 from .serializers import SedeSerializer, SetorSerializer, VpdConfigSerializer, BaseReferenciaSerializer
+from .sso_views import LEGACY_DATA_USER_ID
 from rest_framework.authtoken.views import ObtainAuthToken
 from rest_framework.authtoken.models import Token
+from rest_framework.permissions import IsAdminUser
 from rest_framework.response import Response
 from rest_framework import status
 from rest_framework.decorators import action
-from rest_framework.response import Response
+from django.contrib.auth.models import User
 
 class SedeViewSet(viewsets.ModelViewSet):
     queryset = Sede.objects.all()
@@ -55,6 +57,9 @@ class BaseReferenciaViewSet(viewsets.ModelViewSet):
 
 class CustomAuthToken(ObtainAuthToken):
     def post(self, request, *args, **kwargs):
+        # O AuthTokenSerializer usa authenticate(): usuário inativo (pendente/
+        # revogado) NÃO autentica — Django bloqueia. Login por senha já respeita
+        # o portão de acesso sem código extra.
         serializer = self.serializer_class(data=request.data, context={'request': request})
         serializer.is_valid(raise_exception=True)
         user = serializer.validated_data['user']
@@ -62,8 +67,58 @@ class CustomAuthToken(ObtainAuthToken):
         return Response({
             'token': token.key,
             'user': {
-                # Retornamos o UUID antigo para manter os seus Setores vinculados!
-                'id': '5d8feb1f-24f5-4341-a05b-9f7b80712096',
-                'email': user.email or user.username
+                # UUID legado do Supabase — mantém todos os dados vinculados.
+                'id': LEGACY_DATA_USER_ID,
+                'email': user.email or user.username,
+                'is_staff': user.is_staff,
             }
         })
+
+
+def _user_row(u):
+    nome = f"{u.first_name} {u.last_name}".strip() or u.username
+    return {
+        'id': u.id,
+        'email': u.email or u.username,
+        'username': u.username,
+        'nome': nome,
+        'is_active': u.is_active,
+        'is_staff': u.is_staff,
+        'last_login': u.last_login.isoformat() if u.last_login else None,
+        'date_joined': u.date_joined.isoformat() if u.date_joined else None,
+    }
+
+
+class UserAdminViewSet(viewsets.ViewSet):
+    """Gestão de acesso ao painel — SOMENTE admin (is_staff).
+
+    GET  /api/users/        lista todos os usuários (status + admin).
+    PATCH /api/users/<pk>/  libera/revoga acesso (is_active) ou admin (is_staff).
+    Trava: o admin não pode revogar/rebaixar a própria conta (evita lockout).
+    """
+    permission_classes = [IsAdminUser]
+
+    def list(self, request):
+        users = User.objects.all().order_by('-is_staff', '-is_active', 'email', 'username')
+        return Response([_user_row(u) for u in users])
+
+    def partial_update(self, request, pk=None):
+        user = User.objects.filter(pk=pk).first()
+        if user is None:
+            return Response({'detail': 'Usuário não encontrado.'}, status=status.HTTP_404_NOT_FOUND)
+
+        is_active = request.data.get('is_active', None)
+        is_staff = request.data.get('is_staff', None)
+
+        if user.pk == request.user.pk and (is_active is False or is_staff is False):
+            return Response(
+                {'detail': 'Você não pode revogar o próprio acesso.'},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        if is_active is not None:
+            user.is_active = bool(is_active)
+        if is_staff is not None:
+            user.is_staff = bool(is_staff)
+        user.save()
+        return Response(_user_row(user))

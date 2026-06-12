@@ -7,13 +7,14 @@ import { AppProvider } from "@/contexts/AppContext";
 import { useAuth } from "@/hooks/useAuth";
 import Index from "./pages/Index";
 import Login from "./pages/Login";
+import Aguardando from "./pages/Aguardando";
 import UserManagement from "./pages/UserManagement";
 import NotFound from "./pages/NotFound";
 
 const queryClient = new QueryClient();
 
 function ProtectedRoute({ children }: { children: React.ReactNode }) {
-  const { user, loading } = useAuth();
+  const { user, loading, pending } = useAuth();
   if (loading) {
     return (
       <div className="min-h-screen flex items-center justify-center bg-secondary">
@@ -21,12 +22,13 @@ function ProtectedRoute({ children }: { children: React.ReactNode }) {
       </div>
     );
   }
+  if (pending) return <Navigate to="/aguardando" replace />;
   if (!user) return <Navigate to="/login" replace />;
   return <>{children}</>;
 }
 
 function AdminRoute({ children }: { children: React.ReactNode }) {
-  const { user, loading, isAdmin } = useAuth();
+  const { user, loading, pending, isAdmin } = useAuth();
   if (loading) {
     return (
       <div className="min-h-screen flex items-center justify-center bg-secondary">
@@ -34,13 +36,14 @@ function AdminRoute({ children }: { children: React.ReactNode }) {
       </div>
     );
   }
+  if (pending) return <Navigate to="/aguardando" replace />;
   if (!user) return <Navigate to="/login" replace />;
   if (!isAdmin) return <Navigate to="/" replace />;
   return <>{children}</>;
 }
 
 function LoginRoute() {
-  const { user, loading } = useAuth();
+  const { user, loading, pending } = useAuth();
   if (loading) {
     return (
       <div className="min-h-screen flex items-center justify-center bg-[hsl(207,59%,15%)]">
@@ -48,6 +51,7 @@ function LoginRoute() {
       </div>
     );
   }
+  if (pending) return <Navigate to="/aguardando" replace />;
   if (user) return <Navigate to="/" replace />;
   return <Login />;
 }
@@ -60,6 +64,7 @@ const App = () => (
       <BrowserRouter>
         <Routes>
           <Route path="/login" element={<LoginRoute />} />
+          <Route path="/aguardando" element={<Aguardando />} />
           <Route
             path="/"
             element={

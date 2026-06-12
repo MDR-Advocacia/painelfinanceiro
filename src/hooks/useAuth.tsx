@@ -4,6 +4,7 @@ import { useState, useEffect } from "react";
 export interface User {
   id: string;
   email: string;
+  is_staff?: boolean;
 }
 
 export interface Session {
@@ -14,11 +15,29 @@ export interface Session {
 export const API_URL = import.meta.env.VITE_API_URL;
 export const ADMIN_URL = import.meta.env.VITE_ADMIN_URL || API_URL?.replace('/api', '/admin');
 
+// Header de autenticação pra TODA chamada à API protegida (default-deny no
+// backend). O token é o DRF Token salvo no login/SSO. Sem token → sem header
+// → o backend responde 401.
+export function authHeaders(): Record<string, string> {
+  const t = localStorage.getItem('django_token');
+  return t ? { Authorization: `Token ${t}` } : {};
+}
+
+// 401 da API = sessão expirada ou acesso revogado pelo admin. Limpa o token e
+// volta pro /login, que re-checa o SSO e cai na tela de pendência se for o caso.
+export function clearSessionAndReload() {
+  localStorage.removeItem('django_token');
+  localStorage.removeItem('django_user');
+  window.location.href = '/login';
+}
+
 export function useAuth() {
   const [user, setUser] = useState<User | null>(null);
   const [session, setSession] = useState<Session | null>(null);
   const [loading, setLoading] = useState(true);
   const [isAdmin, setIsAdmin] = useState(false);
+  // Conta existe mas ainda NÃO foi liberada pelo admin (SSO retornou 403).
+  const [pending, setPending] = useState(false);
 
   useEffect(() => {
     // 1. Verifica no cache do navegador se o usuário já logou no Django
@@ -26,15 +45,17 @@ export function useAuth() {
     const savedUser = localStorage.getItem('django_user');
 
     if (token && savedUser) {
+      const parsed: User = JSON.parse(savedUser);
       setSession({ access_token: token });
-      setUser(JSON.parse(savedUser));
-      setIsAdmin(true);
+      setUser(parsed);
+      setIsAdmin(!!parsed.is_staff);
       setLoading(false);
       return;
     }
 
     // 2. Sem token salvo: tenta o SSO (cookie .dunatecnologia.com, same-origin).
     //    Quem voltou do login Microsoft (ou já tem sessão do portal) entra direto.
+    //    403 = conta criada mas pendente de liberação → tela de espera.
     (async () => {
       try {
         const res = await fetch(`${API_URL}/sso/`, { credentials: 'include' });
@@ -45,8 +66,10 @@ export function useAuth() {
             localStorage.setItem('django_user', JSON.stringify(data.user));
             setSession({ access_token: data.token });
             setUser(data.user);
-            setIsAdmin(true);
+            setIsAdmin(!!data.user.is_staff);
           }
+        } else if (res.status === 403) {
+          setPending(true);
         }
       } catch {
         // SSO indisponível (ex.: SSO_ENABLED=false) — cai no login por senha.
@@ -87,21 +110,21 @@ export function useAuth() {
       if (!res.ok) throw new Error('Credenciais inválidas');
 
       const data = await res.json();
-      
+
       const token = data.token ?? data.access ?? data.access_token;
-      const userData = data.user ?? { id: data.user_id, email: username };
+      const userData: User = data.user ?? { id: data.user_id, email: username };
 
       if (!token) throw new Error('Token ausente no login');
       if (!userData?.id) throw new Error('Usuário sem ID válido no login');
-      
+
       // Salva o token e o usuário no navegador
       localStorage.setItem('django_token', token);
       localStorage.setItem('django_user', JSON.stringify(userData));
-      
+
       setSession({ access_token: token });
       setUser(userData);
-      setIsAdmin(true);
-      
+      setIsAdmin(!!userData.is_staff);
+
       return { error: null };
     } catch (error: any) {
       console.error("Erro no login:", error);
@@ -118,11 +141,12 @@ export function useAuth() {
     setUser(null);
     setSession(null);
     setIsAdmin(false);
-    
+    setPending(false);
+
     // Opcional: recarrega a página para limpar os estados do React
     window.location.reload();
   };
 
   // Exporta a exata mesma estrutura que o seu frontend já esperava!
-  return { user, session, loading, isAdmin, signOut, signIn, signInWithMicrosoft };
+  return { user, session, loading, isAdmin, pending, signOut, signIn, signInWithMicrosoft };
 }

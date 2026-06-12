@@ -1,7 +1,7 @@
 import React, { createContext, useContext, useState, useEffect, useCallback, useRef } from 'react';
 import type { Setor, TipoSetor, PeriodoData, ViewMode, Sede, CustoItem, VpdConfig } from '@/types/sector';
 import { createDefaultSetor, createDefaultPeriodoData, getCurrentPeriodo, createDefaultSede } from '@/types/sector';
-import { useAuth } from '@/hooks/useAuth';
+import { useAuth, authHeaders, clearSessionAndReload } from '@/hooks/useAuth';
 import { toast } from "sonner";
 import { getVpdValor } from '@/utils/calculations';
 
@@ -96,10 +96,16 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
 
     const loadData = async () => {
       try {
+        const fetchList = async (endpoint: string) => {
+          const res = await fetch(`${API_URL}/${endpoint}/`, { headers: authHeaders() });
+          if (res.status === 401) { clearSessionAndReload(); throw new Error('unauthorized'); }
+          if (!res.ok) throw new Error(`${res.status} ${res.statusText}`);
+          return res.json();
+        };
         const [setoresRes, sedesRes, vpdRes] = await Promise.all([
-          fetch(`${API_URL}/setores/`).then(res => res.json()),
-          fetch(`${API_URL}/sedes/`).then(res => res.json()),
-          fetch(`${API_URL}/vpd_configs/`).then(res => res.json())
+          fetchList('setores'),
+          fetchList('sedes'),
+          fetchList('vpd_configs'),
         ]);
 
         if (Array.isArray(setoresRes)) {
@@ -148,8 +154,13 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     if (!user || !initialLoadDone.current) return;
     setIsSaving(true);
     
-    const requestOrThrow = async (url: string, options?: RequestInit) => {
-      const res = await fetch(url, options);
+    const requestOrThrow = async (url: string, options: RequestInit = {}) => {
+      // Injeta o token em toda gravação (POST/PUT/DELETE). 401 = acesso revogado.
+      const res = await fetch(url, {
+        ...options,
+        headers: { ...(options.headers || {}), ...authHeaders() },
+      });
+      if (res.status === 401) { clearSessionAndReload(); throw new Error('unauthorized'); }
       if (!res.ok) {
         const body = await res.text().catch(() => '');
         throw new Error(`${res.status} ${res.statusText}${body ? `: ${body}` : ''}`);
@@ -278,7 +289,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     setSetores(prev => prev.filter(s => s.id !== id));
     markUnsaved();
     persistedSetorIdsRef.current.delete(id);
-    fetch(`${API_URL}/setores/${id}/`, { method: 'DELETE' }).catch(console.error);
+    fetch(`${API_URL}/setores/${id}/`, { method: 'DELETE', headers: authHeaders() }).catch(console.error);
   }, [markUnsaved]);
 
   const updatePeriodoData = useCallback((setorId: string, periodo: string, updates: Partial<PeriodoData>) => {
@@ -317,7 +328,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     setSetores(prev => prev.map(s => s.sedeId === id ? { ...s, sedeId: undefined } : s));
     markUnsaved();
     persistedSedeIdsRef.current.delete(id);
-    fetch(`${API_URL}/sedes/${id}/`, { method: 'DELETE' }).catch(console.error);
+    fetch(`${API_URL}/sedes/${id}/`, { method: 'DELETE', headers: authHeaders() }).catch(console.error);
   }, [markUnsaved]);
 
   const updateSedeCustos = useCallback((sedeId: string, periodo: string, custos: CustoItem[]) => {

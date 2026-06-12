@@ -12,6 +12,8 @@ services:
       # SSO_ENABLED=True + SSO_VALIDATE_URL no painel do Coolify quando for ligar.
       - SSO_ENABLED=${SSO_ENABLED:-False}
       - SSO_VALIDATE_URL=${SSO_VALIDATE_URL:-}
+      # Donos do painel (entram liberados + admin). Vírgula, sem aspas no Coolify.
+      - SSO_ADMIN_EMAILS=${SSO_ADMIN_EMAILS:-}
     # O Gunicorn definido no seu Dockerfile vai rodar na porta 8080 internamente
     volumes:
       - sqlite_data:/app/data

@@ -10,6 +10,7 @@ import * as XLSX from 'xlsx';
 import ExcelJS from 'exceljs';
 import { saveAs } from 'file-saver';
 import { MapeadorColunas } from "@/components/MapeadorColunas";
+import { authHeaders } from "@/hooks/useAuth";
 
 const API_URL = import.meta.env.VITE_API_URL;
 
@@ -56,7 +57,7 @@ export default function HonorariosBB() {
 
   const fetchStats = async () => {
     try {
-      const response = await fetch(`${API_URL}/base_referencia/`);
+      const response = await fetch(`${API_URL}/base_referencia/`, { headers: authHeaders() });
       if (!response.ok) throw new Error('Falha ao carregar dados');
       
       const data = await response.json();
@@ -90,11 +91,11 @@ export default function HonorariosBB() {
     if (!confirm("⚠️ ATENÇÃO: Deseja apagar TODOS os processos salvos na base de referência?")) return;
     setLoading(true);
     try {
-      const response = await fetch(`${API_URL}/base_referencia/`);
+      const response = await fetch(`${API_URL}/base_referencia/`, { headers: authHeaders() });
       const data = await response.json();
-      
-      const deletePromises = data.map((item: any) => 
-        fetch(`${API_URL}/base_referencia/${item.id}/`, { method: 'DELETE' })
+
+      const deletePromises = data.map((item: any) =>
+        fetch(`${API_URL}/base_referencia/${item.id}/`, { method: 'DELETE', headers: authHeaders() })
       );
       
       await Promise.all(deletePromises);
@@ -178,7 +179,7 @@ export default function HonorariosBB() {
         // AQUI ESTÁ A MÁGICA: Manda TUDO num único POST para a rota de Bulk Upsert!
         const response = await fetch(`${API_URL}/base_referencia/bulk_upsert/`, {
             method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
+            headers: { 'Content-Type': 'application/json', ...authHeaders() },
             body: JSON.stringify(todosOsProcessos)
         });
 
@@ -237,7 +238,7 @@ export default function HonorariosBB() {
       await delay(300);
 
       // Busca TUDO do banco uma vez para cruzar (em bases grandes isso seria ideal fazer na API, mas mantemos sua lógica original aqui)
-      const resBanco = await fetch(`${API_URL}/base_referencia/`);
+      const resBanco = await fetch(`${API_URL}/base_referencia/`, { headers: authHeaders() });
       const baseRef = await resBanco.json();
 
       const refMap = new Map(baseRef?.map((r: any) => [r.npj_limpo, r.polo]));
