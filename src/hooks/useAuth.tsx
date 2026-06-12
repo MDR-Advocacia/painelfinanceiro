@@ -59,7 +59,15 @@ export function useAuth() {
   // .dunatecnologia.com. No retorno, o bootstrap acima chama /api/sso/ e loga.
   const signInWithMicrosoft = () => {
     const base = import.meta.env.VITE_SSO_AUTHORIZE_BASE || 'https://auth.dunatecnologia.com';
-    const rd = `${window.location.origin}/`;
+    // O SSO só funciona em .dunatecnologia.com: é onde o cookie do oauth2-proxy é
+    // válido E o único host na whitelist do proxy. Se a página foi aberta no
+    // domínio antigo (.mdradvocacia.com), mandar o rd pra lá faz o proxy REJEITAR
+    // o redirect e parar na tela estática "Authenticated". Por isso o retorno é
+    // sempre forçado pro host novo (sobrescrevível por VITE_SSO_RETURN_URL).
+    const rd = import.meta.env.VITE_SSO_RETURN_URL
+      || (window.location.hostname.endsWith('.dunatecnologia.com')
+          ? `${window.location.origin}/`
+          : 'https://painelfinanceiro.dunatecnologia.com/');
     window.location.href = `${base}/oauth2/start?rd=${encodeURIComponent(rd)}`;
   };
 
