@@ -8,6 +8,10 @@ services:
       - DJANGO_DEBUG=${DJANGO_DEBUG}
       - DJANGO_ALLOWED_HOSTS=${DJANGO_ALLOWED_HOSTS}
       - TZ=America/Fortaleza
+      # SSO Entra (Fase 2): ativa GET /api/sso/. Default False (seguro) — ligue
+      # SSO_ENABLED=True + SSO_VALIDATE_URL no painel do Coolify quando for ligar.
+      - SSO_ENABLED=${SSO_ENABLED:-False}
+      - SSO_VALIDATE_URL=${SSO_VALIDATE_URL:-}
     # O Gunicorn definido no seu Dockerfile vai rodar na porta 8080 internamente
     volumes:
       - sqlite_data:/app/data
