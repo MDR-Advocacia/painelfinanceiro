@@ -1,12 +1,36 @@
+import { useEffect } from "react";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Clock, RefreshCw, LogOut } from "lucide-react";
 import logoMdr from "@/assets/logo-mdr.png";
+import { API_URL } from "@/hooks/useAuth";
 
 // Tela onde caem os logins NOVOS (via Microsoft) cuja conta ainda não foi
 // liberada por um admin. O backend retorna 403 {pending:true} em /api/sso/.
 export default function Aguardando() {
   const ssoBase = import.meta.env.VITE_SSO_AUTHORIZE_BASE || "https://auth.dunatecnologia.com";
+
+  // Re-checa o acesso sempre que esta tela abre/recarrega. Se o admin JÁ liberou,
+  // o /api/sso/ passa a devolver 200 → guarda o token e entra no painel sozinha.
+  // Se ainda está pendente (403), continua aqui. Isso conserta o "verificar" que
+  // antes só recarregava /aguardando e ficava preso (a rota não re-checava nada).
+  useEffect(() => {
+    (async () => {
+      try {
+        const res = await fetch(`${API_URL}/sso/`, { credentials: "include" });
+        if (res.ok) {
+          const data = await res.json();
+          if (data?.token && data?.user) {
+            localStorage.setItem("django_token", data.token);
+            localStorage.setItem("django_user", JSON.stringify(data.user));
+            window.location.href = "/";
+          }
+        }
+      } catch {
+        /* sem rede / SSO indisponível — segue na tela de espera */
+      }
+    })();
+  }, []);
 
   const sair = () => {
     localStorage.removeItem("django_token");
