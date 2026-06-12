@@ -16,8 +16,10 @@ services:
     build: 
       context: .
       args:
-        # Passamos a variável nativa do Coolify que contém o link do backend
-        - VITE_API_URL=${SERVICE_URL_BACKEND}
+        # Same-origin: o front chama /api (relativo) e o nginx faz proxy pro
+        # backend interno. Habilita o cookie .dunatecnologia.com chegar no
+        # Django pro SSO. (Antes era ${SERVICE_URL_BACKEND}, domínio separado.)
+        - VITE_API_URL=/api
     container_name: painelfinanceiro_front
     depends_on:
       - backend
