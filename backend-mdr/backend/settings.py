@@ -140,3 +140,15 @@ REST_FRAMEWORK = {
         'rest_framework_simplejwt.authentication.JWTAuthentication',
     )
 }
+
+# --- SSO Microsoft Entra ID (via oauth2-proxy — mesmo approach do Flow/DOC) ---
+# Quando SSO_ENABLED=True, GET /api/sso/ valida o cookie do oauth2-proxy
+# server-side (chama SSO_VALIDATE_URL repassando o cookie .dunatecnologia.com,
+# que o navegador manda same-origin), acha-ou-cria o User pelo e-mail e devolve
+# um DRF Token (mesmo formato do /api/login/). Conta nova nasce PENDENTE
+# (is_active=False) — acesso só após liberação do admin (painel é sensível).
+# Senha continua valendo. Sem efeito enquanto SSO_ENABLED=False (default).
+SSO_ENABLED = os.getenv('SSO_ENABLED', 'False') == 'True'
+SSO_VALIDATE_URL = os.getenv('SSO_VALIDATE_URL', '')  # https://auth.dunatecnologia.com/oauth2/auth
+SSO_AUTHORIZE_BASE = os.getenv('SSO_AUTHORIZE_BASE', 'https://auth.dunatecnologia.com')
+SSO_EMAIL_HEADER = os.getenv('SSO_EMAIL_HEADER', 'X-Auth-Request-Email')

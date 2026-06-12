@@ -28,13 +28,40 @@ export function useAuth() {
     if (token && savedUser) {
       setSession({ access_token: token });
       setUser(JSON.parse(savedUser));
-      // Como você está usando o superusuário do Django, podemos cravar como true
-      setIsAdmin(true); 
+      setIsAdmin(true);
+      setLoading(false);
+      return;
     }
-    
-    // 2. Desliga o loading imediatamente
-    setLoading(false);
+
+    // 2. Sem token salvo: tenta o SSO (cookie .dunatecnologia.com, same-origin).
+    //    Quem voltou do login Microsoft (ou já tem sessão do portal) entra direto.
+    (async () => {
+      try {
+        const res = await fetch(`${API_URL}/sso/`, { credentials: 'include' });
+        if (res.ok) {
+          const data = await res.json();
+          if (data?.token && data?.user) {
+            localStorage.setItem('django_token', data.token);
+            localStorage.setItem('django_user', JSON.stringify(data.user));
+            setSession({ access_token: data.token });
+            setUser(data.user);
+            setIsAdmin(true);
+          }
+        }
+      } catch {
+        // SSO indisponível (ex.: SSO_ENABLED=false) — cai no login por senha.
+      }
+      setLoading(false);
+    })();
   }, []);
+
+  // Inicia o fluxo SSO: vai pro oauth2-proxy (Entra) e volta pra cá com o cookie
+  // .dunatecnologia.com. No retorno, o bootstrap acima chama /api/sso/ e loga.
+  const signInWithMicrosoft = () => {
+    const base = import.meta.env.VITE_SSO_AUTHORIZE_BASE || 'https://auth.dunatecnologia.com';
+    const rd = `${window.location.origin}/`;
+    window.location.href = `${base}/oauth2/start?rd=${encodeURIComponent(rd)}`;
+  };
 
   // Nova função para fazer o login bater na nossa API Python
   const signIn = async (username: string, password: string) => {
@@ -89,5 +116,5 @@ export function useAuth() {
   };
 
   // Exporta a exata mesma estrutura que o seu frontend já esperava!
-  return { user, session, loading, isAdmin, signOut, signIn };
+  return { user, session, loading, isAdmin, signOut, signIn, signInWithMicrosoft };
 }
