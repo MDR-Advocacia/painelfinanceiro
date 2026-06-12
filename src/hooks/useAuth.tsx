@@ -53,6 +53,14 @@ export function useAuth() {
       return;
     }
 
+    // Logout "soft": se o usuário saiu pela porta (signOut), NÃO auto-loga via SSO
+    // — o cookie .dunatecnologia.com continua válido de propósito (sessão única do
+    // portal). Volta a logar só quando clicar em Microsoft ou usar a senha.
+    if (localStorage.getItem('sso_suppress') === '1') {
+      setLoading(false);
+      return;
+    }
+
     // 2. Sem token salvo: tenta o SSO (cookie .dunatecnologia.com, same-origin).
     //    Quem voltou do login Microsoft (ou já tem sessão do portal) entra direto.
     //    403 = conta criada mas pendente de liberação → tela de espera.
@@ -81,6 +89,7 @@ export function useAuth() {
   // Inicia o fluxo SSO: vai pro oauth2-proxy (Entra) e volta pra cá com o cookie
   // .dunatecnologia.com. No retorno, o bootstrap acima chama /api/sso/ e loga.
   const signInWithMicrosoft = () => {
+    localStorage.removeItem('sso_suppress'); // re-habilita o auto-login no retorno
     const base = import.meta.env.VITE_SSO_AUTHORIZE_BASE || 'https://auth.dunatecnologia.com';
     // O SSO só funciona em .dunatecnologia.com: é onde o cookie do oauth2-proxy é
     // válido E o único host na whitelist do proxy. Se a página foi aberta no
@@ -120,6 +129,7 @@ export function useAuth() {
       // Salva o token e o usuário no navegador
       localStorage.setItem('django_token', token);
       localStorage.setItem('django_user', JSON.stringify(userData));
+      localStorage.removeItem('sso_suppress');
 
       setSession({ access_token: token });
       setUser(userData);
@@ -135,16 +145,16 @@ export function useAuth() {
   };
 
   const signOut = async () => {
-    // Limpa tudo do navegador e desloga o usuário
+    // Logout do painel: limpa o token e MARCA sso_suppress pra não auto-logar de
+    // novo pelo cookie do Microsoft (que segue válido). Vai pro /login.
     localStorage.removeItem('django_token');
     localStorage.removeItem('django_user');
+    localStorage.setItem('sso_suppress', '1');
     setUser(null);
     setSession(null);
     setIsAdmin(false);
     setPending(false);
-
-    // Opcional: recarrega a página para limpar os estados do React
-    window.location.reload();
+    window.location.href = '/login';
   };
 
   // Exporta a exata mesma estrutura que o seu frontend já esperava!
