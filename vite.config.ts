@@ -14,10 +14,12 @@ export default defineConfig(({ mode }) => {
 
   let fullApiUrl = '';
 
-  // 1. Se o Coolify mandar a variável pronta, usamos ela com o /api
+  // 1. Coolify manda VITE_API_URL já pronto e same-origin (ex.: "/api"). Usa como
+  //    está — NÃO anexar outro "/api" (senão vira "/api/api" e o front bate em
+  //    rota 404, quebrando login por senha E SSO).
   if (env.VITE_API_URL) {
-    fullApiUrl = `${env.VITE_API_URL}/api`;
-  } 
+    fullApiUrl = env.VITE_API_URL;
+  }
   // 2. Se o domínio for diferente de localhost, montamos SEM a porta
   else if (domain !== 'localhost') {
     fullApiUrl = `${protocol}://${domain}/api`;
