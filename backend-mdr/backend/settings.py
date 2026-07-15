@@ -27,6 +27,12 @@ DEBUG = os.getenv('DJANGO_DEBUG', 'False') == 'True'
 
 ALLOWED_HOSTS = os.getenv('DJANGO_ALLOWED_HOSTS', '*').split(',')
 
+# Upload em massa da Base de Referência manda TODAS as linhas num POST só (JSON).
+# O default do Django (2,5 MB) barra planilhas grandes com RequestDataTooBig depois
+# que o nginx libera o corpo — sobe o teto pra 50 MB (par com client_max_body_size).
+DATA_UPLOAD_MAX_MEMORY_SIZE = 50 * 1024 * 1024  # 50 MB
+FILE_UPLOAD_MAX_MEMORY_SIZE = 50 * 1024 * 1024  # 50 MB
+
 CSRF_TRUSTED_ORIGINS = [
     f"https://{host}" for host in ALLOWED_HOSTS if host != '*'
 ]
