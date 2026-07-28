@@ -173,10 +173,17 @@ DP_MATRICULA_BASE = {"estagiario": 1000, "clt": 2000, "associado": 3000, "pj": 4
 
 
 class DpCentroCusto(models.Model):
-    """Catálogo de Centros de Custo (CONFIG da planilha: 1=ADM … 9=Réu-Ativos)."""
+    """Centros de Custo em ÁRVORE (CONFIG da planilha).
+
+    O código agrupa o núcleo (1=ADM, 2=TI, 3=Autor BB…) e o nome no padrão
+    "Grupo - Subnúcleo" indica o filho (ex.: "ADM - Financeiro" é filho de "ADM").
+    `pai` materializa essa hierarquia: pai nulo = núcleo raiz.
+    """
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     codigo = models.IntegerField()
     nome = models.CharField(max_length=120, unique=True)
+    pai = models.ForeignKey('self', on_delete=models.SET_NULL, null=True, blank=True,
+                            related_name='filhos')
     ativo = models.BooleanField(default=True)
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
@@ -187,6 +194,22 @@ class DpCentroCusto(models.Model):
 
     def __str__(self):
         return f"[{self.codigo}] {self.nome}"
+
+    @property
+    def nome_curto(self) -> str:
+        """Só a parte do subnúcleo (o que vem depois do 'Grupo - ')."""
+        return self.nome.split(" - ", 1)[1] if " - " in self.nome else self.nome
+
+    def descendentes_ids(self) -> list:
+        """Ele mesmo + toda a subárvore (usado nos filtros: escolher o núcleo
+        traz os subnúcleos junto)."""
+        ids, fila = [self.id], [self]
+        while fila:
+            atual = fila.pop()
+            for f in atual.filhos.all():
+                ids.append(f.id)
+                fila.append(f)
+        return ids
 
 
 class DpCargo(models.Model):
@@ -337,7 +360,13 @@ class DpCompetencia(models.Model):
 
 
 class DpLancamento(models.Model):
-    """Ocorrências do colaborador na competência: faltas, premiações, acertos."""
+    """Ocorrências do colaborador na competência: faltas, premiações, acertos.
+
+    Também guarda o AJUSTE PONTUAL (override) daquele mês: quando o operador
+    corrige salário/VT/VA só naquela competência, o valor fica aqui — a ficha do
+    colaborador NÃO muda e o recálculo respeita o ajuste. Todo ajuste exige
+    motivo e vai pra auditoria com destaque.
+    """
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     competencia = models.ForeignKey(DpCompetencia, on_delete=models.CASCADE,
                                     related_name="lancamentos")
@@ -348,6 +377,14 @@ class DpLancamento(models.Model):
     premiacoes = models.FloatField(default=0)
     acerto_contabil = models.FloatField(default=0)
     obs = models.TextField(blank=True, default="")
+    # ajuste pontual do mês (null = usa o valor da ficha)
+    salario_override = models.FloatField(null=True, blank=True)
+    vt_override = models.FloatField(null=True, blank=True)
+    va_override = models.FloatField(null=True, blank=True)
+    saldo_livre_override = models.FloatField(null=True, blank=True)
+    ajuste_motivo = models.TextField(blank=True, default="")
+    ajuste_autor = models.CharField(max_length=150, blank=True, default="")
+    ajuste_em = models.DateTimeField(null=True, blank=True)
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 
@@ -369,6 +406,7 @@ class DpFolhaItem(models.Model):
     matricula = models.IntegerField()
     nome = models.CharField(max_length=200)
     regime = models.CharField(max_length=20)
+    cargo_nome = models.CharField(max_length=120, blank=True, default="")
     centro_custo_nome = models.CharField(max_length=120)
     # entradas
     salario_bruto = models.FloatField(default=0)
@@ -399,6 +437,8 @@ class DpFolhaItem(models.Model):
     custo_provisoes = models.FloatField(default=0)
     custo_total = models.FloatField(default=0)  # total_pagar + provisões + patronal
     memoria = models.JSONField(default=dict, blank=True)
+    ajuste_manual = models.BooleanField(default=False)   # linha com ajuste pontual
+    ajuste_motivo = models.TextField(blank=True, default="")
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 

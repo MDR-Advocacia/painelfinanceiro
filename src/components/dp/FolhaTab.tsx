@@ -3,8 +3,8 @@
 // Fechada é intocável (reabrir só com justificativa, tudo auditado).
 import { useCallback, useEffect, useState } from "react";
 import {
-  CalendarPlus, CheckCircle2, Download, FileText, Loader2, Lock, PieChart,
-  RefreshCw, Search, SendHorizonal, Unlock,
+  CalendarPlus, CheckCircle2, Download, FileText, Loader2, Lock, PencilLine,
+  PieChart, RefreshCw, RotateCcw, Search, SendHorizonal, Unlock,
 } from "lucide-react";
 import { toast } from "sonner";
 
@@ -24,8 +24,8 @@ import {
 } from "@/components/ui/table";
 import { Ajuda, TituloAjuda } from "@/components/dp/Ajuda";
 import {
-  type DpCompetencia, type DpFolhaItem, type DpFolhaTotais, type DpRateioLinha,
-  REGIME_LABELS, fmtBRL, folhaApi, relatoriosApi,
+  type DpCcNo, type DpCompetencia, type DpFolhaItem, type DpFolhaTotais, type DpRateioLinha,
+  REGIME_LABELS, dpApi, fmtBRL, folhaApi, relatoriosApi,
 } from "@/services/dp";
 
 const PAGE = 50;
@@ -141,6 +141,9 @@ function CompetenciaDetalhe({ comp, editar, onMudou }: {
 }) {
   const [busca, setBusca] = useState("");
   const [regime, setRegime] = useState(TODOS);
+  const [ccFiltro, setCcFiltro] = useState(TODOS);
+  const [ccs, setCcs] = useState<DpCcNo[]>([]);
+  const [ajustando, setAjustando] = useState<DpFolhaItem | null>(null);
   const [pagina, setPagina] = useState(0);
   const [total, setTotal] = useState(0);
   const [totais, setTotais] = useState<DpFolhaTotais | null>(null);
@@ -158,12 +161,17 @@ function CompetenciaDetalhe({ comp, editar, onMudou }: {
 
   const carregarItens = useCallback(() => {
     setLoading(true);
-    folhaApi.itens(comp.id, { busca, regime: regime === TODOS ? "" : regime, limit: PAGE, offset: pagina * PAGE })
+    folhaApi.itens(comp.id, {
+      busca, regime: regime === TODOS ? "" : regime,
+      cc: ccFiltro === TODOS ? "" : ccFiltro, limit: PAGE, offset: pagina * PAGE,
+    })
       .then((r) => { setItems(r.items); setTotal(r.total); setTotais(r.totais); })
       .catch((e) => toast.error(e.message))
       .finally(() => setLoading(false));
     folhaApi.rateio(comp.id).then(setRateio).catch(() => undefined);
-  }, [comp.id, busca, regime, pagina]);
+  }, [comp.id, busca, regime, ccFiltro, pagina]);
+
+  useEffect(() => { dpApi.ccArvore().then(setCcs).catch(() => undefined); }, []);
   useEffect(() => { carregarItens(); }, [carregarItens]);
 
   const acao = async (fn: () => Promise<unknown>, ok: string) => {
@@ -200,10 +208,18 @@ function CompetenciaDetalhe({ comp, editar, onMudou }: {
                 </>
               )}
               {comp.status === "em_revisao" && (
-                <Button size="sm" className="gap-1 bg-emerald-600 text-white hover:bg-emerald-700" disabled={agindo}
-                        onClick={() => acao(() => folhaApi.aprovar(comp.id), "Competência FECHADA (snapshot congelado).")}>
-                  <CheckCircle2 className="h-3.5 w-3.5" /> Aprovar e fechar
-                </Button>
+                <>
+                  <Button size="sm" variant="outline" className="gap-1" disabled={agindo}
+                          title="Volta a folha para Aberta (ainda não foi aprovada)"
+                          onClick={() => acao(() => folhaApi.desfazerRevisao(comp.id),
+                                              "Envio desfeito — a folha voltou para Aberta.")}>
+                    <RotateCcw className="h-3.5 w-3.5" /> Desfazer envio
+                  </Button>
+                  <Button size="sm" className="gap-1 bg-emerald-600 text-white hover:bg-emerald-700" disabled={agindo}
+                          onClick={() => acao(() => folhaApi.aprovar(comp.id), "Competência FECHADA (snapshot congelado).")}>
+                    <CheckCircle2 className="h-3.5 w-3.5" /> Aprovar e fechar
+                  </Button>
+                </>
               )}
               {fechada && (
                 <Button size="sm" variant="outline" className="gap-1 border-amber-300 text-amber-800" disabled={agindo}
@@ -243,8 +259,24 @@ function CompetenciaDetalhe({ comp, editar, onMudou }: {
           <Select value={regime} onValueChange={(v) => { setRegime(v); setPagina(0); }}>
             <SelectTrigger className="h-9 w-[150px] text-xs"><SelectValue /></SelectTrigger>
             <SelectContent>
-              <SelectItem value={TODOS}>Todos os regimes</SelectItem>
+              <SelectItem value={TODOS}>Todos os contratos</SelectItem>
               {Object.entries(REGIME_LABELS).map(([k, l]) => <SelectItem key={k} value={k}>{l}</SelectItem>)}
+            </SelectContent>
+          </Select>
+          <Select value={ccFiltro} onValueChange={(v) => { setCcFiltro(v); setPagina(0); }}>
+            <SelectTrigger className="h-9 w-[220px] text-xs">
+              <SelectValue placeholder="Centro de custo" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value={TODOS}>Todos os centros de custo</SelectItem>
+              {ccs.flatMap((raiz) => [
+                <SelectItem key={raiz.id} value={raiz.id}>
+                  {raiz.nome_curto}{raiz.filhos.length ? " (com subnúcleos)" : ""}
+                </SelectItem>,
+                ...raiz.filhos.map((f) => (
+                  <SelectItem key={f.id} value={f.id}>{"\u00A0\u00A0\u00A0"}└ {f.nome_curto}</SelectItem>
+                )),
+              ])}
             </SelectContent>
           </Select>
           <div className="ml-auto flex flex-wrap gap-1.5">
@@ -336,6 +368,7 @@ function CompetenciaDetalhe({ comp, editar, onMudou }: {
                     <TableHead className="hidden text-right text-xs sm:table-cell">
                       <TituloAjuda titulo="Custo total" ajuda="Quanto essa pessoa custa ao escritório no mês, somando pagamento, provisões e encargos." />
                     </TableHead>
+                    {editar && aberta && <TableHead className="w-16 text-center text-xs">Ações</TableHead>}
                   </TableRow>
                 </TableHeader>
                 <TableBody>
@@ -345,7 +378,17 @@ function CompetenciaDetalhe({ comp, editar, onMudou }: {
                               onClick={() => editar && aberta && setLancando(it)}
                               title={editar && aberta ? "Clique pra lançar faltas/prêmios" : ""}>
                       <TableCell className="font-mono text-xs">{it.matricula}</TableCell>
-                      <TableCell className="max-w-[220px] truncate text-sm">{it.nome}</TableCell>
+                      <TableCell className="max-w-[220px] truncate text-sm">
+                        <span className="flex items-center gap-1.5">
+                          <span className="truncate">{it.nome}</span>
+                          {it.ajuste_manual && (
+                            <span title={`Ajuste pontual: ${it.ajuste_motivo}`}
+                                  className="shrink-0 rounded bg-amber-100 px-1 text-[9px] font-semibold uppercase text-amber-800">
+                              ajustado
+                            </span>
+                          )}
+                        </span>
+                      </TableCell>
                       <TableCell className="hidden max-w-[150px] truncate text-xs lg:table-cell">{it.centro_custo_nome}</TableCell>
                       <TableCell className="text-right font-mono text-xs">{fmtBRL(it.salario_bruto)}</TableCell>
                       <TableCell className="hidden text-right font-mono text-xs sm:table-cell">
@@ -359,6 +402,17 @@ function CompetenciaDetalhe({ comp, editar, onMudou }: {
                       </TableCell>
                       <TableCell className="text-right font-mono text-xs font-semibold">{fmtBRL(it.total_pagar)}</TableCell>
                       <TableCell className="hidden text-right font-mono text-xs sm:table-cell">{fmtBRL(it.custo_total)}</TableCell>
+                      {editar && aberta && (
+                        <TableCell className="text-center">
+                          <button
+                            onClick={(e) => { e.stopPropagation(); setAjustando(it); }}
+                            title="Ajuste pontual deste colaborador só nesta competência"
+                            className="rounded p-1 text-muted-foreground/60 transition-colors hover:bg-amber-100 hover:text-amber-700"
+                          >
+                            <PencilLine className="h-3.5 w-3.5" />
+                          </button>
+                        </TableCell>
+                      )}
                     </TableRow>
                   ))}
                   {!loading && items.length === 0 && (
@@ -381,6 +435,12 @@ function CompetenciaDetalhe({ comp, editar, onMudou }: {
           </>
         )}
       </CardContent>
+
+      {ajustando && (
+        <AjusteDialog comp={comp} item={ajustando}
+                      onClose={() => setAjustando(null)}
+                      onAjustou={() => { setAjustando(null); carregarItens(); }} />
+      )}
 
       {lancando && (
         <LancarDialog comp={comp} item={lancando}
@@ -476,6 +536,103 @@ function LancarDialog({ comp, item, onClose, onLancou }: {
           <Button variant="outline" onClick={onClose} disabled={salvando}>Cancelar</Button>
           <Button className="glass-button border-0" onClick={lancar} disabled={salvando}>
             {salvando ? <Loader2 className="mr-1 h-4 w-4 animate-spin" /> : null} Lançar e recalcular
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+/* ─────────────── AJUSTE PONTUAL (canetinha) ─────────────── */
+// Corrige valores SÓ nesta competência, sem mexer na ficha do colaborador.
+// Motivo é obrigatório e tudo fica registrado na auditoria.
+function AjusteDialog({ comp, item, onClose, onAjustou }: {
+  comp: DpCompetencia; item: DpFolhaItem; onClose: () => void; onAjustou: () => void;
+}) {
+  const [salario, setSalario] = useState<string>(String(item.salario_bruto ?? 0));
+  const [vt, setVt] = useState<string>(String(item.vt ?? 0));
+  const [va, setVa] = useState<string>(String(item.va ?? 0));
+  const [saldo, setSaldo] = useState<string>(String(item.saldo_livre ?? 0));
+  const [motivo, setMotivo] = useState(item.ajuste_motivo ?? "");
+  const [salvando, setSalvando] = useState(false);
+
+  const salvar = async () => {
+    if (motivo.trim().length < 5) { toast.error("Explique o motivo do ajuste (mín. 5 caracteres)."); return; }
+    setSalvando(true);
+    try {
+      const novo = await folhaApi.ajustar(comp.id, {
+        colaborador_id: item.colaborador_id,
+        salario: Number(salario), vt: Number(vt), va: Number(va), saldo_livre: Number(saldo),
+        motivo: motivo.trim(),
+      });
+      toast.success(`Ajuste aplicado — a pagar: ${fmtBRL(novo.total_pagar)}.`);
+      onAjustou();
+    } catch (e: any) { toast.error(e.message); }
+    finally { setSalvando(false); }
+  };
+
+  const limpar = async () => {
+    if (motivo.trim().length < 5) { toast.error("Explique o motivo de remover o ajuste."); return; }
+    setSalvando(true);
+    try {
+      await folhaApi.ajustar(comp.id, {
+        colaborador_id: item.colaborador_id, salario: null, vt: null, va: null,
+        saldo_livre: null, motivo: motivo.trim(),
+      });
+      toast.success("Ajuste removido — voltou aos valores da ficha.");
+      onAjustou();
+    } catch (e: any) { toast.error(e.message); }
+    finally { setSalvando(false); }
+  };
+
+  return (
+    <Dialog open onOpenChange={(o) => !o && onClose()}>
+      <DialogContent className="max-w-md">
+        <DialogHeader>
+          <DialogTitle className="flex items-center gap-2 text-base">
+            <PencilLine className="h-4 w-4 text-amber-600" />
+            Ajuste pontual — {item.nome}
+          </DialogTitle>
+          <DialogDescription>
+            Vale <b>apenas para {comp.mes_nome} {comp.ano}</b>. A ficha do colaborador
+            não muda e o ajuste fica registrado no histórico com o seu nome.
+          </DialogDescription>
+        </DialogHeader>
+
+        <div className="rounded-lg border border-amber-300 bg-amber-50 px-3 py-2 text-xs text-amber-800">
+          Use para corrigir algo específico do mês (ex.: salário proporcional, vale a maior).
+          Para mudança definitiva, edite a ficha no Quadro de Pessoal.
+        </div>
+
+        <div className="grid grid-cols-2 gap-3">
+          <div><Label className="text-xs text-muted-foreground">Salário bruto (R$)</Label>
+            <Input type="number" step="0.01" value={salario} onChange={(e) => setSalario(e.target.value)}
+                   className="font-mono text-sm" /></div>
+          <div><Label className="text-xs text-muted-foreground">Saldo livre (R$)</Label>
+            <Input type="number" step="0.01" value={saldo} onChange={(e) => setSaldo(e.target.value)}
+                   className="font-mono text-sm" /></div>
+          <div><Label className="text-xs text-muted-foreground">Vale-transporte (R$)</Label>
+            <Input type="number" step="0.01" value={vt} onChange={(e) => setVt(e.target.value)}
+                   className="font-mono text-sm" /></div>
+          <div><Label className="text-xs text-muted-foreground">Vale-alimentação (R$)</Label>
+            <Input type="number" step="0.01" value={va} onChange={(e) => setVa(e.target.value)}
+                   className="font-mono text-sm" /></div>
+          <div className="col-span-2">
+            <Label className="text-xs text-muted-foreground">Motivo do ajuste *</Label>
+            <Input value={motivo} onChange={(e) => setMotivo(e.target.value)} autoFocus
+                   placeholder="Ex.: admissão no dia 15, salário proporcional" className="text-sm" />
+          </div>
+        </div>
+
+        <DialogFooter className="gap-2">
+          {item.ajuste_manual && (
+            <Button variant="outline" className="mr-auto text-xs" onClick={limpar} disabled={salvando}>
+              Remover ajuste
+            </Button>
+          )}
+          <Button variant="outline" onClick={onClose} disabled={salvando}>Cancelar</Button>
+          <Button className="glass-button border-0" onClick={salvar} disabled={salvando}>
+            {salvando ? <Loader2 className="mr-1 h-4 w-4 animate-spin" /> : null} Aplicar ajuste
           </Button>
         </DialogFooter>
       </DialogContent>

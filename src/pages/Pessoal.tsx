@@ -723,6 +723,7 @@ const TOM_UI: Record<string, { cls: string; rotulo: string }> = {
   revisao: { cls: "bg-amber-100 text-amber-800", rotulo: "Revisão" },
   fechar: { cls: "bg-emerald-100 text-emerald-700", rotulo: "Fechamento" },
   reabrir: { cls: "bg-rose-100 text-rose-700", rotulo: "Reabertura" },
+  ajuste: { cls: "bg-amber-200 text-amber-900 ring-1 ring-amber-400", rotulo: "Ajuste pontual" },
 };
 
 function AuditoriaTab() {

@@ -76,6 +76,8 @@ ACOES = {
     "enviar_revisao": ("enviou a folha para revisão", "revisao"),
     "fechar_competencia": ("fechou a competência", "fechar"),
     "reabrir_competencia": ("reabriu a competência", "reabrir"),
+    "desfazer_revisao": ("desfez o envio para revisão", "reabrir"),
+    "ajuste_pontual": ("fez um ajuste pontual em", "ajuste"),
 }
 
 ENTIDADES = {
@@ -87,6 +89,7 @@ ENTIDADES = {
     "dp_lancamento": "lançamento da folha",
     "dp_importacao": "importação",
     "dp_simulacao": "simulação",
+    "dp_folha_item": "linha da folha",
 }
 
 
@@ -219,6 +222,16 @@ def humanizar(log) -> dict:
         titulo = "Reabriu uma competência fechada"
         mudancas = [{"campo": "Justificativa", "de": None,
                      "para": depois.get("justificativa", "—")}]
+    elif log.acao == "ajuste_pontual":
+        comp_txt = depois.get("competencia", "")
+        titulo = (f"AJUSTE PONTUAL em {depois.get('colaborador', 'colaborador')}"
+                  + (f" — competência {comp_txt}" if comp_txt else ""))
+        mudancas = _mudancas(
+            {k: v for k, v in antes.items() if k != "colaborador"},
+            {k: v for k, v in depois.items() if k not in ("colaborador", "competencia")})
+    elif log.acao == "desfazer_revisao":
+        titulo = "Desfez o envio para revisão (folha voltou para Aberta)"
+        mudancas = []
     elif log.acao == "enviar_revisao":
         titulo = "Enviou a folha para revisão"
         mudancas = []

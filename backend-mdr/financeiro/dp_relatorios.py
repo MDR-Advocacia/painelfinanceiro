@@ -100,6 +100,20 @@ def dp_dashboard(request):
                 "patronal": round((ag_ult["pat"] or 0) / total_ult * 100, 1),
             }
 
+    # custo médio POR CARGO (da última competência)
+    custo_por_cargo = []
+    if comp_ult:
+        for r in (filtrar_folha(comp_ult.itens.all(), request.user)
+                  .exclude(cargo_nome="").values("cargo_nome", "regime")
+                  .annotate(n=Count("id"), custo=Sum("custo_total"),
+                            salario=Sum("salario_bruto")).order_by("-custo")):
+            custo_por_cargo.append({
+                "cargo": r["cargo_nome"], "regime": r["regime"], "quantidade": r["n"],
+                "custo": round(r["custo"] or 0, 2),
+                "custo_medio": round((r["custo"] or 0) / r["n"], 2) if r["n"] else 0,
+                "salario_medio": round((r["salario"] or 0) / r["n"], 2) if r["n"] else 0,
+            })
+
     # custo médio por tipo de contrato (da última competência)
     custo_por_regime = []
     if comp_ult:
@@ -159,6 +173,7 @@ def dp_dashboard(request):
         # extras
         "por_unidade": por_unidade, "por_area": por_area, "por_cc_qtd": por_cc_qtd,
         "custo_por_cc": custo_por_cc, "custo_por_regime": custo_por_regime,
+        "custo_por_cargo": custo_por_cargo,
         "custo_medio_pessoa": custo_medio_pessoa, "participacao": participacao,
         "variacao_custo": variacao,
         "tempo_casa": [{"faixa": k, "quantidade": v} for k, v in faixas_casa.items()],
@@ -512,6 +527,14 @@ def dp_relatorio_dashboard(request):
             [[l["mes"], l["status"], l["headcount"], l["folha"], l["provisoes"],
               l["patronal"], l["custo_total"]] for l in dados["serie_custo"]],
             larguras=[14, 12, 12, 16, 16, 16, 18], money_cols={4, 5, 6, 7})
+    if dados.get("custo_por_cargo"):
+        wsc = wb.create_sheet("Custo por cargo")
+        _tabela(wsc, 1, ["Cargo", "Tipo de contrato", "Pessoas", "Salário médio (R$)",
+                         "Custo total (R$)", "Custo médio por pessoa (R$)"],
+                [[c["cargo"], REG_LABEL.get(c["regime"], c["regime"]), c["quantidade"],
+                  c["salario_medio"], c["custo"], c["custo_medio"]]
+                 for c in dados["custo_por_cargo"]],
+                larguras=[34, 16, 10, 18, 18, 24], money_cols={4, 5, 6})
     ws3 = wb.create_sheet("Movimentação")
     _tabela(ws3, 1, ["Mês", "Admissões", "Desligamentos"],
             [[l["mes"], l["admissoes"], l["desligamentos"]] for l in dados["serie_mov"]],

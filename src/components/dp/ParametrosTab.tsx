@@ -18,9 +18,10 @@ import {
   Table, TableBody, TableCell, TableHead, TableHeader, TableRow,
 } from "@/components/ui/table";
 import { Ajuda, TituloAjuda } from "@/components/dp/Ajuda";
+import ArvoreCentrosCusto from "@/components/dp/ArvoreCentrosCusto";
 import {
-  type DpCargo, type DpCentroCusto, type DpTabelaFiscal,
-  exportApi, fmtBRL, fmtData, previsaoApi,
+  type DpCargo, type DpCcNo, type DpCentroCusto, type DpTabelaFiscal,
+  dpApi, exportApi, fmtBRL, fmtData, previsaoApi,
 } from "@/services/dp";
 
 export default function ParametrosTab({ ccs, cargos, editar, onMudou }: {
@@ -323,6 +324,9 @@ function CcsBloco({ ccs, editar, onMudou }: {
   ccs: DpCentroCusto[]; editar: boolean; onMudou: () => void;
 }) {
   const [novo, setNovo] = useState({ codigo: 0, nome: "" });
+  const [arvore, setArvore] = useState<DpCcNo[]>([]);
+  const carregarArvore = () => { dpApi.ccArvore().then(setArvore).catch(() => undefined); };
+  useEffect(carregarArvore, [ccs]);
 
   const criar = async () => {
     if (!novo.nome.trim()) { toast.error("Informe o nome do centro de custo."); return; }
@@ -337,36 +341,23 @@ function CcsBloco({ ccs, editar, onMudou }: {
   return (
     <Card className="glass-card border-0">
       <CardHeader className="pb-2">
-        <CardTitle className="text-base">Centros de Custo</CardTitle>
-        <CardDescription>Setores e carteiras que recebem o rateio da folha.</CardDescription>
+        <CardTitle className="text-base">
+          <TituloAjuda titulo="Centros de Custo"
+                       ajuda="Estrutura em árvore: os núcleos (ADM, Autor, Réu…) agrupam subnúcleos. O rateio da folha usa o centro exato do colaborador, e os relatórios podem somar por núcleo." />
+        </CardTitle>
+        <CardDescription>Núcleos e subnúcleos que recebem o rateio da folha.</CardDescription>
       </CardHeader>
       <CardContent className="space-y-2">
-        <div className="max-h-[340px] overflow-y-auto rounded-md border">
-          <Table>
-            <TableHeader>
-              <TableRow>
-                <TableHead className="text-xs">Cód.</TableHead>
-                <TableHead className="text-xs">Centro de Custo</TableHead>
-                <TableHead className="text-right text-xs">Ativos</TableHead>
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              {ccs.map((c) => (
-                <TableRow key={c.id}>
-                  <TableCell className="py-1 font-mono text-xs">{c.codigo}</TableCell>
-                  <TableCell className="py-1 text-sm">{c.nome}</TableCell>
-                  <TableCell className="py-1 text-right font-mono text-xs">{c.colaboradores_ativos}</TableCell>
-                </TableRow>
-              ))}
-            </TableBody>
-          </Table>
+        <div className="max-h-[340px] overflow-y-auto">
+          <ArvoreCentrosCusto arvore={arvore} editar={editar}
+                              onMudou={() => { carregarArvore(); onMudou(); }} />
         </div>
         {editar && (
           <div className="flex flex-wrap items-end gap-2">
             <Input type="number" placeholder="Cód." value={novo.codigo || ""}
                    onChange={(e) => setNovo({ ...novo, codigo: Number(e.target.value) })}
                    className="h-8 w-20 font-mono text-xs" />
-            <Input placeholder="Novo centro de custo" value={novo.nome}
+            <Input placeholder="Novo núcleo (raiz)" value={novo.nome}
                    onChange={(e) => setNovo({ ...novo, nome: e.target.value })}
                    className="h-8 w-56 text-xs" />
             <Button size="sm" variant="outline" className="h-8 gap-1 text-xs" onClick={criar}>

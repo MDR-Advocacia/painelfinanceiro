@@ -27,13 +27,22 @@ class DpTabelaFiscalSerializer(serializers.ModelSerializer):
 
 class DpCentroCustoSerializer(serializers.ModelSerializer):
     colaboradores_ativos = serializers.SerializerMethodField()
+    pai_id = serializers.PrimaryKeyRelatedField(
+        source='pai', queryset=DpCentroCusto.objects.all(), allow_null=True, required=False)
+    pai_nome = serializers.CharField(source='pai.nome', read_only=True, default=None)
+    nome_curto = serializers.CharField(read_only=True)
+    tem_filhos = serializers.SerializerMethodField()
 
     class Meta:
         model = DpCentroCusto
-        fields = ['id', 'codigo', 'nome', 'ativo', 'colaboradores_ativos']
+        fields = ['id', 'codigo', 'nome', 'nome_curto', 'pai_id', 'pai_nome',
+                  'tem_filhos', 'ativo', 'colaboradores_ativos']
 
     def get_colaboradores_ativos(self, obj):
         return obj.colaboradores.filter(status='ativo').count()
+
+    def get_tem_filhos(self, obj):
+        return obj.filhos.exists()
 
 
 class DpCargoSerializer(serializers.ModelSerializer):

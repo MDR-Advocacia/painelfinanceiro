@@ -4,7 +4,7 @@
 from datetime import date, datetime
 
 from django.db import transaction
-from django.db.models import Max, Q
+from django.db.models import Count, Max, Q
 from rest_framework import status, viewsets
 from rest_framework.decorators import action, api_view, permission_classes
 from rest_framework.response import Response
@@ -59,6 +59,32 @@ class DpCentroCustoViewSet(viewsets.ModelViewSet):
     queryset = DpCentroCusto.objects.all()
     serializer_class = DpCentroCustoSerializer
     permission_classes = _PERM
+
+    @action(detail=False, methods=["get"])
+    def arvore(self, request):
+        """Centros de custo em árvore (núcleo → subnúcleos) com totais somados."""
+        todos = list(DpCentroCusto.objects.select_related("pai").all())
+        ativos = {}
+        for cc_id, n in (DpColaborador.objects.filter(status="ativo")
+                         .values_list("centro_custo_id").annotate(n=Count("id"))):
+            ativos[cc_id] = n
+        filhos_de = {}
+        for c in todos:
+            filhos_de.setdefault(c.pai_id, []).append(c)
+
+        def montar(c):
+            filhos = [montar(f) for f in sorted(filhos_de.get(c.id, []), key=lambda x: x.nome)]
+            proprios = ativos.get(c.id, 0)
+            return {
+                "id": str(c.id), "codigo": c.codigo, "nome": c.nome,
+                "nome_curto": (c.nome_curto if c.pai_id else c.nome), "ativo": c.ativo,
+                "colaboradores_ativos": proprios,
+                "total_com_filhos": proprios + sum(f["total_com_filhos"] for f in filhos),
+                "filhos": filhos,
+            }
+
+        raizes = sorted(filhos_de.get(None, []), key=lambda x: (x.codigo, x.nome))
+        return Response([montar(r) for r in raizes])
 
     def perform_create(self, serializer):
         obj = serializer.save()

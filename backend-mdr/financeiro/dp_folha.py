@@ -57,8 +57,17 @@ def calcular_inss(salario: float, faixas: list) -> tuple:
 
 def calcular_item(colab: DpColaborador, lanc, comp: DpCompetencia, fiscal: DpTabelaFiscal) -> dict:
     """Pipeline por colaborador — as colunas da planilha, com memória de cálculo."""
-    bruto = colab.salario_bruto or 0.0
-    vt, va, saldo = colab.vt or 0.0, colab.va or 0.0, colab.saldo_livre or 0.0
+    # ajuste pontual do mês tem precedência sobre a ficha (não altera o cadastro)
+    def _ov(campo, padrao):
+        v = getattr(lanc, campo, None) if lanc else None
+        return padrao if v is None else v
+
+    bruto = _ov("salario_override", colab.salario_bruto or 0.0)
+    vt = _ov("vt_override", colab.vt or 0.0)
+    va = _ov("va_override", colab.va or 0.0)
+    saldo = _ov("saldo_livre_override", colab.saldo_livre or 0.0)
+    ajustada = bool(lanc and (lanc.salario_override is not None or lanc.vt_override is not None
+                              or lanc.va_override is not None or lanc.saldo_livre_override is not None))
     f_dias = (lanc.faltas_dias if lanc else 0.0) or 0.0
     f_horas = (lanc.faltas_horas if lanc else 0.0) or 0.0
     premio = (lanc.premiacoes if lanc else 0.0) or 0.0
@@ -118,6 +127,7 @@ def calcular_item(colab: DpColaborador, lanc, comp: DpCompetencia, fiscal: DpTab
     provisoes = round(decimo + ferias + terco + fgts + multa + recesso, 2)
     return {
         "matricula": colab.matricula, "nome": colab.nome, "regime": colab.regime,
+        "cargo_nome": (colab.cargo.nome if getattr(colab, "cargo_id", None) else "") or "",
         "centro_custo_nome": colab.centro_custo.nome if colab.centro_custo_id else "",
         "salario_bruto": bruto, "vt": vt, "va": va, "saldo_livre": saldo,
         "faltas_dias": f_dias, "faltas_horas": f_horas,
@@ -131,6 +141,8 @@ def calcular_item(colab: DpColaborador, lanc, comp: DpCompetencia, fiscal: DpTab
         "inss_patronal": patronal, "custo_provisoes": provisoes,
         "custo_total": round(total_pagar + provisoes + patronal, 2),
         "memoria": mem,
+        "ajuste_manual": ajustada,
+        "ajuste_motivo": (lanc.ajuste_motivo if lanc else "") or "",
     }
 
 
@@ -257,7 +269,15 @@ class DpCompetenciaViewSet(viewsets.ViewSet):
         if request.query_params.get("regime"):
             qs = qs.filter(regime=request.query_params["regime"])
         if request.query_params.get("cc"):
-            qs = qs.filter(centro_custo_nome=request.query_params["cc"])
+            # aceita id do centro de custo e traz junto os subnúcleos (subárvore)
+            from .models import DpCentroCusto
+            cc = DpCentroCusto.objects.filter(pk=request.query_params["cc"]).first()
+            if cc:
+                nomes = list(DpCentroCusto.objects.filter(id__in=cc.descendentes_ids())
+                             .values_list("nome", flat=True))
+                qs = qs.filter(centro_custo_nome__in=nomes)
+            else:
+                qs = qs.filter(centro_custo_nome=request.query_params["cc"])
         total = qs.count()
         from django.db.models import Sum
         ag = qs.aggregate(pagar=Sum("total_pagar"), prov=Sum("custo_provisoes"),
@@ -271,7 +291,7 @@ class DpCompetenciaViewSet(viewsets.ViewSet):
                   "faltas_dias", "faltas_horas", "desc_faltas", "desc_inss", "desc_vt",
                   "vt_com_faltas", "va_com_faltas", "saldo_livre", "premiacoes",
                   "acerto_contabil", "total_pagar", "custo_provisoes", "inss_patronal",
-                  "custo_total"]
+                  "custo_total", "ajuste_manual", "ajuste_motivo", "vt", "va", "cargo_nome"]
         items = []
         for it in qs[offset:offset + limit]:
             row = {k: getattr(it, k) for k in campos}
@@ -309,6 +329,79 @@ class DpCompetenciaViewSet(viewsets.ViewSet):
         comp.save()
         audit(request, "enviar_revisao", "dp_competencia", comp.id)
         return Response(_comp_row(comp))
+
+    @action(detail=True, methods=["post"])
+    def desfazer_revisao(self, request, pk=None):
+        """Volta de \"Em revisão\" para \"Aberta\" (o operador percebeu que faltava
+        algo antes de alguém aprovar). Fica registrado na auditoria."""
+        comp = DpCompetencia.objects.get(pk=pk)
+        if comp.status != "em_revisao":
+            return Response({"detail": f"A competência está {comp.status}."}, status=409)
+        quem_enviou = comp.enviada_revisao_por
+        comp.status = "aberta"
+        comp.enviada_revisao_por = ""
+        comp.save()
+        audit(request, "desfazer_revisao", "dp_competencia", comp.id,
+              antes={"status": "em_revisao"},
+              depois={"status": "aberta", "enviada_revisao_por": quem_enviou})
+        return Response(_comp_row(comp))
+
+    @action(detail=True, methods=["post"])
+    def ajustar(self, request, pk=None):
+        """AJUSTE PONTUAL de um colaborador NESTA competência (só com a folha
+        aberta). Não altera a ficha: o valor vale só neste mês, exige MOTIVO e
+        fica destacado na auditoria.
+
+        Body: {colaborador_id, salario?, vt?, va?, saldo_livre?, motivo}
+        Campo ausente/null = volta a usar o valor da ficha.
+        """
+        comp = DpCompetencia.objects.get(pk=pk)
+        if comp.status != "aberta":
+            return Response(
+                {"detail": "Ajuste pontual só com a competência ABERTA. "
+                           "Desfaça o envio à revisão (ou reabra) antes."}, status=409)
+        colab = DpColaborador.objects.filter(pk=request.data.get("colaborador_id")).first()
+        if not colab:
+            return Response({"detail": "Colaborador não encontrado."}, status=400)
+        motivo = (request.data.get("motivo") or "").strip()
+        if len(motivo) < 5:
+            return Response({"detail": "Explique o motivo do ajuste (mínimo 5 caracteres)."},
+                            status=400)
+
+        def num_ou_none(k):
+            v = request.data.get(k, "__ausente__")
+            if v in ("__ausente__", None, ""):
+                return None
+            try:
+                return float(v)
+            except (TypeError, ValueError):
+                return None
+
+        lanc, _ = DpLancamento.objects.get_or_create(competencia=comp, colaborador=colab)
+        antes = {"salario_bruto": lanc.salario_override if lanc.salario_override is not None else colab.salario_bruto,
+                 "vt": lanc.vt_override if lanc.vt_override is not None else colab.vt,
+                 "va": lanc.va_override if lanc.va_override is not None else colab.va,
+                 "saldo_livre": lanc.saldo_livre_override if lanc.saldo_livre_override is not None else colab.saldo_livre}
+        lanc.salario_override = num_ou_none("salario")
+        lanc.vt_override = num_ou_none("vt")
+        lanc.va_override = num_ou_none("va")
+        lanc.saldo_livre_override = num_ou_none("saldo_livre")
+        lanc.ajuste_motivo = motivo
+        lanc.ajuste_autor = _quem(request)
+        lanc.ajuste_em = timezone.now()
+        lanc.save()
+
+        fiscal = tabela_fiscal_para(comp.ano, comp.mes)
+        d = calcular_item(colab, lanc, comp, fiscal)
+        DpFolhaItem.objects.update_or_create(competencia=comp, colaborador=colab, defaults=d)
+
+        depois = {"salario_bruto": d["salario_bruto"], "vt": d["vt"], "va": d["va"],
+                  "saldo_livre": d["saldo_livre"]}
+        audit(request, "ajuste_pontual", "dp_folha_item", lanc.id,
+              antes={**antes, "colaborador": colab.nome},
+              depois={**depois, "colaborador": colab.nome, "competencia": f"{comp.mes:02d}/{comp.ano}",
+                      "motivo": motivo})
+        return Response(d)
 
     @action(detail=True, methods=["post"])
     def aprovar(self, request, pk=None):

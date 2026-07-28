@@ -2,7 +2,13 @@
 import { API_URL, authHeaders } from "@/hooks/useAuth";
 
 export interface DpCentroCusto {
-  id: string; codigo: number; nome: string; ativo: boolean; colaboradores_ativos: number;
+  id: string; codigo: number; nome: string; nome_curto?: string;
+  pai_id?: string | null; pai_nome?: string | null; tem_filhos?: boolean;
+  ativo: boolean; colaboradores_ativos: number;
+}
+export interface DpCcNo {
+  id: string; codigo: number; nome: string; nome_curto: string; ativo: boolean;
+  colaboradores_ativos: number; total_com_filhos: number; filhos: DpCcNo[];
 }
 export interface DpCargo {
   id: string; area: string; nome: string; salario_base: number;
@@ -74,6 +80,7 @@ export const dpApi = {
       .then((r) => j<{ matricula: number }>(r)),
 
   ccs: () => fetch(`${API_URL}/dp/centros-custo/`, { headers: authHeaders() }).then((r) => j<DpCentroCusto[]>(r)),
+  ccArvore: () => fetch(`${API_URL}/dp/centros-custo/arvore/`, { headers: authHeaders() }).then((r) => j<DpCcNo[]>(r)),
   cargos: () => fetch(`${API_URL}/dp/cargos/`, { headers: authHeaders() }).then((r) => j<DpCargo[]>(r)),
 
   importar: (arquivo: File) => {
@@ -98,7 +105,8 @@ export interface DpCompetencia {
 }
 export interface DpFolhaItem {
   id: string; colaborador_id: string; matricula: number; nome: string; regime: string;
-  centro_custo_nome: string; salario_bruto: number;
+  cargo_nome?: string; centro_custo_nome: string; salario_bruto: number;
+  vt?: number; va?: number; ajuste_manual?: boolean; ajuste_motivo?: string;
   faltas_dias: number; faltas_horas: number; desc_faltas: number;
   desc_inss: number; desc_vt: number; vt_com_faltas: number; va_com_faltas: number;
   saldo_livre: number; premiacoes: number; acerto_contabil: number;
@@ -136,6 +144,13 @@ export const folhaApi = {
     fetch(`${API_URL}/dp/competencias/${id}/enviar_revisao/`, { method: "POST", headers: H() }).then((r) => j<DpCompetencia>(r)),
   aprovar: (id: string) =>
     fetch(`${API_URL}/dp/competencias/${id}/aprovar/`, { method: "POST", headers: H() }).then((r) => j<DpCompetencia>(r)),
+  desfazerRevisao: (id: string) =>
+    fetch(`${API_URL}/dp/competencias/${id}/desfazer_revisao/`, { method: "POST", headers: H() })
+      .then((r) => j<DpCompetencia>(r)),
+  ajustar: (id: string, dados: { colaborador_id: string; salario?: number | null; vt?: number | null;
+    va?: number | null; saldo_livre?: number | null; motivo: string }) =>
+    fetch(`${API_URL}/dp/competencias/${id}/ajustar/`, { method: "POST", headers: H(), body: JSON.stringify(dados) })
+      .then((r) => j<DpFolhaItem>(r)),
   reabrir: (id: string, justificativa: string) =>
     fetch(`${API_URL}/dp/competencias/${id}/reabrir/`, { method: "POST", headers: H(), body: JSON.stringify({ justificativa }) })
       .then((r) => j<DpCompetencia>(r)),
@@ -154,6 +169,8 @@ export interface DpDashboard {
   por_cc_qtd: { nome: string; quantidade: number; salario_medio: number }[];
   custo_por_cc: { nome: string; quantidade: number; custo: number; custo_medio: number }[];
   custo_por_regime: { regime: string; quantidade: number; custo: number; custo_medio: number }[];
+  custo_por_cargo: { cargo: string; regime: string; quantidade: number; custo: number;
+    custo_medio: number; salario_medio: number }[];
   custo_medio_pessoa: number;
   participacao: { folha?: number; provisoes?: number; patronal?: number };
   variacao_custo: { percent: number; valor: number } | null;

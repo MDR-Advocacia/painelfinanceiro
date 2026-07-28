@@ -227,6 +227,37 @@ export default function DashboardDpTab({ onAbrirQuadro }: {
         </Painel>
       </div>
 
+      {/* Custo médio por cargo */}
+      {d.custo_por_cargo?.length > 0 && (
+        <Painel titulo="Custo médio por cargo"
+                ajuda="Quanto custa, em média, cada pessoa de cada cargo — já incluindo benefícios, provisões e encargos. Útil para dimensionar contratações.">
+          <div className="max-h-80 overflow-y-auto">
+            <table className="w-full min-w-[520px] text-sm">
+              <thead className="sticky top-0 bg-card">
+                <tr className="border-b text-xs text-muted-foreground">
+                  <th className="py-1.5 text-left font-medium">Cargo</th>
+                  <th className="py-1.5 text-left font-medium">Contrato</th>
+                  <th className="py-1.5 text-right font-medium">Pessoas</th>
+                  <th className="py-1.5 text-right font-medium">Salário médio</th>
+                  <th className="py-1.5 text-right font-medium">Custo médio</th>
+                </tr>
+              </thead>
+              <tbody>
+                {d.custo_por_cargo.map((c, i) => (
+                  <tr key={i} className="border-b last:border-0 hover:bg-muted/50">
+                    <td className="max-w-[220px] truncate py-1.5">{c.cargo}</td>
+                    <td className="py-1.5 text-xs text-muted-foreground">{REGIME_LABELS[c.regime] || c.regime}</td>
+                    <td className="py-1.5 text-right font-mono text-xs">{c.quantidade}</td>
+                    <td className="py-1.5 text-right font-mono text-xs">{fmtBRL(c.salario_medio)}</td>
+                    <td className="py-1.5 text-right font-mono text-xs font-semibold">{fmtBRL(c.custo_medio)}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </Painel>
+      )}
+
       {/* Custo médio por tipo de contrato */}
       {d.custo_por_regime?.length > 0 && (
         <Painel titulo="Custo médio por tipo de contrato"
