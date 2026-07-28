@@ -13,7 +13,7 @@ from django.http import HttpResponse
 from rest_framework.decorators import api_view, permission_classes
 from rest_framework.response import Response
 
-from .models import DpColaborador, DpCompetencia, DpEvento
+from .models import DpCentroCusto, DpColaborador, DpCompetencia, DpEvento
 from .views import modulo_permission
 
 _PERM = [modulo_permission(read_any=["pessoal"], write="pessoal")]
@@ -177,6 +177,22 @@ def dp_relatorio_competencia(request, pk):
         return _resposta_excel(wb, f"rateio_cc_{comp.ano}_{comp.mes:02d}.xlsx")
 
     # folha analítica
+    if formato == "pdf":
+        rows = [[it.matricula, it.nome[:32], REG_LABEL.get(it.regime, it.regime),
+                 it.centro_custo_nome[:24], _brl(it.salario_bruto), _brl(it.desc_inss),
+                 _brl(it.desc_vt), _brl(it.total_pagar), _brl(it.custo_total)]
+                for it in comp.itens.all()]
+        tot = ["TOTAL", "", "", "", "", "", "",
+               _brl(sum(i.total_pagar for i in comp.itens.all())),
+               _brl(sum(i.custo_total for i in comp.itens.all()))]
+        return _pdf_generico(f"Folha Analítica — {rotulo}",
+                             f"{len(rows)} colaboradores · status: {comp.status}",
+                             ["Mat.", "Nome", "Regime", "Centro de Custo", "Bruto",
+                              "INSS", "VT 6%", "A pagar", "Custo total"],
+                             rows + [tot], [16, 62, 24, 46, 24, 22, 22, 26, 28],
+                             _quem(request), f"folha_{comp.ano}_{comp.mes:02d}.pdf",
+                             aligns_dir={4, 5, 6, 7, 8}, linha_total=True, paisagem=True)
+
     headers = ["Mat.", "Nome", "Regime", "Centro de Custo", "Sal. Bruto", "Faltas (d)",
                "Faltas (h)", "Desc. Faltas", "Desc. INSS", "Desc. VT", "VT", "VA",
                "Saldo Livre", "Prêmios", "Acerto", "Total a Pagar", "13º", "Férias",
@@ -258,6 +274,239 @@ def _pdf_rateio(comp, rows, tot, usuario: str, rotulo: str) -> HttpResponse:
     return resp
 
 
+def _pdf_generico(titulo: str, subtitulo: str, headers: list, rows: list, larguras: list,
+                  usuario: str, nome_arquivo: str, aligns_dir: set = None,
+                  linha_total: bool = False, paisagem: bool = False) -> HttpResponse:
+    """PDF timbrado genérico (usado por quadro, folha, catálogos, simulação…)."""
+    from reportlab.lib import colors
+    from reportlab.lib.pagesizes import A4, landscape
+    from reportlab.lib.styles import ParagraphStyle
+    from reportlab.lib.units import mm
+    from reportlab.platypus import (Image, Paragraph, SimpleDocTemplate, Spacer, Table,
+                                    TableStyle)
+
+    buf = BytesIO()
+    doc = SimpleDocTemplate(buf, pagesize=landscape(A4) if paisagem else A4,
+                            topMargin=12 * mm, bottomMargin=12 * mm,
+                            leftMargin=12 * mm, rightMargin=12 * mm, title=titulo)
+    navy = colors.HexColor("#0A1940")
+    azul = colors.HexColor("#1E7BFF")
+    story = []
+    if os.path.exists(_LOGO):
+        story.append(Image(_LOGO, width=40 * mm, height=14.2 * mm, hAlign="LEFT"))
+    story.append(Spacer(1, 3 * mm))
+    story.append(Paragraph(titulo, ParagraphStyle("t", fontSize=15, textColor=navy,
+                                                  fontName="Helvetica-Bold")))
+    story.append(Paragraph(
+        f"{subtitulo} · gerado por {usuario} em {datetime.now().strftime('%d/%m/%Y %H:%M')}",
+        ParagraphStyle("s", fontSize=7.5, textColor=colors.HexColor("#666666"))))
+    story.append(Spacer(1, 5 * mm))
+
+    data = [headers] + [[str(c) for c in r] for r in rows]
+    t = Table(data, colWidths=[w * mm for w in larguras], repeatRows=1)
+    estilo = [
+        ("BACKGROUND", (0, 0), (-1, 0), navy),
+        ("TEXTCOLOR", (0, 0), (-1, 0), colors.white),
+        ("FONTNAME", (0, 0), (-1, 0), "Helvetica-Bold"),
+        ("FONTSIZE", (0, 0), (-1, -1), 6.8),
+        ("ROWBACKGROUNDS", (0, 1), (-1, -1 if not linha_total else -2),
+         [colors.white, colors.HexColor("#F2F6FF")]),
+        ("GRID", (0, 0), (-1, -1), 0.3, colors.HexColor("#CCD6EE")),
+        ("TOPPADDING", (0, 0), (-1, -1), 3),
+        ("BOTTOMPADDING", (0, 0), (-1, -1), 3),
+        ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
+    ]
+    for c in (aligns_dir or set()):
+        estilo.append(("ALIGN", (c, 0), (c, -1), "RIGHT"))
+    if linha_total:
+        estilo += [("BACKGROUND", (0, -1), (-1, -1), azul),
+                   ("TEXTCOLOR", (0, -1), (-1, -1), colors.white),
+                   ("FONTNAME", (0, -1), (-1, -1), "Helvetica-Bold")]
+    t.setStyle(TableStyle(estilo))
+    story.append(t)
+    story.append(Spacer(1, 6 * mm))
+    story.append(Paragraph("MDR Advocacia · Painel Financeiro — powered by Duna.Tech",
+                           ParagraphStyle("f", fontSize=7, textColor=colors.HexColor("#999999"))))
+    doc.build(story)
+    resp = HttpResponse(buf.getvalue(), content_type="application/pdf")
+    resp["Content-Disposition"] = f'attachment; filename="{nome_arquivo}"'
+    resp["Access-Control-Expose-Headers"] = "Content-Disposition"
+    return resp
+
+
+def _brl(v) -> str:
+    try:
+        return f"R$ {float(v):,.2f}".replace(",", "@").replace(".", ",").replace("@", ".")
+    except (TypeError, ValueError):
+        return str(v)
+
+
+@api_view(["GET"])
+@permission_classes(_PERM)
+def dp_relatorio_catalogos(request):
+    """Cargos + Centros de Custo (Excel com 2 abas, ou PDF)."""
+    from .models import DpCargo
+    cargos = list(DpCargo.objects.all())
+    ccs = list(DpCentroCusto.objects.all())
+    usuario = _quem(request)
+
+    if request.query_params.get("formato") == "pdf":
+        rows = [[c.area, c.nome, _brl(c.salario_base), c.dias_mes, c.carga_horaria_mes] for c in cargos]
+        return _pdf_generico("Plano de Cargos", f"{len(rows)} cargos",
+                             ["Área", "Cargo", "Salário base", "Dias/mês", "Carga/mês"],
+                             rows, [20, 80, 30, 20, 25], usuario, "plano_cargos.pdf",
+                             aligns_dir={2, 3, 4})
+
+    wb, ws = _wb_timbrado("Plano de Cargos", f"{len(cargos)} cargos cadastrados", usuario)
+    _tabela(ws, 5, ["Área", "Cargo", "Salário base (R$)", "Dias/mês", "Carga horária/mês", "Ativo"],
+            [[c.area, c.nome, c.salario_base, c.dias_mes, c.carga_horaria_mes,
+              "Sim" if c.ativo else "Não"] for c in cargos],
+            larguras=[10, 40, 18, 11, 18, 8], money_cols={3})
+    ws2 = wb.create_sheet("Centros de Custo")
+    _tabela(ws2, 1, ["Código", "Centro de Custo", "Colaboradores ativos"],
+            [[c.codigo, c.nome, c.colaboradores.filter(status="ativo").count()] for c in ccs],
+            larguras=[10, 40, 20])
+    return _resposta_excel(wb, "cargos_e_centros_custo.xlsx")
+
+
+@api_view(["GET"])
+@permission_classes(_PERM)
+def dp_relatorio_auditoria(request):
+    """Trilha de auditoria em Excel (últimos N registros)."""
+    from .models import DpAuditLog
+    try:
+        limit = min(int(request.query_params.get("limit", 2000)), 20000)
+    except ValueError:
+        limit = 2000
+    logs = DpAuditLog.objects.all()[:limit]
+    rows = [[a.created_at.strftime("%d/%m/%Y %H:%M:%S"), a.usuario, a.acao, a.entidade,
+             a.entidade_id, str(a.antes or "")[:500], str(a.depois or "")[:500]] for a in logs]
+    wb, ws = _wb_timbrado("Trilha de Auditoria — Controle de Pessoal",
+                          f"{len(rows)} registro(s) mais recentes", _quem(request))
+    _tabela(ws, 5, ["Data/hora", "Usuário", "Ação", "Entidade", "ID", "Antes", "Depois"],
+            rows, larguras=[18, 26, 16, 20, 22, 60, 60])
+    return _resposta_excel(wb, "auditoria_dp.xlsx")
+
+
+@api_view(["GET"])
+@permission_classes(_PERM)
+def dp_relatorio_dashboard(request):
+    """Dashboard do DP em Excel: KPIs + série de custo + movimentação."""
+    from .dp_relatorios import dp_dashboard as _dash  # reusa o cálculo
+    dados = _dash(request._request if hasattr(request, "_request") else request).data
+    usuario = _quem(request)
+    wb, ws = _wb_timbrado("Dashboard — Controle de Pessoal",
+                          f"Headcount ativo: {dados['headcount']}", usuario)
+    _tabela(ws, 5, ["Indicador", "Valor"], [
+        ["Headcount ativo", dados["headcount"]],
+        ["Admissões no mês", dados["admissoes_mes"]],
+        ["Desligamentos no mês", dados["desligamentos_mes"]],
+        ["Turnover do mês (%)", dados["turnover_mes"]],
+    ] + [[f"Headcount — {REG_LABEL.get(k, k)}", v] for k, v in dados["por_regime"].items()],
+        larguras=[34, 16])
+    ws2 = wb.create_sheet("Custo por competência")
+    _tabela(ws2, 1, ["Competência", "Status", "Headcount", "Folha (R$)", "Provisões (R$)",
+                     "Patronal (R$)", "Custo total (R$)"],
+            [[l["mes"], l["status"], l["headcount"], l["folha"], l["provisoes"],
+              l["patronal"], l["custo_total"]] for l in dados["serie_custo"]],
+            larguras=[14, 12, 12, 16, 16, 16, 18], money_cols={4, 5, 6, 7})
+    ws3 = wb.create_sheet("Movimentação")
+    _tabela(ws3, 1, ["Mês", "Admissões", "Desligamentos"],
+            [[l["mes"], l["admissoes"], l["desligamentos"]] for l in dados["serie_mov"]],
+            larguras=[14, 14, 16])
+    return _resposta_excel(wb, "dashboard_dp.xlsx")
+
+
+REG_LABEL = {"estagiario": "Estagiário (TCE)", "clt": "CLT",
+             "associado": "Associado", "pj": "PJ"}
+
+
+@api_view(["POST"])
+@permission_classes(_PERM)
+def dp_relatorio_simulacao(request):
+    """Recebe o RESULTADO da simulação (do front) e devolve Excel ou PDF timbrado."""
+    d = request.data or {}
+    formato = request.query_params.get("formato", "excel")
+    nome = d.get("nome") or "Cenário"
+    usuario = _quem(request)
+    atual, cen, delta = d.get("atual", {}), d.get("cenario", {}), d.get("delta", {})
+    resumo = [
+        ["Headcount", atual.get("headcount", 0), cen.get("headcount", 0), delta.get("headcount", 0)],
+        ["Folha (a pagar)", atual.get("folha", 0), cen.get("folha", 0), delta.get("folha", 0)],
+        ["Provisões", atual.get("provisoes", 0), cen.get("provisoes", 0), delta.get("provisoes", 0)],
+        ["INSS patronal", atual.get("patronal", 0), cen.get("patronal", 0), delta.get("patronal", 0)],
+        ["CUSTO TOTAL", atual.get("custo_total", 0), cen.get("custo_total", 0), delta.get("custo_total", 0)],
+    ]
+    sub = (f"Impacto mensal: {_brl(d.get('impacto_mensal', 0))} · "
+           f"anual ({d.get('meses', 12)} meses): {_brl(d.get('impacto_anual', 0))}")
+
+    if formato == "pdf":
+        rows = [[r[0], _brl(r[1]) if r[0] != "Headcount" else r[1],
+                 _brl(r[2]) if r[0] != "Headcount" else r[2],
+                 _brl(r[3]) if r[0] != "Headcount" else r[3]] for r in resumo]
+        return _pdf_generico(f"Simulação — {nome}", sub,
+                             ["Indicador", "Cenário atual", "Cenário simulado", "Variação"],
+                             rows, [55, 40, 40, 40], usuario, "simulacao.pdf",
+                             aligns_dir={1, 2, 3}, linha_total=True)
+
+    wb, ws = _wb_timbrado(f"Simulação — {nome}", sub, usuario)
+    _tabela(ws, 5, ["Indicador", "Cenário atual", "Cenário simulado", "Variação"],
+            resumo, larguras=[28, 20, 20, 18], money_cols={2, 3, 4})
+    novos = d.get("detalhe_novos") or []
+    if novos:
+        ws2 = wb.create_sheet("Contratações simuladas")
+        _tabela(ws2, 1, ["Vaga", "Regime", "Centro de Custo", "Salário bruto",
+                         "A pagar", "Provisões", "Patronal", "Custo total"],
+                [[n["nome"], REG_LABEL.get(n["regime"], n["regime"]), n["cc"], n["salario_bruto"],
+                  n["total_pagar"], n["provisoes"], n["patronal"], n["custo_total"]] for n in novos],
+                larguras=[26, 14, 24, 15, 14, 14, 14, 16], money_cols={4, 5, 6, 7, 8})
+    porcc = d.get("por_centro_custo") or []
+    if porcc:
+        ws3 = wb.create_sheet("Impacto por CC")
+        _tabela(ws3, 1, ["Centro de Custo", "Novas vagas", "Custo mensal"],
+                [[c["centro_custo"], c["headcount"], c["custo_total"]] for c in porcc],
+                larguras=[32, 14, 18], money_cols={3})
+    return _resposta_excel(wb, "simulacao.xlsx")
+
+
+@api_view(["GET"])
+@permission_classes(_PERM)
+def dp_relatorio_projecao(request):
+    """Projeção de gastos + aprovisionamento em Excel ou PDF."""
+    from .dp_simulacao import dp_projecao as _proj
+    dados = _proj(request._request if hasattr(request, "_request") else request).data
+    usuario = _quem(request)
+    p = dados["premissas"]
+    sub = (f"{p['meses']} meses · reajuste {p['reajuste']:.1%} no mês {p['mes_reajuste']} · "
+           f"crescimento {p['crescimento']:.1%} a.m.")
+    linhas = dados["linhas"]
+
+    if request.query_params.get("formato") == "pdf":
+        rows = [[l["mes"], l["headcount"], _brl(l["folha"]), _brl(l["provisoes"]),
+                 _brl(l["patronal"]), _brl(l["custo_total"]), _brl(l["provisionado_acumulado"])]
+                for l in linhas]
+        return _pdf_generico("Projeção de Gastos com Pessoal", sub,
+                             ["Mês", "HC", "Folha", "Provisões", "Patronal", "Custo total",
+                              "Provisionado acum."],
+                             rows, [20, 14, 30, 30, 28, 32, 36], usuario, "projecao.pdf",
+                             aligns_dir={1, 2, 3, 4, 5, 6}, paisagem=True)
+
+    wb, ws = _wb_timbrado("Projeção de Gastos com Pessoal", sub, usuario)
+    _tabela(ws, 5, ["Mês", "Headcount", "Folha (R$)", "Provisões (R$)", "Patronal (R$)",
+                    "Custo total (R$)", "Provisionado acumulado (R$)"],
+            [[l["mes"], l["headcount"], l["folha"], l["provisoes"], l["patronal"],
+              l["custo_total"], l["provisionado_acumulado"]] for l in linhas],
+            larguras=[12, 12, 16, 16, 16, 18, 24], money_cols={3, 4, 5, 6, 7})
+    ap = dados["aprovisionamento"]
+    ws2 = wb.create_sheet("Aprovisionamento")
+    _tabela(ws2, 1, ["Verba provisionada", "Valor acumulado (R$)"],
+            [["13º salário", ap["decimo"]], ["Férias", ap["ferias"]], ["1/3 de férias", ap["terco"]],
+             ["FGTS", ap["fgts"]], ["Multa FGTS (40%)", ap["multa_fgts"]],
+             ["Recesso (estagiários)", ap["recesso"]], ["TOTAL", ap["total"]]],
+            larguras=[30, 24], money_cols={2})
+    return _resposta_excel(wb, "projecao_gastos.xlsx")
+
+
 @api_view(["GET"])
 @permission_classes(_PERM)
 def dp_relatorio_quadro(request):
@@ -266,6 +515,16 @@ def dp_relatorio_quadro(request):
     qs = DpColaborador.objects.select_related("centro_custo", "cargo").all()
     if status_f:
         qs = qs.filter(status=status_f)
+    if request.query_params.get("formato") == "pdf":
+        rows = [[c.matricula, c.nome[:34], REG_LABEL.get(c.regime, c.regime), c.status,
+                 c.centro_custo.nome[:26] if c.centro_custo_id else "",
+                 (c.cargo.nome[:26] if c.cargo_id else ""), _brl(c.salario_bruto)] for c in qs]
+        return _pdf_generico("Quadro de Pessoal",
+                             f"{len(rows)} colaborador(es)" + (f" · {status_f}" if status_f else " · todos"),
+                             ["Mat.", "Nome", "Regime", "Status", "Centro de Custo", "Cargo", "Sal. bruto"],
+                             rows, [16, 68, 26, 18, 55, 55, 28], _quem(request),
+                             "quadro_pessoal.pdf", aligns_dir={6}, paisagem=True)
+
     headers = ["Mat.", "Nome", "CPF", "Regime", "Status", "Unidade", "Área",
                "Centro de Custo", "Supervisor", "Equipe", "Cargo", "Admissão",
                "Demissão", "Sal. Bruto", "Saldo Livre", "VT", "VA"]

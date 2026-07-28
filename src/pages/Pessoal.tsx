@@ -4,7 +4,7 @@
 import { useCallback, useEffect, useState } from "react";
 import {
   Contact, Download, FileSpreadsheet, LayoutDashboard, Loader2, Plus, RefreshCw,
-  ScrollText, Search, UserMinus, Users, Wallet,
+  FileText, ScrollText, Search, Sliders, TrendingUp, UserMinus, Users, Wallet,
 } from "lucide-react";
 import { toast } from "sonner";
 
@@ -25,11 +25,13 @@ import {
 } from "@/components/ui/table";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import DashboardDpTab from "@/components/dp/DashboardDpTab";
+import ParametrosTab from "@/components/dp/ParametrosTab";
+import SimulacoesTab from "@/components/dp/SimulacoesTab";
 import FolhaTab from "@/components/dp/FolhaTab";
 import { usePermissions } from "@/hooks/usePermissions";
 import {
   type DpCargo, type DpCentroCusto, type DpColaborador, type DpEvento, type DpResumo,
-  REGIME_LABELS, dpApi, fmtBRL, fmtData,
+  REGIME_LABELS, dpApi, exportApi, fmtBRL, fmtData,
 } from "@/services/dp";
 
 const PAGE = 50;
@@ -88,7 +90,8 @@ export default function Pessoal() {
           <TabsTrigger value="dash" className="gap-2"><LayoutDashboard className="h-4 w-4" /> Dashboard</TabsTrigger>
           <TabsTrigger value="quadro" className="gap-2"><Users className="h-4 w-4" /> Quadro</TabsTrigger>
           <TabsTrigger value="folha" className="gap-2"><Wallet className="h-4 w-4" /> Folha</TabsTrigger>
-          <TabsTrigger value="catalogos" className="gap-2"><Contact className="h-4 w-4" /> Cargos & CCs</TabsTrigger>
+          <TabsTrigger value="simulacoes" className="gap-2"><TrendingUp className="h-4 w-4" /> Previsão</TabsTrigger>
+          <TabsTrigger value="parametros" className="gap-2"><Sliders className="h-4 w-4" /> Parâmetros</TabsTrigger>
           {editar && (
             <TabsTrigger value="importar" className="gap-2"><FileSpreadsheet className="h-4 w-4" /> Importar</TabsTrigger>
           )}
@@ -104,8 +107,11 @@ export default function Pessoal() {
         <TabsContent value="folha" className="mt-4">
           <FolhaTab editar={editar} />
         </TabsContent>
-        <TabsContent value="catalogos" className="mt-4">
-          <CatalogosTab ccs={ccs} cargos={cargos} />
+        <TabsContent value="simulacoes" className="mt-4">
+          <SimulacoesTab ccs={ccs} cargos={cargos} />
+        </TabsContent>
+        <TabsContent value="parametros" className="mt-4">
+          <ParametrosTab ccs={ccs} cargos={cargos} editar={editar} onMudou={carregarBase} />
         </TabsContent>
         {editar && (
           <TabsContent value="importar" className="mt-4">
@@ -197,14 +203,13 @@ function QuadroTab({ ccs, cargos, editar, onMudou }: {
           <button onClick={carregar} className="ml-1 text-muted-foreground hover:text-foreground" title="Atualizar">
             <RefreshCw className={`h-4 w-4 ${loading ? "animate-spin" : ""}`} />
           </button>
-          <Button
-            size="sm" variant="outline" className="ml-auto gap-1"
-            onClick={() => {
-              import("@/services/dp").then(({ relatoriosApi }) =>
-                relatoriosApi.quadroExcel(status === TODOS ? "" : status).catch((e) => toast.error(e.message)));
-            }}
-          >
+          <Button size="sm" variant="outline" className="ml-auto gap-1"
+                  onClick={() => exportApi.quadro(status === TODOS ? "" : status, "excel").catch((e) => toast.error(e.message))}>
             <Download className="h-4 w-4" /> Excel
+          </Button>
+          <Button size="sm" variant="outline" className="gap-1"
+                  onClick={() => exportApi.quadro(status === TODOS ? "" : status, "pdf").catch((e) => toast.error(e.message))}>
+            <FileText className="h-4 w-4" /> PDF
           </Button>
           {editar && (
             <Button size="sm" className="glass-button gap-1 border-0" onClick={() => setNovoAberto(true)}>
@@ -597,69 +602,6 @@ function NovoDialog({ ccs, cargos, onClose, onCriou }: {
   );
 }
 
-/* ─────────────────────────── CATÁLOGOS ─────────────────────────── */
-
-function CatalogosTab({ ccs, cargos }: { ccs: DpCentroCusto[]; cargos: DpCargo[] }) {
-  return (
-    <div className="grid gap-4 lg:grid-cols-2">
-      <Card className="glass-card border-0">
-        <CardHeader>
-          <CardTitle className="text-base">Centros de Custo</CardTitle>
-          <CardDescription>Catálogo importado do CONFIG da planilha.</CardDescription>
-        </CardHeader>
-        <CardContent>
-          <Table>
-            <TableHeader>
-              <TableRow>
-                <TableHead className="text-xs">Cód.</TableHead>
-                <TableHead className="text-xs">Nome</TableHead>
-                <TableHead className="text-right text-xs">Ativos</TableHead>
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              {ccs.map((c) => (
-                <TableRow key={c.id}>
-                  <TableCell className="font-mono text-xs">{c.codigo}</TableCell>
-                  <TableCell className="text-sm">{c.nome}</TableCell>
-                  <TableCell className="text-right font-mono text-xs">{c.colaboradores_ativos}</TableCell>
-                </TableRow>
-              ))}
-            </TableBody>
-          </Table>
-        </CardContent>
-      </Card>
-      <Card className="glass-card border-0">
-        <CardHeader>
-          <CardTitle className="text-base">Plano de Cargos</CardTitle>
-          <CardDescription>Salário base, dias e carga horária (TB_Cargos).</CardDescription>
-        </CardHeader>
-        <CardContent>
-          <div className="max-h-[420px] overflow-y-auto">
-            <Table>
-              <TableHeader>
-                <TableRow>
-                  <TableHead className="text-xs">Área</TableHead>
-                  <TableHead className="text-xs">Cargo</TableHead>
-                  <TableHead className="text-right text-xs">Salário base</TableHead>
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {cargos.map((c) => (
-                  <TableRow key={c.id}>
-                    <TableCell className="text-xs">{c.area}</TableCell>
-                    <TableCell className="text-sm">{c.nome}</TableCell>
-                    <TableCell className="text-right font-mono text-xs">{fmtBRL(c.salario_base)}</TableCell>
-                  </TableRow>
-                ))}
-              </TableBody>
-            </Table>
-          </div>
-        </CardContent>
-      </Card>
-    </div>
-  );
-}
-
 /* ─────────────────────────── IMPORTAR ─────────────────────────── */
 
 function ImportarTab({ onImportou }: { onImportou: () => void }) {
@@ -739,7 +681,13 @@ function AuditoriaTab() {
   return (
     <Card className="glass-card border-0">
       <CardHeader>
-        <CardTitle className="text-base">Trilha de auditoria</CardTitle>
+        <div className="flex items-center justify-between gap-2">
+          <CardTitle className="text-base">Trilha de auditoria</CardTitle>
+          <Button size="sm" variant="outline" className="h-7 gap-1 text-xs"
+                  onClick={() => exportApi.auditoria().catch((e) => toast.error(e.message))}>
+            <Download className="h-3.5 w-3.5" /> Excel
+          </Button>
+        </div>
         <CardDescription>Toda escrita do módulo, imutável: quem, quando e o antes→depois.</CardDescription>
       </CardHeader>
       <CardContent className="space-y-3">

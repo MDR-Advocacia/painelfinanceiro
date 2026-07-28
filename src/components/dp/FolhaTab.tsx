@@ -254,9 +254,14 @@ function CompetenciaDetalhe({ comp, editar, onMudou }: {
               <Download className="h-3.5 w-3.5" /> Rateio
             </Button>
             <Button size="sm" variant="outline" className="gap-1"
+                    title="Folha analitica em PDF timbrado"
+                    onClick={() => relatoriosApi.folhaPdf(comp.id).catch((e) => toast.error(e.message))}>
+              <FileText className="h-3.5 w-3.5" /> PDF folha
+            </Button>
+            <Button size="sm" variant="outline" className="gap-1"
                     title="Rateio por CC em PDF timbrado (pro fechamento)"
                     onClick={() => relatoriosApi.rateioPdf(comp.id).catch((e) => toast.error(e.message))}>
-              <FileText className="h-3.5 w-3.5" /> PDF
+              <FileText className="h-3.5 w-3.5" /> PDF rateio
             </Button>
             <Button size="sm" variant={verRateio ? "default" : "outline"} className="gap-1"
                     onClick={() => setVerRateio((v) => !v)}>

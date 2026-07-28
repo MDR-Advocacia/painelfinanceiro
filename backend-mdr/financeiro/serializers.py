@@ -1,8 +1,28 @@
 from rest_framework import serializers
 from .models import (
     Cargo, Sede, Setor, VpdConfig, BaseReferencia,
-    DpCargo, DpCentroCusto, DpColaborador,
+    DpCargo, DpCentroCusto, DpColaborador, DpTabelaFiscal,
 )
+
+
+class DpTabelaFiscalSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = DpTabelaFiscal
+        fields = ['id', 'vigencia_inicio', 'inss_faixas', 'vt_percent', 'fgts_percent',
+                  'multa_fgts_percent', 'inss_patronal_percent', 'provisao_base',
+                  'created_at', 'updated_at']
+
+    def validate_inss_faixas(self, v):
+        if not isinstance(v, list) or not v:
+            raise serializers.ValidationError("Informe ao menos uma faixa de INSS.")
+        ultimo = 0
+        for f in v:
+            if not all(k in f for k in ("ate", "aliquota", "deducao")):
+                raise serializers.ValidationError("Cada faixa precisa de 'ate', 'aliquota' e 'deducao'.")
+            if float(f["ate"]) <= ultimo:
+                raise serializers.ValidationError("As faixas devem estar em ordem crescente de 'ate'.")
+            ultimo = float(f["ate"])
+        return v
 
 
 class DpCentroCustoSerializer(serializers.ModelSerializer):

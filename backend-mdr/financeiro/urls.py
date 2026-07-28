@@ -9,7 +9,11 @@ from .dp_views import (
     dp_audit_list, dp_importar,
 )
 from .dp_folha import DpCompetenciaViewSet
-from .dp_relatorios import dp_dashboard, dp_relatorio_competencia, dp_relatorio_quadro
+from .dp_relatorios import (
+    dp_dashboard, dp_relatorio_auditoria, dp_relatorio_catalogos, dp_relatorio_competencia,
+    dp_relatorio_dashboard, dp_relatorio_projecao, dp_relatorio_quadro, dp_relatorio_simulacao,
+)
+from .dp_simulacao import DpTabelaFiscalViewSet, dp_projecao, dp_simular
 from . import sso_views
 
 router = DefaultRouter()
@@ -24,6 +28,7 @@ router.register(r'dp/colaboradores', DpColaboradorViewSet, basename='dp-colabora
 router.register(r'dp/cargos', DpCargoViewSet, basename='dp-cargos')
 router.register(r'dp/centros-custo', DpCentroCustoViewSet, basename='dp-ccs')
 router.register(r'dp/competencias', DpCompetenciaViewSet, basename='dp-competencias')
+router.register(r'dp/tabelas-fiscais', DpTabelaFiscalViewSet, basename='dp-fiscais')
 
 urlpatterns = [
     path('', include(router.urls)),
@@ -34,5 +39,14 @@ urlpatterns = [
     path('dp/auditoria/', dp_audit_list), # trilha de auditoria do DP
     path('dp/dashboard/', dp_dashboard),  # KPIs + séries do DP
     path('dp/competencias/<uuid:pk>/relatorio/', dp_relatorio_competencia),  # folha/rateio (excel/pdf)
-    path('dp/relatorio-quadro/', dp_relatorio_quadro),  # quadro de pessoal (excel)
+    path('dp/relatorio-quadro/', dp_relatorio_quadro),  # quadro de pessoal (excel/pdf)
+    # Previsão de gastos: projeção, aprovisionamento e simulação de cenários
+    path('dp/projecao/', dp_projecao),
+    path('dp/simular/', dp_simular),
+    # Relatórios das demais abas (excel/pdf timbrados)
+    path('dp/relatorio-dashboard/', dp_relatorio_dashboard),
+    path('dp/relatorio-catalogos/', dp_relatorio_catalogos),
+    path('dp/relatorio-auditoria/', dp_relatorio_auditoria),
+    path('dp/relatorio-projecao/', dp_relatorio_projecao),
+    path('dp/relatorio-simulacao/', dp_relatorio_simulacao),
 ]

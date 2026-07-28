@@ -2,14 +2,17 @@
 // KPIs (headcount, movimentação, turnover, custo) + série de custo por
 // competência + movimentação mensal + composição por regime.
 import { useEffect, useState } from "react";
-import { Loader2 } from "lucide-react";
+import { Download, Loader2 } from "lucide-react";
+import { toast } from "sonner";
+
+import { Button } from "@/components/ui/button";
 import {
   Bar, BarChart, CartesianGrid, Cell, Legend, Line, LineChart, Pie, PieChart,
   ResponsiveContainer, Tooltip as RTooltip, XAxis, YAxis,
 } from "recharts";
 
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { type DpDashboard, REGIME_LABELS, fmtBRL, relatoriosApi } from "@/services/dp";
+import { type DpDashboard, REGIME_LABELS, exportApi, fmtBRL, relatoriosApi } from "@/services/dp";
 
 const CORES = ["#1E7BFF", "#0A1940", "#7FB5FF", "#F39C12"];
 
@@ -35,6 +38,12 @@ export default function DashboardDpTab() {
 
   return (
     <div className="space-y-4">
+      <div className="flex justify-end">
+        <Button size="sm" variant="outline" className="gap-1"
+                onClick={() => exportApi.dashboard().catch((e) => toast.error(e.message))}>
+          <Download className="h-3.5 w-3.5" /> Exportar dashboard (Excel)
+        </Button>
+      </div>
       <div className="grid grid-cols-2 gap-3 md:grid-cols-5">
         <KpiCard rotulo="Headcount ativo" valor={String(d.headcount)} />
         <KpiCard rotulo="Admissões (mês)" valor={String(d.admissoes_mes)} tom="text-emerald-600" />

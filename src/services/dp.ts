@@ -170,10 +170,109 @@ export const relatoriosApi = {
     baixar(`${API_URL}/dp/competencias/${compId}/relatorio/?tipo=folha&formato=excel`, "folha.xlsx"),
   rateioExcel: (compId: string) =>
     baixar(`${API_URL}/dp/competencias/${compId}/relatorio/?tipo=rateio&formato=excel`, "rateio.xlsx"),
+  folhaPdf: (compId: string) =>
+    baixar(`${API_URL}/dp/competencias/${compId}/relatorio/?tipo=folha&formato=pdf`, "folha.pdf"),
   rateioPdf: (compId: string) =>
     baixar(`${API_URL}/dp/competencias/${compId}/relatorio/?tipo=rateio&formato=pdf`, "rateio.pdf"),
   quadroExcel: (status = "") =>
     baixar(`${API_URL}/dp/relatorio-quadro/${status ? `?status=${status}` : ""}`, "quadro_pessoal.xlsx"),
+};
+
+// ── Previsão de gastos: projeção, aprovisionamento, simulação ──
+export interface DpProjecaoLinha {
+  mes: string; headcount: number; folha: number; provisoes: number;
+  patronal: number; custo_total: number; provisionado_acumulado: number;
+}
+export interface DpProjecao {
+  base: Record<string, number>;
+  premissas: { meses: number; reajuste: number; mes_reajuste: number; crescimento: number };
+  linhas: DpProjecaoLinha[];
+  aprovisionamento: Record<string, number>;
+  custo_12m: number;
+}
+export interface DpAdmissaoSim {
+  regime: string; salario: number; vt: number; va: number;
+  quantidade: number; cc_nome: string; cargo_id?: string | null;
+}
+export interface DpSimulacao {
+  nome: string;
+  atual: Record<string, number>; cenario: Record<string, number>; delta: Record<string, number>;
+  novas_contratacoes: Record<string, number>;
+  impacto_mensal: number; impacto_anual: number; custo_medio_por_novo: number;
+  por_centro_custo: { centro_custo: string; headcount: number; custo_total: number }[];
+  detalhe_novos: { nome: string; regime: string; cc: string; salario_bruto: number;
+    total_pagar: number; provisoes: number; patronal: number; custo_total: number }[];
+  meses: number;
+}
+export interface DpTabelaFiscal {
+  id: string; vigencia_inicio: string;
+  inss_faixas: { ate: number; aliquota: number; deducao: number }[];
+  vt_percent: number; fgts_percent: number; multa_fgts_percent: number;
+  inss_patronal_percent: number; provisao_base: "bruto_menos_inss" | "bruto";
+}
+
+export const previsaoApi = {
+  projecao: (p: { meses?: number; reajuste?: number; mes_reajuste?: number; crescimento?: number }) => {
+    const qs = new URLSearchParams();
+    Object.entries(p).forEach(([k, v]) => { if (v !== undefined) qs.set(k, String(v)); });
+    return fetch(`${API_URL}/dp/projecao/?${qs}`, { headers: authHeaders() }).then((r) => j<DpProjecao>(r));
+  },
+  simular: (body: { nome: string; admissoes: DpAdmissaoSim[]; desligamentos?: string[]; reajuste_percent?: number; meses?: number }) =>
+    fetch(`${API_URL}/dp/simular/`, { method: "POST", headers: H(), body: JSON.stringify(body) })
+      .then((r) => j<DpSimulacao>(r)),
+  fiscais: () => fetch(`${API_URL}/dp/tabelas-fiscais/`, { headers: authHeaders() }).then((r) => j<DpTabelaFiscal[]>(r)),
+  salvarFiscal: (id: string, dados: Partial<DpTabelaFiscal>) =>
+    fetch(`${API_URL}/dp/tabelas-fiscais/${id}/`, { method: "PATCH", headers: H(), body: JSON.stringify(dados) })
+      .then((r) => j<DpTabelaFiscal>(r)),
+  criarFiscal: (dados: Partial<DpTabelaFiscal>) =>
+    fetch(`${API_URL}/dp/tabelas-fiscais/`, { method: "POST", headers: H(), body: JSON.stringify(dados) })
+      .then((r) => j<DpTabelaFiscal>(r)),
+  salvarCargo: (id: string, dados: Partial<DpCargo>) =>
+    fetch(`${API_URL}/dp/cargos/${id}/`, { method: "PATCH", headers: H(), body: JSON.stringify(dados) })
+      .then((r) => j<DpCargo>(r)),
+  criarCargo: (dados: Partial<DpCargo>) =>
+    fetch(`${API_URL}/dp/cargos/`, { method: "POST", headers: H(), body: JSON.stringify(dados) }).then((r) => j<DpCargo>(r)),
+  salvarCc: (id: string, dados: Partial<DpCentroCusto>) =>
+    fetch(`${API_URL}/dp/centros-custo/${id}/`, { method: "PATCH", headers: H(), body: JSON.stringify(dados) })
+      .then((r) => j<DpCentroCusto>(r)),
+  criarCc: (dados: Partial<DpCentroCusto>) =>
+    fetch(`${API_URL}/dp/centros-custo/`, { method: "POST", headers: H(), body: JSON.stringify(dados) })
+      .then((r) => j<DpCentroCusto>(r)),
+};
+
+// Exports (Excel/PDF timbrados) de TODAS as abas
+export const exportApi = {
+  dashboard: () => baixar(`${API_URL}/dp/relatorio-dashboard/`, "dashboard_dp.xlsx"),
+  quadro: (status = "", formato: "excel" | "pdf" = "excel") => {
+    const qs = new URLSearchParams();
+    if (status) qs.set("status", status);
+    if (formato === "pdf") qs.set("formato", "pdf");
+    return baixar(`${API_URL}/dp/relatorio-quadro/?${qs}`, `quadro_pessoal.${formato === "pdf" ? "pdf" : "xlsx"}`);
+  },
+  folha: (compId: string, formato: "excel" | "pdf" = "excel") =>
+    baixar(`${API_URL}/dp/competencias/${compId}/relatorio/?tipo=folha&formato=${formato}`, `folha.${formato === "pdf" ? "pdf" : "xlsx"}`),
+  rateio: (compId: string, formato: "excel" | "pdf" = "excel") =>
+    baixar(`${API_URL}/dp/competencias/${compId}/relatorio/?tipo=rateio&formato=${formato}`, `rateio.${formato === "pdf" ? "pdf" : "xlsx"}`),
+  catalogos: (formato: "excel" | "pdf" = "excel") =>
+    baixar(`${API_URL}/dp/relatorio-catalogos/?formato=${formato}`, `cargos_ccs.${formato === "pdf" ? "pdf" : "xlsx"}`),
+  auditoria: () => baixar(`${API_URL}/dp/relatorio-auditoria/`, "auditoria_dp.xlsx"),
+  projecao: (p: Record<string, number>, formato: "excel" | "pdf" = "excel") => {
+    const qs = new URLSearchParams({ formato });
+    Object.entries(p).forEach(([k, v]) => qs.set(k, String(v)));
+    return baixar(`${API_URL}/dp/relatorio-projecao/?${qs}`, `projecao.${formato === "pdf" ? "pdf" : "xlsx"}`);
+  },
+  simulacao: async (resultado: DpSimulacao, formato: "excel" | "pdf" = "excel") => {
+    const res = await fetch(`${API_URL}/dp/relatorio-simulacao/?formato=${formato}`, {
+      method: "POST", headers: H(), body: JSON.stringify(resultado),
+    });
+    if (!res.ok) throw new Error(`Erro ${res.status} ao gerar o relatório`);
+    const blob = await res.blob();
+    const a = document.createElement("a");
+    a.href = URL.createObjectURL(blob);
+    a.download = `simulacao.${formato === "pdf" ? "pdf" : "xlsx"}`;
+    document.body.appendChild(a); a.click(); a.remove();
+    URL.revokeObjectURL(a.href);
+  },
 };
 
 export const REGIME_LABELS: Record<string, string> = {
