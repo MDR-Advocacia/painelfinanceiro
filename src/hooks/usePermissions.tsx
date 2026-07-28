@@ -1,16 +1,25 @@
-// Permissões efetivas do usuário logado (RBAC por cargo).
-// Busca /api/me/permissions/ UMA vez por sessão (cache de módulo) — o menu, as
-// views e o guard usam isso. Admin (is_staff) enxerga tudo (backend garante).
+// Permissões efetivas do usuário logado (RBAC v2 por cargo, com NÍVEIS).
+// O backend devolve modulos: {key: "nada"|"ver"|"editar"} — "ver" é só
+// visualização; "editar" permite alterar. Busca /api/me/permissions/ UMA vez
+// por sessão (cache de módulo). Admin (is_staff) enxerga e edita tudo.
 import { useEffect, useState } from "react";
 import { API_URL, authHeaders } from "@/hooks/useAuth";
+
+export type NivelPermissao = "nada" | "ver" | "editar";
 
 export interface MePermissions {
   is_staff: boolean;
   cargo: { id: string; nome: string } | null;
-  modulos: Record<string, boolean>;
+  modulos: Record<string, NivelPermissao | boolean>; // boolean = legado (true→editar)
 }
 
 const VAZIO: MePermissions = { is_staff: false, cargo: null, modulos: {} };
+
+function nivel(v: NivelPermissao | boolean | undefined): NivelPermissao {
+  if (v === true || v === "editar") return "editar";
+  if (v === "ver") return "ver";
+  return "nada";
+}
 
 let cache: MePermissions | null = null;
 let inflight: Promise<MePermissions> | null = null;
@@ -40,7 +49,7 @@ export function usePermissions() {
         if (vivo) setPerms(p);
       })
       .catch(() => {
-        if (vivo) setPerms(VAZIO); // sem sessão/erro → nenhum módulo
+        if (vivo) setPerms(VAZIO);
       })
       .finally(() => {
         inflight = null;
@@ -53,7 +62,9 @@ export function usePermissions() {
   return {
     loading,
     perms: perms ?? VAZIO,
-    /** pode ver o módulo? (admin sempre pode) */
-    pode: (modulo: string) => !!perms?.is_staff || !!modulos[modulo],
+    /** enxerga o módulo? (ver OU editar; admin sempre) */
+    pode: (modulo: string) => !!perms?.is_staff || nivel(modulos[modulo]) !== "nada",
+    /** pode ALTERAR dados do módulo? (editar; admin sempre) */
+    podeEditar: (modulo: string) => !!perms?.is_staff || nivel(modulos[modulo]) === "editar",
   };
 }

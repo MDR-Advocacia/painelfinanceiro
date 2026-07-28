@@ -36,11 +36,23 @@ interface AdminUser {
   date_joined: string | null;
 }
 
+type Nivel = "nada" | "ver" | "editar";
+
 interface Cargo {
   id: string;
   nome: string;
-  modulos: Record<string, boolean>;
+  // RBAC v2: níveis por módulo (boolean = legado, true→editar)
+  modulos: Record<string, Nivel | boolean>;
 }
+
+const nivelDe = (v: Nivel | boolean | undefined): Nivel =>
+  v === true || v === "editar" ? "editar" : v === "ver" ? "ver" : "nada";
+const PROXIMO_NIVEL: Record<Nivel, Nivel> = { nada: "ver", ver: "editar", editar: "nada" };
+const NIVEL_UI: Record<Nivel, { rotulo: string; cls: string; title: string }> = {
+  nada:   { rotulo: "—",      cls: "border-muted-foreground/20 text-muted-foreground/50 hover:border-muted-foreground/40", title: "Sem acesso — clique pra dar Visualização" },
+  ver:    { rotulo: "Ver",    cls: "border-sky-300 bg-sky-50 text-sky-700 hover:bg-sky-100", title: "Só visualização — clique pra dar Edição" },
+  editar: { rotulo: "Editar", cls: "border-emerald-300 bg-emerald-50 text-emerald-700 hover:bg-emerald-100", title: "Ver + editar — clique pra remover o acesso" },
+};
 
 interface Modulo { key: string; label: string; }
 
@@ -106,7 +118,7 @@ export default function UserManagement() {
 
   // ── Cargos & Permissões ──
   const toggleModulo = async (cargo: Cargo, key: string) => {
-    const novos = { ...cargo.modulos, [key]: !cargo.modulos[key] };
+    const novos = { ...cargo.modulos, [key]: PROXIMO_NIVEL[nivelDe(cargo.modulos[key])] };
     setSavingCargo(cargo.id);
     // otimista
     setCargos((prev) => prev.map((c) => (c.id === cargo.id ? { ...c, modulos: novos } : c)));
@@ -188,8 +200,8 @@ export default function UserManagement() {
               <BadgeCheck className="h-5 w-5 text-[hsl(var(--dunatech-blue))]" /> Cargos & Permissões
             </CardTitle>
             <CardDescription>
-              A política de visualização é <b>por cargo</b>: marque quais módulos cada cargo enxerga.
-              Admins (coroa) enxergam tudo, independente do cargo.
+              A política é <b>por cargo</b> e em níveis: <b>Ver</b> = só visualização; <b>Editar</b> = ver +
+              alterar. Clique na célula pra alternar (— → Ver → Editar). Admins (coroa) têm tudo.
             </CardDescription>
           </CardHeader>
           <CardContent className="space-y-3">
@@ -222,15 +234,23 @@ export default function UserManagement() {
                               {users.filter((u) => u.cargo_id === c.id).length} usuário(s)
                             </span>
                           </TableCell>
-                          {modulos.map((m) => (
-                            <TableCell key={m.key} className="text-center">
-                              <Checkbox
-                                checked={!!c.modulos[m.key]}
-                                onCheckedChange={() => toggleModulo(c, m.key)}
-                                disabled={savingCargo === c.id}
-                              />
-                            </TableCell>
-                          ))}
+                          {modulos.map((m) => {
+                            const nv = nivelDe(c.modulos[m.key]);
+                            const ui = NIVEL_UI[nv];
+                            return (
+                              <TableCell key={m.key} className="text-center">
+                                <button
+                                  type="button"
+                                  onClick={() => toggleModulo(c, m.key)}
+                                  disabled={savingCargo === c.id}
+                                  title={ui.title}
+                                  className={`min-w-[52px] rounded-full border px-2 py-0.5 text-[10px] font-medium transition-colors ${ui.cls}`}
+                                >
+                                  {ui.rotulo}
+                                </button>
+                              </TableCell>
+                            );
+                          })}
                           <TableCell>
                             <button
                               onClick={() => excluirCargo(c)}

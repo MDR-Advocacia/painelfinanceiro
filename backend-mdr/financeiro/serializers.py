@@ -1,5 +1,47 @@
 from rest_framework import serializers
-from .models import Cargo, Sede, Setor, VpdConfig, BaseReferencia
+from .models import (
+    Cargo, Sede, Setor, VpdConfig, BaseReferencia,
+    DpCargo, DpCentroCusto, DpColaborador,
+)
+
+
+class DpCentroCustoSerializer(serializers.ModelSerializer):
+    colaboradores_ativos = serializers.SerializerMethodField()
+
+    class Meta:
+        model = DpCentroCusto
+        fields = ['id', 'codigo', 'nome', 'ativo', 'colaboradores_ativos']
+
+    def get_colaboradores_ativos(self, obj):
+        return obj.colaboradores.filter(status='ativo').count()
+
+
+class DpCargoSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = DpCargo
+        fields = ['id', 'area', 'nome', 'salario_base', 'dias_mes', 'carga_horaria_mes', 'ativo']
+
+
+class DpColaboradorSerializer(serializers.ModelSerializer):
+    centro_custo_nome = serializers.CharField(source='centro_custo.nome', read_only=True)
+    centro_custo_id = serializers.PrimaryKeyRelatedField(
+        source='centro_custo', queryset=DpCentroCusto.objects.all())
+    cargo_nome = serializers.CharField(source='cargo.nome', read_only=True, default=None)
+    cargo_id = serializers.PrimaryKeyRelatedField(
+        source='cargo', queryset=DpCargo.objects.all(), allow_null=True, required=False)
+    regime_label = serializers.CharField(source='get_regime_display', read_only=True)
+
+    class Meta:
+        model = DpColaborador
+        fields = [
+            'id', 'matricula', 'nome', 'sexo', 'cpf', 'unidade', 'area',
+            'centro_custo_id', 'centro_custo_nome', 'supervisor', 'equipe',
+            'cargo_id', 'cargo_nome', 'regime', 'regime_label', 'status',
+            'data_entrada', 'data_admissao', 'data_demissao',
+            'salario_bruto', 'saldo_livre', 'vt', 'opta_vt', 'va',
+            'conta_bb', 'pix', 'conta_caixa', 'created_at', 'updated_at',
+        ]
+        read_only_fields = ['matricula']
 
 
 class CargoSerializer(serializers.ModelSerializer):

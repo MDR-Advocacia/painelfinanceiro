@@ -19,6 +19,7 @@ import {
   Users,
   FileSpreadsheet,
   Target,
+  Contact,
   ChevronDown,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -99,6 +100,7 @@ export function Sidebar() {
     { key: "ranking", label: "Rentabilidade", icon: BarChart3 },
     { key: "honorarios", label: "Honorários BB", icon: FileSpreadsheet },
     { key: "config-estrategica", label: "Gestão Estratégica", icon: Target },
+    { key: "pessoal", label: "Pessoal (DP)", icon: Contact },
   ] as const).filter((p) => pode(p.key));
   const podeSedes = pode("sedes");
   const podeSetores = pode("setores");

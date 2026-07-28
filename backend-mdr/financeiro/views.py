@@ -1,5 +1,8 @@
 from rest_framework import viewsets
-from .models import MODULO_KEYS, MODULOS, Cargo, PerfilUsuario, Sede, Setor, VpdConfig, BaseReferencia
+from .models import (
+    MODULO_KEYS, MODULOS, NIVEL_EDITAR, NIVEL_NADA, NIVEL_VER, normalizar_nivel,
+    Cargo, PerfilUsuario, Sede, Setor, VpdConfig, BaseReferencia,
+)
 from .serializers import CargoSerializer, SedeSerializer, SetorSerializer, VpdConfigSerializer, BaseReferenciaSerializer
 from .sso_views import LEGACY_DATA_USER_ID
 from rest_framework.authtoken.views import ObtainAuthToken
@@ -22,10 +25,12 @@ def _modulos_do_usuario(user) -> dict:
 def modulo_permission(read_any: list, write: str):
     """Fábrica de permission DRF do RBAC por cargo (enforcement no BACKEND).
 
-    - Leitura (GET/HEAD/OPTIONS): liberada se o cargo tiver QUALQUER módulo de
-      `read_any` — necessário porque Dashboard/Projeções/Rentabilidade consomem
-      /setores//sedes//vpd_configs pra calcular agregados.
-    - Escrita (POST/PATCH/DELETE): exige o módulo específico `write`.
+    Níveis (RBAC v2): "ver" libera leitura; "editar" libera leitura+escrita
+    (True legado = editar). Regras:
+    - Leitura (GET/HEAD/OPTIONS): nível >= ver em QUALQUER módulo de `read_any`
+      — Dashboard/Projeções/Rentabilidade consomem /setores//sedes//vpd_configs
+      pra calcular agregados.
+    - Escrita (POST/PATCH/DELETE): exige nível EDITAR no módulo `write`.
     - Admin (is_staff) bypassa. Sem cargo = nega tudo (default-deny).
     """
     class _ModuloPermission(BasePermission):
@@ -39,8 +44,8 @@ def modulo_permission(read_any: list, write: str):
                 return True
             mods = _modulos_do_usuario(u)
             if request.method in SAFE_METHODS:
-                return any(mods.get(k) for k in read_any)
-            return bool(mods.get(write))
+                return any(normalizar_nivel(mods.get(k)) != NIVEL_NADA for k in read_any)
+            return normalizar_nivel(mods.get(write)) == NIVEL_EDITAR
 
     return _ModuloPermission
 
@@ -150,15 +155,15 @@ def me_permissions(request):
     perfil = PerfilUsuario.objects.filter(user=u).select_related('cargo').first()
     cargo = perfil.cargo if perfil else None
     if u.is_staff:
-        modulos = {k: True for k in MODULO_KEYS}
+        modulos = {k: NIVEL_EDITAR for k in MODULO_KEYS}
     elif cargo:
         modulos = cargo.modulos_efetivos()
     else:
-        modulos = {k: False for k in MODULO_KEYS}
+        modulos = {k: NIVEL_NADA for k in MODULO_KEYS}
     return Response({
         'is_staff': u.is_staff,
         'cargo': {'id': str(cargo.id), 'nome': cargo.nome} if cargo else None,
-        'modulos': modulos,
+        'modulos': modulos,  # {modulo: "nada"|"ver"|"editar"}
     })
 
 
