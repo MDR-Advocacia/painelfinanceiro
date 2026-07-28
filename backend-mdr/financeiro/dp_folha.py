@@ -9,7 +9,7 @@
 #   • VT com faltas: desconta as faltas DA PRÓPRIA competência (a planilha
 #     referenciava o mês defasado — confirmar com o DP; se for regra, muda aqui).
 # Cada linha carrega `memoria` (como cada número foi obtido).
-from datetime import date
+from datetime import date, datetime, timedelta
 
 from django.db import transaction
 from django.utils import timezone
@@ -69,6 +69,9 @@ def calcular_item(colab: DpColaborador, lanc, comp: DpCompetencia, fiscal: DpTab
     saldo = _ov("saldo_livre_override", colab.saldo_livre or 0.0)
     ajustada = bool(lanc and (lanc.salario_override is not None or lanc.vt_override is not None
                               or lanc.va_override is not None or lanc.saldo_livre_override is not None))
+    fer_dias = int((lanc.ferias_dias if lanc else 0) or 0)
+    fer_abono = int((lanc.ferias_abono_dias if lanc else 0) or 0)
+    fer_inicio = (lanc.ferias_inicio if lanc else None)
     f_dias = (lanc.faltas_dias if lanc else 0.0) or 0.0
     f_horas = (lanc.faltas_horas if lanc else 0.0) or 0.0
     premio = (lanc.premiacoes if lanc else 0.0) or 0.0
@@ -89,6 +92,8 @@ def calcular_item(colab: DpColaborador, lanc, comp: DpCompetencia, fiscal: DpTab
     # cada dia de falta desconta 1/dias_úteis do valor cheio (horas viram fração
     # de dia pela carga do cargo).
     dias_equiv = f_dias + (f_horas / (horas_ref / dias_ref) if horas_ref else 0)
+    # dia de férias não gera vale: entra no mesmo rateio das faltas
+    dias_equiv += fer_dias * (comp.dias_uteis / 30)
     fator_falta = min(dias_equiv / max(comp.dias_uteis, 1), 1.0) if dias_equiv else 0.0
     vt_faltas = round(vt * (1 - fator_falta), 2) if vt else 0.0
     va_faltas = round(va * (1 - fator_falta), 2) if va else 0.0
@@ -97,10 +102,50 @@ def calcular_item(colab: DpColaborador, lanc, comp: DpCompetencia, fiscal: DpTab
             f"{dias_equiv:.2f} dia(s) de falta ÷ {comp.dias_uteis} dias úteis = "
             f"{fator_falta:.1%} de desconto no VT e no VA")
 
-    # INSS (só CLT) — tabela da vigência
+    # ── FÉRIAS DO MÊS ──────────────────────────────────────────────────────
+    # Os dias de férias saem do salário (não se trabalha) e voltam como
+    # remuneração de férias + 1/3 constitucional. O abono pecuniário (venda de
+    # até 1/3 do período) é indenizatório: entra no pagamento e NÃO sofre INSS.
+    # Estagiário tira RECESSO: recebe a bolsa cheia, sem 1/3 e sem INSS.
+    # Associado/PJ não têm direito legal — a marcação fica só como ausência.
+    fer_valor = fer_terco = fer_abono_valor = 0.0
+    fer_fim = None
+    if fer_dias > 0:
+        fer_dias = min(fer_dias, 30)
+        diaria = bruto / 30
+        if fer_inicio:
+            fer_fim = fer_inicio + timedelta(days=fer_dias - 1)
+        if clt:
+            fer_valor = round(diaria * fer_dias, 2)
+            fer_terco = round(fer_valor / 3, 2)
+            # os dias de férias saem do salário do mês
+            desc_faltas = round(desc_faltas + diaria * fer_dias, 2)
+            sal_faltas = round(bruto - desc_faltas, 2)
+            mem["ferias"] = (f"{fer_dias} dia(s) × ({bruto}/30) = {fer_valor} "
+                             f"+ 1/3 constitucional = {fer_terco}")
+            if fer_abono > 0:
+                fer_abono = min(fer_abono, 10)   # teto legal: 1/3 do período
+                base_abono = round(diaria * fer_abono, 2)
+                fer_abono_valor = round(base_abono + base_abono / 3, 2)
+                mem["ferias_abono"] = (f"abono pecuniário: {fer_abono} dia(s) vendido(s) × "
+                                       f"({bruto}/30) + 1/3 = {fer_abono_valor} (sem INSS)")
+        elif estagiario:
+            # recesso remunerado: a bolsa é paga cheia, nada é descontado
+            fer_valor = 0.0
+            mem["ferias"] = f"recesso de {fer_dias} dia(s) — bolsa paga integralmente"
+        else:
+            mem["ferias"] = (f"{fer_dias} dia(s) de ausência programada — "
+                             f"contrato sem direito legal a férias")
+
+    # INSS (só CLT) — tabela da vigência.
+    # Férias têm tributação PRÓPRIA, separada do salário: por isso duas contas.
     if clt:
         desc_inss, mem_inss = calcular_inss(sal_faltas, fiscal.inss_faixas)
         mem["inss"] = mem_inss
+        if fer_valor:
+            inss_fer, mem_inss_fer = calcular_inss(fer_valor + fer_terco, fiscal.inss_faixas)
+            desc_inss = round(desc_inss + inss_fer, 2)
+            mem["inss_ferias"] = mem_inss_fer
     else:
         desc_inss = 0.0
 
@@ -111,7 +156,8 @@ def calcular_item(colab: DpColaborador, lanc, comp: DpCompetencia, fiscal: DpTab
 
     sal_desc = round(sal_faltas - desc_inss - desc_vt, 2)
     # TOTAL a pagar = salário c/ descontos + VT + VA + saldo livre + acerto + prêmios
-    total_pagar = round(sal_desc + vt_faltas + va_faltas + saldo + acerto + premio, 2)
+    total_pagar = round(sal_desc + vt_faltas + va_faltas + saldo + acerto + premio
+                        + fer_valor + fer_terco + fer_abono_valor, 2)
 
     # Provisões
     if clt:
@@ -147,6 +193,8 @@ def calcular_item(colab: DpColaborador, lanc, comp: DpCompetencia, fiscal: DpTab
         "salario_com_descontos": sal_desc, "total_pagar": total_pagar,
         "decimo_mensal": decimo, "ferias_mensal": ferias, "terco_ferias_mensal": terco,
         "fgts_mensal": fgts, "multa_fgts_mensal": multa, "recesso_mensal": recesso,
+        "ferias_dias": fer_dias, "ferias_valor": fer_valor, "ferias_terco": fer_terco,
+        "ferias_abono": fer_abono_valor, "ferias_inicio": fer_inicio, "ferias_fim": fer_fim,
         "inss_patronal": patronal, "custo_provisoes": provisoes,
         "custo_total": round(total_pagar + provisoes + patronal, 2),
         "memoria": mem,
@@ -275,7 +323,8 @@ class DpCompetenciaViewSet(viewsets.ViewSet):
     @action(detail=True, methods=["post"])
     def lancar(self, request, pk=None):
         """Upsert de lançamento {colaborador_id, faltas_dias, faltas_horas,
-        premiacoes, acerto_contabil, obs} e recálculo da linha."""
+        premiacoes, acerto_contabil, obs, ferias_inicio, ferias_dias,
+        ferias_abono_dias} e recálculo da linha."""
         comp = DpCompetencia.objects.get(pk=pk)
         if comp.status == "fechada":
             return Response({"detail": "Competência fechada."}, status=409)
@@ -289,18 +338,42 @@ class DpCompetenciaViewSet(viewsets.ViewSet):
             except (TypeError, ValueError):
                 return 0.0
 
-        lanc, _ = DpLancamento.objects.update_or_create(
-            competencia=comp, colaborador=colab,
-            defaults={"faltas_dias": num("faltas_dias"), "faltas_horas": num("faltas_horas"),
-                      "premiacoes": num("premiacoes"), "acerto_contabil": num("acerto_contabil"),
-                      "obs": request.data.get("obs") or ""})
+        def inteiro(k):
+            try:
+                return int(float(request.data.get(k) or 0))
+            except (TypeError, ValueError):
+                return 0
+
+        def data(k):
+            v = (request.data.get(k) or "").strip()
+            if not v:
+                return None
+            try:
+                return datetime.strptime(v, "%Y-%m-%d").date()
+            except ValueError:
+                return None
+
+        # o lançamento é UM por pessoa/mês: só mexe no que veio no corpo, pra
+        # lançar férias não apagar as faltas já registradas (e vice-versa)
+        lanc, _ = DpLancamento.objects.get_or_create(competencia=comp, colaborador=colab)
+        campos = {"faltas_dias": num, "faltas_horas": num, "premiacoes": num,
+                  "acerto_contabil": num, "ferias_dias": inteiro,
+                  "ferias_abono_dias": inteiro, "ferias_inicio": data}
+        for campo, conv in campos.items():
+            if campo in request.data:
+                setattr(lanc, campo, conv(campo))
+        if "obs" in request.data:
+            lanc.obs = request.data.get("obs") or ""
+        lanc.save()
         fiscal = tabela_fiscal_para(comp.ano, comp.mes)
         d = calcular_item(colab, lanc, comp, fiscal)
         DpFolhaItem.objects.update_or_create(competencia=comp, colaborador=colab, defaults=d)
         audit(request, "lancar", "dp_lancamento", lanc.id, colaborador=colab,
               depois={"colaborador": colab.nome, "faltas_dias": lanc.faltas_dias,
                       "faltas_horas": lanc.faltas_horas, "premiacoes": lanc.premiacoes,
-                      "acerto": lanc.acerto_contabil})
+                      "acerto": lanc.acerto_contabil, "ferias_dias": lanc.ferias_dias,
+                      "ferias_inicio": str(lanc.ferias_inicio or ""),
+                      "ferias_abono_dias": lanc.ferias_abono_dias})
         return Response(d)
 
     @action(detail=True, methods=["get"])
@@ -336,7 +409,9 @@ class DpCompetenciaViewSet(viewsets.ViewSet):
                   "vt_com_faltas", "va_com_faltas", "saldo_livre", "premiacoes",
                   "acerto_contabil", "total_pagar", "custo_provisoes", "inss_patronal",
                   "custo_total", "ajuste_manual", "ajuste_motivo", "vt", "va", "cargo_nome",
-                  "em_rescisao", "salario_com_faltas", "salario_com_descontos"]
+                  "em_rescisao", "salario_com_faltas", "salario_com_descontos",
+                  "ferias_dias", "ferias_valor", "ferias_terco", "ferias_abono",
+                  "ferias_inicio", "ferias_fim"]
         items = []
         for it in qs[offset:offset + limit]:
             row = {k: getattr(it, k) for k in campos}

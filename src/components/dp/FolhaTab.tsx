@@ -6,6 +6,7 @@ import {
   CalendarDays, CalendarPlus, CheckCircle2, Coins, Download, FileText, Loader2, Lock,
   MoreVertical, PencilLine, PieChart, RefreshCw, RotateCcw, Search, SendHorizonal,
   Sliders, UserMinus, Unlock,
+  Palmtree,
 } from "lucide-react";
 import { toast } from "sonner";
 
@@ -29,10 +30,12 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { Ajuda, TituloAjuda } from "@/components/dp/Ajuda";
 import { CcPicker } from "@/components/dp/Pickers";
+import FeriasDialog from "@/components/dp/FeriasDialog";
+import { TabelaRolavel } from "@/components/TabelaRolavel";
 import ResumoCentroCusto from "@/components/dp/ResumoCentroCusto";
 import {
   type DpCompetencia, type DpFolhaItem, type DpFolhaTotais, type DpRateio,
-  REGIME_LABELS, dpApi, fmtBRL, folhaApi, relatoriosApi,
+  REGIME_LABELS, dpApi, fmtBRL, fmtData, folhaApi, relatoriosApi,
 } from "@/services/dp";
 
 const PAGE = 50;
@@ -162,6 +165,7 @@ function CompetenciaDetalhe({ comp, editar, onMudou }: {
   const [loading, setLoading] = useState(false);
   const [agindo, setAgindo] = useState(false);
   const [lancando, setLancando] = useState<DpFolhaItem | null>(null);
+  const [ferias, setFerias] = useState<DpFolhaItem | null>(null);
   const [reabrindo, setReabrindo] = useState(false);
   const [justificativa, setJustificativa] = useState("");
 
@@ -325,7 +329,7 @@ function CompetenciaDetalhe({ comp, editar, onMudou }: {
           <ResumoCentroCusto rateio={rateio} compId={comp.id} />
         ) : (
           <>
-            <div className="overflow-x-auto rounded-md border">
+            <TabelaRolavel className="rounded-md border">
               <Table>
                 <TableHeader>
                   <TableRow>
@@ -385,6 +389,12 @@ function CompetenciaDetalhe({ comp, editar, onMudou }: {
                               rescisão
                             </span>
                           )}
+                          {!!it.ferias_dias && (
+                            <span title={`${it.ferias_dias} dia(s) de ${it.regime === "estagiario" ? "recesso" : "férias"}${it.ferias_inicio ? ` a partir de ${fmtData(it.ferias_inicio)}` : ""}`}
+                                  className="shrink-0 rounded bg-emerald-100 px-1 text-[9px] font-semibold uppercase text-emerald-700">
+                              {it.regime === "estagiario" ? "recesso" : "férias"} {it.ferias_dias}d
+                            </span>
+                          )}
                         </span>
                       </TableCell>
                       <TableCell className="hidden max-w-[150px] truncate text-xs lg:table-cell">{it.centro_custo_nome}</TableCell>
@@ -429,6 +439,11 @@ function CompetenciaDetalhe({ comp, editar, onMudou }: {
                               <DropdownMenuItem onClick={() => setLancando({ ...it, _aba: "extras" } as DpFolhaItem)}>
                                 <Coins className="mr-2 h-4 w-4" /> Premiações e acertos
                               </DropdownMenuItem>
+                              <DropdownMenuItem onClick={() => setFerias(it)}>
+                                <Palmtree className="mr-2 h-4 w-4" />
+                                {it.regime === "estagiario" ? "Recesso" : "Férias"}
+                                {!!it.ferias_dias && <span className="ml-auto text-[10px] text-emerald-600">{it.ferias_dias}d</span>}
+                              </DropdownMenuItem>
                               <DropdownMenuSeparator />
                               <DropdownMenuItem onClick={() => setAjustando(it)}>
                                 <Sliders className="mr-2 h-4 w-4" /> Ajuste pontual (salário/benefícios)
@@ -446,7 +461,7 @@ function CompetenciaDetalhe({ comp, editar, onMudou }: {
                   )}
                 </TableBody>
               </Table>
-            </div>
+            </TabelaRolavel>
             <div className="flex items-center justify-between text-xs text-muted-foreground">
               <span>Página {pagina + 1} de {totalPaginas} · {total} linha(s)</span>
               <div className="flex gap-1.5">
@@ -523,6 +538,12 @@ function CompetenciaDetalhe({ comp, editar, onMudou }: {
         <LancarDialog comp={comp} item={lancando}
                       onClose={() => setLancando(null)}
                       onLancou={() => { setLancando(null); carregarItens(); }} />
+      )}
+
+      {ferias && (
+        <FeriasDialog comp={comp} item={ferias}
+                      onClose={() => setFerias(null)}
+                      onLancou={() => { setFerias(null); carregarItens(); }} />
       )}
 
       {reabrindo && (

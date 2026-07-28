@@ -421,6 +421,12 @@ class DpLancamento(models.Model):
     premiacoes = models.FloatField(default=0)
     acerto_contabil = models.FloatField(default=0)
     obs = models.TextField(blank=True, default="")
+    # FÉRIAS do mês (versão simples: é uma ocorrência da competência, não um
+    # controle de período aquisitivo). Estagiário = recesso; associado/PJ só
+    # marca a ausência, sem verba.
+    ferias_inicio = models.DateField(null=True, blank=True)
+    ferias_dias = models.IntegerField(default=0)
+    ferias_abono_dias = models.IntegerField(default=0)   # abono pecuniário (até 1/3)
     # ajuste pontual do mês (null = usa o valor da ficha)
     salario_override = models.FloatField(null=True, blank=True)
     vt_override = models.FloatField(null=True, blank=True)
@@ -480,6 +486,13 @@ class DpFolhaItem(models.Model):
     inss_patronal = models.FloatField(default=0)
     custo_provisoes = models.FloatField(default=0)
     custo_total = models.FloatField(default=0)  # total_pagar + provisões + patronal
+    # férias gozadas NESTE mês (o que efetivamente entra no pagamento)
+    ferias_dias = models.IntegerField(default=0)
+    ferias_valor = models.FloatField(default=0)          # remuneração dos dias de férias
+    ferias_terco = models.FloatField(default=0)          # 1/3 constitucional
+    ferias_abono = models.FloatField(default=0)          # abono pecuniário + 1/3
+    ferias_inicio = models.DateField(null=True, blank=True)
+    ferias_fim = models.DateField(null=True, blank=True)
     memoria = models.JSONField(default=dict, blank=True)
     ajuste_manual = models.BooleanField(default=False)   # linha com ajuste pontual
     em_rescisao = models.BooleanField(default=False)     # sai neste mês (rescisão)

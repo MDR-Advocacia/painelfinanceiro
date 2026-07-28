@@ -201,6 +201,8 @@ export interface DpFolhaItem {
   cargo_nome?: string; centro_custo_nome: string; salario_bruto: number;
   vt?: number; va?: number; ajuste_manual?: boolean; ajuste_motivo?: string;
   em_rescisao?: boolean; salario_com_faltas?: number; salario_com_descontos?: number;
+  ferias_dias?: number; ferias_valor?: number; ferias_terco?: number; ferias_abono?: number;
+  ferias_inicio?: string | null; ferias_fim?: string | null;
   faltas_dias: number; faltas_horas: number; desc_faltas: number;
   desc_inss: number; desc_vt: number; vt_com_faltas: number; va_com_faltas: number;
   saldo_livre: number; premiacoes: number; acerto_contabil: number;
@@ -254,7 +256,9 @@ export const folhaApi = {
     fetch(`${API_URL}/dp/competencias/${id}/ajustar_dias/`, {
       method: "POST", headers: H(), body: JSON.stringify({ dias_mes, dias_uteis }),
     }).then((r) => j<DpCompetencia>(r)),
-  lancar: (id: string, dados: { colaborador_id: string; faltas_dias: number; faltas_horas: number; premiacoes: number; acerto_contabil: number; obs?: string }) =>
+  lancar: (id: string, dados: { colaborador_id: string; faltas_dias?: number; faltas_horas?: number;
+                               premiacoes?: number; acerto_contabil?: number; obs?: string;
+                               ferias_inicio?: string; ferias_dias?: number; ferias_abono_dias?: number }) =>
     fetch(`${API_URL}/dp/competencias/${id}/lancar/`, { method: "POST", headers: H(), body: JSON.stringify(dados) })
       .then((r) => j<DpFolhaItem>(r)),
   enviarRevisao: (id: string) =>
