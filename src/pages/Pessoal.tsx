@@ -25,6 +25,7 @@ import {
 } from "@/components/ui/table";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import DashboardDpTab, { type FiltroQuadro } from "@/components/dp/DashboardDpTab";
+import DesligamentoDialog from "@/components/dp/DesligamentoDialog";
 import { Ajuda, TituloAjuda } from "@/components/dp/Ajuda";
 import ParametrosTab from "@/components/dp/ParametrosTab";
 import SimulacoesTab from "@/components/dp/SimulacoesTab";
@@ -349,7 +350,6 @@ function FichaDialog({ colaborador, ccs, cargos, editar, onClose, onMudou }: {
   const [eventos, setEventos] = useState<DpEvento[]>([]);
   const [salvando, setSalvando] = useState(false);
   const [desligarAberto, setDesligarAberto] = useState(false);
-  const [dataDem, setDataDem] = useState(new Date().toISOString().slice(0, 10));
 
   useEffect(() => {
     dpApi.eventos(colaborador.id).then(setEventos).catch(() => undefined);
@@ -361,24 +361,15 @@ function FichaDialog({ colaborador, ccs, cargos, editar, onClose, onMudou }: {
     setSalvando(true);
     try {
       await dpApi.atualizar(c.id, {
-        nome: c.nome, cpf: c.cpf, unidade: c.unidade, area: c.area,
-        centro_custo_id: c.centro_custo_id, supervisor: c.supervisor, equipe: c.equipe,
+        nome: c.nome, cpf: c.cpf, sexo: c.sexo, unidade: c.unidade, area: c.area,
+        centro_custo_id: c.centro_custo_id, supervisor: c.supervisor,
+        coordenador: c.coordenador, equipe: c.equipe,
         cargo_id: c.cargo_id, salario_bruto: Number(c.salario_bruto) || 0,
         saldo_livre: Number(c.saldo_livre) || 0, vt: Number(c.vt) || 0,
         va: Number(c.va) || 0, opta_vt: c.opta_vt, pix: c.pix,
         conta_bb: c.conta_bb, conta_caixa: c.conta_caixa,
       } as Partial<DpColaborador>);
       toast.success("Ficha atualizada.");
-      onMudou(); onClose();
-    } catch (e: any) { toast.error(e.message); }
-    finally { setSalvando(false); }
-  };
-
-  const desligar = async () => {
-    setSalvando(true);
-    try {
-      await dpApi.desligar(c.id, dataDem);
-      toast.success(`${c.nome} desligado(a) em ${fmtData(dataDem)}.`);
       onMudou(); onClose();
     } catch (e: any) { toast.error(e.message); }
     finally { setSalvando(false); }
@@ -422,7 +413,21 @@ function FichaDialog({ colaborador, ccs, cargos, editar, onClose, onMudou }: {
             </Select>
           </div>
           <CampoTexto rotulo="Supervisor" valor={c.supervisor} onChange={(v) => set("supervisor", v)} ro={ro} />
+          <CampoTexto rotulo="Coordenador" valor={c.coordenador} onChange={(v) => set("coordenador", v)} ro={ro} />
           <CampoTexto rotulo="Equipe" valor={c.equipe} onChange={(v) => set("equipe", v)} ro={ro} />
+          <div>
+            <Label className="text-xs text-muted-foreground">Sexo</Label>
+            <Select value={c.sexo || "-"} onValueChange={(v) => set("sexo", v === "-" ? "" : v)} disabled={ro}>
+              <SelectTrigger className="h-9 text-sm"><SelectValue /></SelectTrigger>
+              <SelectContent>
+                <SelectItem value="-">Não informado</SelectItem>
+                <SelectItem value="M">Masculino</SelectItem>
+                <SelectItem value="F">Feminino</SelectItem>
+                <SelectItem value="Outro">Outro</SelectItem>
+              </SelectContent>
+            </Select>
+          </div>
+          <CampoTexto rotulo="Área" valor={c.area} onChange={(v) => set("area", v)} ro={ro} />
           <CampoNum rotulo="Salário bruto (R$)" valor={c.salario_bruto} onChange={(v) => set("salario_bruto", v)} ro={ro} />
           <CampoNum rotulo="Saldo livre (R$)" valor={c.saldo_livre} onChange={(v) => set("saldo_livre", v)} ro={ro} />
           <CampoNum rotulo="VT (R$)" valor={c.vt} onChange={(v) => set("vt", v)} ro={ro} />
@@ -431,8 +436,9 @@ function FichaDialog({ colaborador, ccs, cargos, editar, onClose, onMudou }: {
             <Checkbox checked={c.opta_vt} onCheckedChange={(v) => set("opta_vt", !!v)} disabled={ro} />
             Opta pelo VT (desconto de 6% — só CLT)
           </label>
-          <CampoTexto rotulo="PIX" valor={c.pix} onChange={(v) => set("pix", v)} ro={ro} />
-          <CampoTexto rotulo="Conta BB" valor={c.conta_bb} onChange={(v) => set("conta_bb", v)} ro={ro} />
+          <CampoTexto rotulo="Chave PIX" valor={c.pix} onChange={(v) => set("pix", v)} ro={ro} />
+          <CampoTexto rotulo="Conta Banco do Brasil" valor={c.conta_bb} onChange={(v) => set("conta_bb", v)} ro={ro} />
+          <CampoTexto rotulo="Conta Caixa" valor={c.conta_caixa} onChange={(v) => set("conta_caixa", v)} ro={ro} />
           <div className="col-span-2 grid grid-cols-3 gap-2 text-xs text-muted-foreground">
             <span>Entrada: <b>{fmtData(c.data_entrada)}</b></span>
             <span>Admissão: <b>{fmtData(c.data_admissao)}</b></span>
@@ -480,26 +486,11 @@ function FichaDialog({ colaborador, ccs, cargos, editar, onClose, onMudou }: {
         </DialogFooter>
 
         {desligarAberto && (
-          <Dialog open onOpenChange={(o) => !o && setDesligarAberto(false)}>
-            <DialogContent className="max-w-sm">
-              <DialogHeader>
-                <DialogTitle>Desligar {c.nome.split(" ")[0]}?</DialogTitle>
-                <DialogDescription>
-                  Marca como desligado(a) e registra o evento. As verbas rescisórias entram na fase da folha.
-                </DialogDescription>
-              </DialogHeader>
-              <div>
-                <Label className="text-xs text-muted-foreground">Data do desligamento</Label>
-                <Input type="date" value={dataDem} onChange={(e) => setDataDem(e.target.value)} />
-              </div>
-              <DialogFooter>
-                <Button variant="outline" onClick={() => setDesligarAberto(false)}>Cancelar</Button>
-                <Button variant="destructive" onClick={desligar} disabled={salvando}>
-                  {salvando ? <Loader2 className="mr-1 h-4 w-4 animate-spin" /> : null} Confirmar desligamento
-                </Button>
-              </DialogFooter>
-            </DialogContent>
-          </Dialog>
+          <DesligamentoDialog
+            colaborador={c}
+            onClose={() => setDesligarAberto(false)}
+            onConcluido={() => { onMudou(); }}
+          />
         )}
       </DialogContent>
     </Dialog>
@@ -541,6 +532,14 @@ function NovoDialog({ ccs, cargos, onClose, onCriou }: {
   const [unidade, setUnidade] = useState("Capim Macio");
   const [ccId, setCcId] = useState("");
   const [cargoId, setCargoId] = useState("");
+  const [sexo, setSexo] = useState("");
+  const [area, setArea] = useState("JUR");
+  const [supervisor, setSupervisor] = useState("");
+  const [coordenador, setCoordenador] = useState("");
+  const [equipe, setEquipe] = useState("");
+  const [contaBb, setContaBb] = useState("");
+  const [pix, setPix] = useState("");
+  const [contaCaixa, setContaCaixa] = useState("");
   const [dataAdm, setDataAdm] = useState(new Date().toISOString().slice(0, 10));
   const [salario, setSalario] = useState(0);
   const [vt, setVt] = useState(0);
@@ -563,8 +562,10 @@ function NovoDialog({ ccs, cargos, onClose, onCriou }: {
     setSalvando(true);
     try {
       await dpApi.criar({
-        nome: nome.trim().toUpperCase(), cpf, unidade, regime,
+        nome: nome.trim().toUpperCase(), cpf, sexo, unidade, area, regime,
         centro_custo_id: ccId, cargo_id: cargoId || null,
+        supervisor, coordenador, equipe,
+        conta_bb: contaBb, pix, conta_caixa: contaCaixa,
         data_admissao: dataAdm, salario_bruto: salario, vt, va, status: "ativo",
       } as Partial<DpColaborador>);
       toast.success(`Colaborador(a) admitido(a) — matrícula ${proxMat ?? "gerada"}.`);
@@ -637,6 +638,46 @@ function NovoDialog({ ccs, cargos, onClose, onCriou }: {
           <div>
             <Label className="text-xs text-muted-foreground">VA (R$)</Label>
             <Input type="number" step="0.01" value={va} onChange={(e) => setVa(Number(e.target.value))} className="h-9 font-mono text-sm" />
+          </div>
+          <div>
+            <Label className="text-xs text-muted-foreground">Sexo</Label>
+            <Select value={sexo || "-"} onValueChange={(v) => setSexo(v === "-" ? "" : v)}>
+              <SelectTrigger className="h-9 text-sm"><SelectValue /></SelectTrigger>
+              <SelectContent>
+                <SelectItem value="-">Não informado</SelectItem>
+                <SelectItem value="M">Masculino</SelectItem>
+                <SelectItem value="F">Feminino</SelectItem>
+                <SelectItem value="Outro">Outro</SelectItem>
+              </SelectContent>
+            </Select>
+          </div>
+          <div>
+            <Label className="text-xs text-muted-foreground">Área</Label>
+            <Input value={area} onChange={(e) => setArea(e.target.value)} className="h-9 text-sm" />
+          </div>
+          <div>
+            <Label className="text-xs text-muted-foreground">Supervisor</Label>
+            <Input value={supervisor} onChange={(e) => setSupervisor(e.target.value)} className="h-9 text-sm" />
+          </div>
+          <div>
+            <Label className="text-xs text-muted-foreground">Coordenador</Label>
+            <Input value={coordenador} onChange={(e) => setCoordenador(e.target.value)} className="h-9 text-sm" />
+          </div>
+          <div>
+            <Label className="text-xs text-muted-foreground">Equipe</Label>
+            <Input value={equipe} onChange={(e) => setEquipe(e.target.value)} className="h-9 text-sm" />
+          </div>
+          <div>
+            <Label className="text-xs text-muted-foreground">Chave PIX</Label>
+            <Input value={pix} onChange={(e) => setPix(e.target.value)} className="h-9 text-sm" />
+          </div>
+          <div>
+            <Label className="text-xs text-muted-foreground">Conta Banco do Brasil</Label>
+            <Input value={contaBb} onChange={(e) => setContaBb(e.target.value)} className="h-9 text-sm" />
+          </div>
+          <div>
+            <Label className="text-xs text-muted-foreground">Conta Caixa</Label>
+            <Input value={contaCaixa} onChange={(e) => setContaCaixa(e.target.value)} className="h-9 text-sm" />
           </div>
         </div>
         <DialogFooter>

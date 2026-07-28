@@ -157,6 +157,76 @@ export default function DashboardDpTab({ onAbrirQuadro }: {
         </Painel>
       </div>
 
+      {/* Colaboradores e rotatividade por mês */}
+      <div className="grid gap-4 lg:grid-cols-2">
+        <Painel titulo="Colaboradores por mês"
+                ajuda="Quantas pessoas estavam na folha em cada competência calculada.">
+          <ResponsiveContainer width="100%" height={230}>
+            <BarChart data={d.serie_custo.map((l) => ({ ...l, rotulo: fmtCompetencia(l.mes) }))}
+                      layout="vertical" margin={{ left: 4, right: 24 }}>
+              <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))" />
+              <XAxis type="number" tick={{ fontSize: 10 }} allowDecimals={false} />
+              <YAxis type="category" dataKey="rotulo" tick={{ fontSize: 10 }} width={54} />
+              <RTooltip />
+              <Bar dataKey="headcount" name="Colaboradores" fill="#1E7BFF" radius={[0, 4, 4, 0]} />
+            </BarChart>
+          </ResponsiveContainer>
+        </Painel>
+
+        <Painel titulo="Rotatividade por mês (%)"
+                ajuda="Percentual de desligamentos sobre o total de pessoas em cada mês — o famoso turnover.">
+          <ResponsiveContainer width="100%" height={230}>
+            <LineChart data={d.serie_custo.map((l) => ({ ...l, rotulo: fmtCompetencia(l.mes) }))}>
+              <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))" />
+              <XAxis dataKey="rotulo" tick={{ fontSize: 10 }} />
+              <YAxis tick={{ fontSize: 10 }} tickFormatter={(v) => `${v}%`} />
+              <RTooltip formatter={(v: number) => `${v.toFixed(2)}%`} />
+              <Line type="monotone" dataKey="turnover" name="Rotatividade" stroke="#E74C3C"
+                    strokeWidth={2} dot={{ r: 3 }} />
+            </LineChart>
+          </ResponsiveContainer>
+        </Painel>
+      </div>
+
+      {/* Evolução mensal consolidada */}
+      <Painel titulo="Evolução mensal"
+              ajuda="Tabela consolidada por competência: pessoas, movimentação, rotatividade, custo total e por CLT, provisões, INSS patronal e FGTS acumulado.">
+        <div className="overflow-x-auto">
+          <table className="w-full min-w-[880px] text-sm">
+            <thead>
+              <tr className="border-b text-xs text-muted-foreground">
+                <th className="py-1.5 text-left font-medium">Mês</th>
+                <th className="py-1.5 text-right font-medium">Pessoas</th>
+                <th className="py-1.5 text-right font-medium">Entradas</th>
+                <th className="py-1.5 text-right font-medium">Saídas</th>
+                <th className="py-1.5 text-right font-medium">Rotativ.</th>
+                <th className="py-1.5 text-right font-medium">Custo total</th>
+                <th className="py-1.5 text-right font-medium">Custo CLT</th>
+                <th className="py-1.5 text-right font-medium">Provisões</th>
+                <th className="py-1.5 text-right font-medium">Patronal</th>
+                <th className="py-1.5 text-right font-medium">FGTS acum.</th>
+              </tr>
+            </thead>
+            <tbody>
+              {d.serie_custo.map((l) => (
+                <tr key={l.mes} className="border-b last:border-0 hover:bg-muted/50">
+                  <td className="py-1.5 font-medium">{fmtCompetencia(l.mes)}</td>
+                  <td className="py-1.5 text-right font-mono text-xs">{l.headcount}</td>
+                  <td className="py-1.5 text-right font-mono text-xs text-emerald-700">{l.admissoes ?? 0}</td>
+                  <td className="py-1.5 text-right font-mono text-xs text-rose-700">{l.desligamentos ?? 0}</td>
+                  <td className="py-1.5 text-right font-mono text-xs">{(l.turnover ?? 0).toFixed(2)}%</td>
+                  <td className="py-1.5 text-right font-mono text-xs font-semibold">{fmtBRL(l.custo_total)}</td>
+                  <td className="py-1.5 text-right font-mono text-xs">{fmtBRL(l.custo_clt ?? 0)}</td>
+                  <td className="py-1.5 text-right font-mono text-xs">{fmtBRL(l.provisoes)}</td>
+                  <td className="py-1.5 text-right font-mono text-xs">{fmtBRL(l.patronal)}</td>
+                  <td className="py-1.5 text-right font-mono text-xs text-muted-foreground">{fmtBRL(l.fgts_acumulado ?? 0)}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      </Painel>
+
       {/* Custo por centro de custo */}
       {d.custo_por_cc?.length > 0 && (
         <Painel titulo="Custo por centro de custo"

@@ -49,16 +49,30 @@ def dp_dashboard(request):
                                       data_efeito__gte=ini, data_efeito__lt=fim).count()
         serie_mov.append({"mes": f"{a}-{m:02d}", "admissoes": adm, "desligamentos": des})
 
-    # série de custo por competência calculada
+    # série mensal COMPLETA por competência (espelha a aba de evolução da planilha)
     serie_custo = []
+    fgts_acum = multa_acum = 0.0
+    mov_por_mes = {m["mes"]: m for m in serie_mov}
     for comp in DpCompetencia.objects.order_by("ano", "mes")[:24]:
-        ag = comp.itens.aggregate(pagar=Sum("total_pagar"), prov=Sum("custo_provisoes"),
-                                  pat=Sum("inss_patronal"), custo=Sum("custo_total"))
+        itens = filtrar_folha(comp.itens.all(), request.user)
+        ag = itens.aggregate(pagar=Sum("total_pagar"), prov=Sum("custo_provisoes"),
+                             pat=Sum("inss_patronal"), custo=Sum("custo_total"),
+                             fgts=Sum("fgts_mensal"), multa=Sum("multa_fgts_mensal"))
+        ag_clt = itens.filter(regime="clt").aggregate(custo=Sum("custo_total"))
+        hc = itens.count()
+        chave = f"{comp.ano}-{comp.mes:02d}"
+        mov = mov_por_mes.get(chave, {"admissoes": 0, "desligamentos": 0})
+        fgts_acum += round(ag["fgts"] or 0, 2)
+        multa_acum += round(ag["multa"] or 0, 2)
         serie_custo.append({
-            "mes": f"{comp.ano}-{comp.mes:02d}", "status": comp.status,
-            "headcount": comp.itens.count(),
+            "mes": chave, "status": comp.status, "headcount": hc,
+            "admissoes": mov["admissoes"], "desligamentos": mov["desligamentos"],
+            "turnover": round(mov["desligamentos"] / hc * 100, 2) if hc else 0.0,
             "folha": round(ag["pagar"] or 0, 2), "provisoes": round(ag["prov"] or 0, 2),
             "patronal": round(ag["pat"] or 0, 2), "custo_total": round(ag["custo"] or 0, 2),
+            "custo_clt": round(ag_clt["custo"] or 0, 2),
+            "fgts": round(ag["fgts"] or 0, 2), "multa_fgts": round(ag["multa"] or 0, 2),
+            "fgts_acumulado": round(fgts_acum, 2), "multa_fgts_acumulada": round(multa_acum, 2),
         })
 
     ult = serie_custo[-1] if serie_custo else None
@@ -521,12 +535,18 @@ def dp_relatorio_dashboard(request):
         ["Turnover do mês (%)", dados["turnover_mes"]],
     ] + [[f"Headcount — {REG_LABEL.get(k, k)}", v] for k, v in dados["por_regime"].items()],
         larguras=[34, 16])
-    ws2 = wb.create_sheet("Custo por competência")
-    _tabela(ws2, 1, ["Competência", "Status", "Headcount", "Folha (R$)", "Provisões (R$)",
-                     "Patronal (R$)", "Custo total (R$)"],
-            [[l["mes"], l["status"], l["headcount"], l["folha"], l["provisoes"],
-              l["patronal"], l["custo_total"]] for l in dados["serie_custo"]],
-            larguras=[14, 12, 12, 16, 16, 16, 18], money_cols={4, 5, 6, 7})
+    ws2 = wb.create_sheet("Evolução mensal")
+    _tabela(ws2, 1, ["Competência", "Situação", "Colaboradores", "Admissões", "Desligamentos",
+                     "Rotatividade (%)", "Custo total (R$)", "Custo CLT (R$)", "Provisões (R$)",
+                     "INSS patronal (R$)", "FGTS do mês (R$)", "FGTS acumulado (R$)",
+                     "Multa FGTS (R$)", "Multa acumulada (R$)"],
+            [[l["mes"], l["status"], l["headcount"], l.get("admissoes", 0), l.get("desligamentos", 0),
+              l.get("turnover", 0), l["custo_total"], l.get("custo_clt", 0), l["provisoes"],
+              l["patronal"], l.get("fgts", 0), l.get("fgts_acumulado", 0),
+              l.get("multa_fgts", 0), l.get("multa_fgts_acumulada", 0)]
+             for l in dados["serie_custo"]],
+            larguras=[14, 12, 13, 11, 13, 15, 17, 16, 15, 17, 15, 18, 15, 18],
+            money_cols={7, 8, 9, 10, 11, 12, 13, 14})
     if dados.get("custo_por_cargo"):
         wsc = wb.create_sheet("Custo por cargo")
         _tabela(wsc, 1, ["Cargo", "Tipo de contrato", "Pessoas", "Salário médio (R$)",
@@ -668,3 +688,121 @@ def dp_relatorio_quadro(request):
             larguras=[8, 32, 13, 13, 9, 13, 7, 24, 16, 18, 24, 11, 11, 12, 11, 9, 9],
             money_cols={14, 15, 16, 17})
     return _resposta_excel(wb, "quadro_pessoal.xlsx")
+
+
+def _pdf_termo_rescisao(r, usuario: str) -> HttpResponse:
+    """Termo de rescisão timbrado: identificação, verbas, descontos e líquido."""
+    from reportlab.lib import colors
+    from reportlab.lib.pagesizes import A4
+    from reportlab.lib.styles import ParagraphStyle
+    from reportlab.lib.units import mm
+    from reportlab.platypus import (Image, Paragraph, SimpleDocTemplate, Spacer, Table,
+                                    TableStyle)
+
+    c = r.colaborador
+    navy = colors.HexColor("#0A1940")
+    azul = colors.HexColor("#1E7BFF")
+    buf = BytesIO()
+    doc = SimpleDocTemplate(buf, pagesize=A4, topMargin=14 * mm, bottomMargin=14 * mm,
+                            leftMargin=16 * mm, rightMargin=16 * mm,
+                            title=f"Termo de rescisão — {c.nome}")
+    st_lbl = ParagraphStyle("l", fontSize=8, textColor=colors.HexColor("#666666"))
+    story = []
+    if os.path.exists(_LOGO):
+        story.append(Image(_LOGO, width=42 * mm, height=14.9 * mm, hAlign="LEFT"))
+    story.append(Spacer(1, 4 * mm))
+    story.append(Paragraph("Termo de Rescisão do Contrato de Trabalho",
+                           ParagraphStyle("t", fontSize=15, textColor=navy, fontName="Helvetica-Bold")))
+    story.append(Paragraph(
+        f"Gerado por {usuario} em {datetime.now().strftime('%d/%m/%Y %H:%M')} · MDR Advocacia",
+        st_lbl))
+    story.append(Spacer(1, 5 * mm))
+
+    def dbr(d):
+        return d.strftime("%d/%m/%Y") if d else "—"
+
+    ident = [
+        ["Colaborador", c.nome, "Matrícula", str(c.matricula)],
+        ["CPF", c.cpf or "—", "Tipo de contrato", dict(
+            [("estagiario", "Estagiário (TCE)"), ("clt", "CLT"),
+             ("associado", "Associado"), ("pj", "PJ")]).get(c.regime, c.regime)],
+        ["Cargo", (c.cargo.nome if c.cargo_id else "—"), "Centro de custo",
+         (c.centro_custo.nome if c.centro_custo_id else "—")],
+        ["Admissão", dbr(c.data_admissao or c.data_entrada), "Desligamento", dbr(r.data_desligamento)],
+        ["Motivo", r.get_tipo_display(), "Aviso prévio",
+         f"{r.aviso_dias} dias" if r.aviso_dias else "—"],
+    ]
+    t = Table(ident, colWidths=[26 * mm, 62 * mm, 30 * mm, 60 * mm])
+    t.setStyle(TableStyle([
+        ("FONTSIZE", (0, 0), (-1, -1), 8),
+        ("TEXTCOLOR", (0, 0), (0, -1), colors.HexColor("#666666")),
+        ("TEXTCOLOR", (2, 0), (2, -1), colors.HexColor("#666666")),
+        ("FONTNAME", (1, 0), (1, -1), "Helvetica-Bold"),
+        ("FONTNAME", (3, 0), (3, -1), "Helvetica-Bold"),
+        ("BOTTOMPADDING", (0, 0), (-1, -1), 4),
+        ("LINEBELOW", (0, 0), (-1, -2), 0.3, colors.HexColor("#EEEEEE")),
+    ]))
+    story.append(t)
+    story.append(Spacer(1, 6 * mm))
+
+    def bloco(titulo, linhas, cor, total_label, total):
+        story.append(Paragraph(titulo, ParagraphStyle("b", fontSize=10, textColor=cor,
+                                                      fontName="Helvetica-Bold")))
+        story.append(Spacer(1, 1.5 * mm))
+        data = [["Verba", "Como foi calculado", "Valor"]]
+        for v in linhas:
+            data.append([v["descricao"], v.get("memoria", ""), _brl(v["valor"])])
+        data.append([total_label, "", _brl(total)])
+        tb = Table(data, colWidths=[52 * mm, 90 * mm, 36 * mm], repeatRows=1)
+        tb.setStyle(TableStyle([
+            ("BACKGROUND", (0, 0), (-1, 0), navy),
+            ("TEXTCOLOR", (0, 0), (-1, 0), colors.white),
+            ("FONTNAME", (0, 0), (-1, 0), "Helvetica-Bold"),
+            ("FONTSIZE", (0, 0), (-1, -1), 7.5),
+            ("ALIGN", (2, 0), (2, -1), "RIGHT"),
+            ("TEXTCOLOR", (1, 1), (1, -2), colors.HexColor("#777777")),
+            ("ROWBACKGROUNDS", (0, 1), (-1, -2), [colors.white, colors.HexColor("#F7F9FF")]),
+            ("BACKGROUND", (0, -1), (-1, -1), cor),
+            ("TEXTCOLOR", (0, -1), (-1, -1), colors.white),
+            ("FONTNAME", (0, -1), (-1, -1), "Helvetica-Bold"),
+            ("GRID", (0, 0), (-1, -1), 0.3, colors.HexColor("#CCD6EE")),
+            ("TOPPADDING", (0, 0), (-1, -1), 3),
+            ("BOTTOMPADDING", (0, 0), (-1, -1), 3),
+        ]))
+        story.append(tb)
+        story.append(Spacer(1, 5 * mm))
+
+    bloco("Verbas devidas (proventos)", r.verbas or [], azul, "Total de proventos", r.proventos)
+    if r.descontos:
+        bloco("Descontos", r.descontos, colors.HexColor("#C0392B"), "Total de descontos", r.total_descontos)
+
+    liq = Table([["VALOR LÍQUIDO A RECEBER", _brl(r.liquido)]], colWidths=[130 * mm, 48 * mm])
+    liq.setStyle(TableStyle([
+        ("BACKGROUND", (0, 0), (-1, -1), colors.HexColor("#0A1940")),
+        ("TEXTCOLOR", (0, 0), (-1, -1), colors.white),
+        ("FONTNAME", (0, 0), (-1, -1), "Helvetica-Bold"),
+        ("FONTSIZE", (0, 0), (-1, -1), 11),
+        ("ALIGN", (1, 0), (1, -1), "RIGHT"),
+        ("TOPPADDING", (0, 0), (-1, -1), 6),
+        ("BOTTOMPADDING", (0, 0), (-1, -1), 6),
+    ]))
+    story.append(liq)
+    if r.motivo:
+        story.append(Spacer(1, 4 * mm))
+        story.append(Paragraph(f"<b>Observações:</b> {r.motivo}", ParagraphStyle("o", fontSize=8)))
+    story.append(Spacer(1, 14 * mm))
+    ass = Table([["_" * 42, "_" * 42], ["MDR Advocacia", c.nome]],
+                colWidths=[85 * mm, 85 * mm])
+    ass.setStyle(TableStyle([("FONTSIZE", (0, 0), (-1, -1), 8),
+                             ("ALIGN", (0, 0), (-1, -1), "CENTER"),
+                             ("TEXTCOLOR", (0, 1), (-1, 1), colors.HexColor("#666666"))]))
+    story.append(ass)
+    story.append(Spacer(1, 6 * mm))
+    story.append(Paragraph(
+        "Documento gerado pelo Painel Financeiro — confira os valores antes da homologação.",
+        ParagraphStyle("f", fontSize=7, textColor=colors.HexColor("#999999"))))
+    doc.build(story)
+    resp = HttpResponse(buf.getvalue(), content_type="application/pdf")
+    resp["Content-Disposition"] = f'attachment; filename="rescisao_{c.matricula}.pdf"'
+    resp["Access-Control-Expose-Headers"] = "Content-Disposition"
+    return resp

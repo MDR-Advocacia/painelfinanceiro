@@ -9,6 +9,7 @@ from .dp_views import (
     dp_audit_list, dp_importar,
 )
 from .dp_folha import DpCompetenciaViewSet
+from .dp_rescisao import DpRescisaoViewSet
 from .dp_relatorios import (
     dp_dashboard, dp_relatorio_auditoria, dp_relatorio_catalogos, dp_relatorio_competencia,
     dp_relatorio_dashboard, dp_relatorio_projecao, dp_relatorio_quadro, dp_relatorio_simulacao,
@@ -31,6 +32,7 @@ router.register(r'dp/cargos', DpCargoViewSet, basename='dp-cargos')
 router.register(r'dp/centros-custo', DpCentroCustoViewSet, basename='dp-ccs')
 router.register(r'dp/competencias', DpCompetenciaViewSet, basename='dp-competencias')
 router.register(r'dp/tabelas-fiscais', DpTabelaFiscalViewSet, basename='dp-fiscais')
+router.register(r'dp/rescisoes', DpRescisaoViewSet, basename='dp-rescisoes')
 
 urlpatterns = [
     path('', include(router.urls)),

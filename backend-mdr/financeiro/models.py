@@ -248,6 +248,7 @@ class DpColaborador(models.Model):
     centro_custo = models.ForeignKey(DpCentroCusto, on_delete=models.PROTECT,
                                      related_name="colaboradores")
     supervisor = models.CharField(max_length=120, blank=True, default="")
+    coordenador = models.CharField(max_length=120, blank=True, default="")
     equipe = models.CharField(max_length=120, blank=True, default="")
     cargo = models.ForeignKey(DpCargo, on_delete=models.SET_NULL, null=True, blank=True,
                               related_name="colaboradores")
@@ -446,6 +447,44 @@ class DpFolhaItem(models.Model):
         db_table = 'dp_folha_itens'
         unique_together = [('competencia', 'colaborador')]
         ordering = ['nome']
+
+
+class DpRescisao(models.Model):
+    """Desligamento com as verbas rescisórias calculadas e congeladas.
+
+    `verbas`/`descontos` guardam a lista detalhada com a memória de cálculo de
+    cada linha — o termo em PDF e a conferência saem daqui.
+    """
+    TIPOS = [
+        ("sem_justa_causa", "Dispensa sem justa causa"),
+        ("pedido_demissao", "Pedido de demissão"),
+        ("acordo", "Acordo (art. 484-A)"),
+        ("justa_causa", "Dispensa por justa causa"),
+        ("termino_contrato", "Término de contrato"),
+        ("fim_estagio", "Encerramento do estágio (TCE)"),
+    ]
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    colaborador = models.ForeignKey(DpColaborador, on_delete=models.PROTECT,
+                                    related_name="rescisoes")
+    data_desligamento = models.DateField()
+    tipo = models.CharField(max_length=30, choices=TIPOS)
+    motivo = models.TextField(blank=True, default="")
+    aviso_dias = models.IntegerField(default=0)
+    verbas = models.JSONField(default=list, blank=True)
+    descontos = models.JSONField(default=list, blank=True)
+    proventos = models.FloatField(default=0)
+    total_descontos = models.FloatField(default=0)
+    liquido = models.FloatField(default=0)
+    opcoes = models.JSONField(default=dict, blank=True)
+    criado_por = models.CharField(max_length=150, blank=True, default="")
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        db_table = 'dp_rescisoes'
+        ordering = ['-data_desligamento', '-created_at']
+
+    def __str__(self):
+        return f"Rescisão {self.colaborador} em {self.data_desligamento}"
 
 
 class DpAuditLog(models.Model):

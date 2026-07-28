@@ -18,7 +18,7 @@ export interface DpColaborador {
   id: string; matricula: number; nome: string; sexo: string; cpf: string;
   unidade: string; area: string;
   centro_custo_id: string; centro_custo_nome: string;
-  supervisor: string; equipe: string;
+  supervisor: string; coordenador: string; equipe: string;
   cargo_id: string | null; cargo_nome: string | null;
   regime: "estagiario" | "clt" | "associado" | "pj"; regime_label: string;
   status: "ativo" | "inativo";
@@ -162,7 +162,10 @@ export interface DpDashboard {
   admissoes_mes: number; desligamentos_mes: number; turnover_mes: number;
   custo_competencia: { mes: string; status: string; headcount: number; folha: number; provisoes: number; patronal: number; custo_total: number } | null;
   serie_mov: { mes: string; admissoes: number; desligamentos: number }[];
-  serie_custo: { mes: string; status: string; headcount: number; folha: number; provisoes: number; patronal: number; custo_total: number }[];
+  serie_custo: { mes: string; status: string; headcount: number; folha: number; provisoes: number;
+    patronal: number; custo_total: number; admissoes?: number; desligamentos?: number;
+    turnover?: number; custo_clt?: number; fgts?: number; multa_fgts?: number;
+    fgts_acumulado?: number; multa_fgts_acumulada?: number }[];
   // análises extras
   por_unidade: { nome: string; quantidade: number }[];
   por_area: { nome: string; quantidade: number }[];
@@ -314,6 +317,31 @@ export interface DpOpcoesEscopo {
 }
 export const escopoApi = {
   opcoes: () => fetch(`${API_URL}/dp/opcoes-escopo/`, { headers: authHeaders() }).then((r) => j<DpOpcoesEscopo>(r)),
+};
+
+// ── Desligamento / verbas rescisórias ──
+export interface DpVerba { descricao: string; valor: number; memoria: string }
+export interface DpRescisaoCalc {
+  colaborador: Record<string, unknown>;
+  tipo: string; tipo_label: string; data_desligamento: string; dias_aviso: number;
+  verbas: DpVerba[]; descontos: DpVerba[];
+  proventos: number; total_descontos: number; liquido: number;
+}
+export interface DpRescisaoRegistro extends DpRescisaoCalc {
+  id: string; colaborador_id: string; matricula: number; nome: string;
+  regime: string; motivo: string; criado_por: string; created_at: string;
+}
+
+export const rescisaoApi = {
+  listar: () => fetch(`${API_URL}/dp/rescisoes/`, { headers: authHeaders() })
+    .then((r) => j<DpRescisaoRegistro[]>(r)),
+  simular: (body: { colaborador_id: string; data_desligamento: string; tipo: string; opcoes?: Record<string, unknown> }) =>
+    fetch(`${API_URL}/dp/rescisoes/simular/`, { method: "POST", headers: H(), body: JSON.stringify(body) })
+      .then((r) => j<DpRescisaoCalc>(r)),
+  efetivar: (body: { colaborador_id: string; data_desligamento: string; tipo: string; motivo?: string; opcoes?: Record<string, unknown> }) =>
+    fetch(`${API_URL}/dp/rescisoes/efetivar/`, { method: "POST", headers: H(), body: JSON.stringify(body) })
+      .then((r) => j<DpRescisaoRegistro>(r)),
+  termo: (id: string) => baixar(`${API_URL}/dp/rescisoes/${id}/termo/`, "termo_rescisao.pdf"),
 };
 
 export const REGIME_LABELS: Record<string, string> = {

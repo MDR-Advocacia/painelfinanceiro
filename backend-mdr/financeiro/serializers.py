@@ -64,7 +64,7 @@ class DpColaboradorSerializer(serializers.ModelSerializer):
         model = DpColaborador
         fields = [
             'id', 'matricula', 'nome', 'sexo', 'cpf', 'unidade', 'area',
-            'centro_custo_id', 'centro_custo_nome', 'supervisor', 'equipe',
+            'centro_custo_id', 'centro_custo_nome', 'supervisor', 'coordenador', 'equipe',
             'cargo_id', 'cargo_nome', 'regime', 'regime_label', 'status',
             'data_entrada', 'data_admissao', 'data_demissao',
             'salario_bruto', 'saldo_livre', 'vt', 'opta_vt', 'va',

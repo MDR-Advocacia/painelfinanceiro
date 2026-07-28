@@ -37,7 +37,7 @@ def _snap(obj: DpColaborador) -> dict:
         "matricula": obj.matricula, "nome": obj.nome, "cpf": obj.cpf,
         "unidade": obj.unidade, "area": obj.area,
         "centro_custo": obj.centro_custo.nome if obj.centro_custo_id else None,
-        "supervisor": obj.supervisor, "equipe": obj.equipe,
+        "supervisor": obj.supervisor, "coordenador": obj.coordenador, "equipe": obj.equipe,
         "cargo": obj.cargo.nome if obj.cargo_id else None,
         "regime": obj.regime, "status": obj.status,
         "data_admissao": str(obj.data_admissao or ""), "data_demissao": str(obj.data_demissao or ""),
@@ -352,7 +352,10 @@ def dp_importar(request):
                 campos = {
                     "nome": nome, "sexo": _norm(row[3]), "cpf": _norm(row[4]),
                     "unidade": _norm(row[5]), "area": _norm(row[6]),
-                    "centro_custo": cc, "supervisor": _norm(row[9]), "equipe": _norm(row[10]),
+                    "centro_custo": cc, "supervisor": _norm(row[9]),
+                    # a planilha traz "Fulano - SUP" / "Fulano - COOR" na mesma coluna
+                    "coordenador": (_norm(row[9]) if "COOR" in _norm(row[9]).upper() else ""),
+                    "equipe": _norm(row[10]),
                     "cargo": cargo, "regime": regime,
                     "status": "ativo" if _norm(row[12]).lower() == "ativo" else "inativo",
                     "data_entrada": _data(row[14] if len(row) > 14 else None),

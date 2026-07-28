@@ -14,6 +14,9 @@ CAMPOS = {
     "area": ("Área", "texto"),
     "centro_custo": ("Centro de custo", "texto"),
     "supervisor": ("Supervisor", "texto"),
+    "coordenador": ("Coordenador", "texto"),
+    "tipo_desligamento": ("Tipo de desligamento", "texto"),
+    "liquido_rescisao": ("Líquido da rescisão", "moeda"),
     "equipe": ("Equipe", "texto"),
     "cargo": ("Cargo", "texto"),
     "regime": ("Tipo de contrato", "regime"),
@@ -194,7 +197,13 @@ def humanizar(log) -> dict:
         titulo = f"Desligou {alvo or 'colaborador'}"
         if depois.get("data_demissao"):
             titulo += f" em {_data_br(depois['data_demissao'])}"
-        mudancas = _mudancas({"status": antes.get("status")}, {"status": depois.get("status")})
+        if depois.get("tipo_desligamento"):
+            titulo += f" — {depois['tipo_desligamento']}"
+        if depois.get("liquido_rescisao") is not None:
+            titulo += f" · rescisão líquida de {_brl(depois['liquido_rescisao'])}"
+        mudancas = _mudancas(
+            {"status": antes.get("status")},
+            {k: v for k, v in depois.items() if k in ("status", "motivo")})
     elif log.acao == "criar":
         titulo = f"Cadastrou {entidade}: {alvo}" if alvo else f"Cadastrou {entidade}"
         mudancas = [m for m in _mudancas({}, depois) if m["para"] != "—"]
