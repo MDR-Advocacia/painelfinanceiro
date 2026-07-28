@@ -1,13 +1,27 @@
+// Menu do ADM — Usuários & Permissões (RBAC por cargo):
+//  1) Gestão de acesso: liberar/revogar, admin, e ATRIBUIR CARGO a cada usuário.
+//  2) Cargos & Permissões: tabela cargos × módulos (checkboxes) — a política de
+//     visualização é POR CARGO; admin bypassa tudo.
 import { useEffect, useState } from "react";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
+import { Input } from "@/components/ui/input";
+import { Checkbox } from "@/components/ui/checkbox";
+import {
+  Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
+} from "@/components/ui/select";
+import {
+  Table, TableBody, TableCell, TableHead, TableHeader, TableRow,
+} from "@/components/ui/table";
 import {
   ShieldCheck, ArrowLeft, RefreshCw, Check, X, Loader2, ExternalLink, Crown,
+  Plus, Trash2, BadgeCheck,
 } from "lucide-react";
 import { useNavigate } from "react-router-dom";
 import { toast } from "sonner";
 import { API_URL, ADMIN_URL, authHeaders, useAuth } from "@/hooks/useAuth";
+import { invalidatePermissionsCache } from "@/hooks/usePermissions";
 
 interface AdminUser {
   id: number;
@@ -16,9 +30,21 @@ interface AdminUser {
   nome: string;
   is_active: boolean;
   is_staff: boolean;
+  cargo_id: string | null;
+  cargo_nome: string | null;
   last_login: string | null;
   date_joined: string | null;
 }
+
+interface Cargo {
+  id: string;
+  nome: string;
+  modulos: Record<string, boolean>;
+}
+
+interface Modulo { key: string; label: string; }
+
+const SEM_CARGO = "__none__";
 
 const fmtData = (iso: string | null) =>
   iso ? new Date(iso).toLocaleString("pt-BR", { dateStyle: "short", timeStyle: "short" }) : "—";
@@ -27,17 +53,27 @@ export default function UserManagement() {
   const navigate = useNavigate();
   const { user } = useAuth();
   const [users, setUsers] = useState<AdminUser[]>([]);
+  const [cargos, setCargos] = useState<Cargo[]>([]);
+  const [modulos, setModulos] = useState<Modulo[]>([]);
   const [loading, setLoading] = useState(true);
   const [savingId, setSavingId] = useState<number | null>(null);
+  const [savingCargo, setSavingCargo] = useState<string | null>(null);
+  const [novoCargo, setNovoCargo] = useState("");
 
   const carregar = async () => {
     setLoading(true);
     try {
-      const res = await fetch(`${API_URL}/users/`, { headers: authHeaders() });
-      if (!res.ok) throw new Error(String(res.status));
-      setUsers(await res.json());
+      const [ru, rc, rm] = await Promise.all([
+        fetch(`${API_URL}/users/`, { headers: authHeaders() }),
+        fetch(`${API_URL}/cargos/`, { headers: authHeaders() }),
+        fetch(`${API_URL}/cargos/modulos/`, { headers: authHeaders() }),
+      ]);
+      if (!ru.ok || !rc.ok || !rm.ok) throw new Error("http");
+      setUsers(await ru.json());
+      setCargos(await rc.json());
+      setModulos(await rm.json());
     } catch {
-      toast.error("Não foi possível carregar os usuários.");
+      toast.error("Não foi possível carregar usuários/cargos.");
     } finally {
       setLoading(false);
     }
@@ -45,11 +81,7 @@ export default function UserManagement() {
 
   useEffect(() => { carregar(); }, []);
 
-  const patch = async (
-    u: AdminUser,
-    body: Partial<Pick<AdminUser, "is_active" | "is_staff">>,
-    msg: string,
-  ) => {
+  const patchUser = async (u: AdminUser, body: Record<string, unknown>, msg: string) => {
     setSavingId(u.id);
     try {
       const res = await fetch(`${API_URL}/users/${u.id}/`, {
@@ -63,6 +95,7 @@ export default function UserManagement() {
       }
       const atualizado: AdminUser = await res.json();
       setUsers((prev) => prev.map((x) => (x.id === atualizado.id ? atualizado : x)));
+      invalidatePermissionsCache();
       toast.success(msg);
     } catch (e: any) {
       toast.error(e.message || "Falha ao atualizar.");
@@ -71,40 +104,182 @@ export default function UserManagement() {
     }
   };
 
+  // ── Cargos & Permissões ──
+  const toggleModulo = async (cargo: Cargo, key: string) => {
+    const novos = { ...cargo.modulos, [key]: !cargo.modulos[key] };
+    setSavingCargo(cargo.id);
+    // otimista
+    setCargos((prev) => prev.map((c) => (c.id === cargo.id ? { ...c, modulos: novos } : c)));
+    try {
+      const res = await fetch(`${API_URL}/cargos/${cargo.id}/`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json", ...authHeaders() },
+        body: JSON.stringify({ modulos: novos }),
+      });
+      if (!res.ok) throw new Error(String(res.status));
+      invalidatePermissionsCache();
+    } catch {
+      // desfaz
+      setCargos((prev) => prev.map((c) => (c.id === cargo.id ? cargo : c)));
+      toast.error("Falha ao salvar a permissão.");
+    } finally {
+      setSavingCargo(null);
+    }
+  };
+
+  const criarCargo = async () => {
+    const nome = novoCargo.trim();
+    if (!nome) { toast.error("Dê um nome ao cargo."); return; }
+    try {
+      const res = await fetch(`${API_URL}/cargos/`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", ...authHeaders() },
+        body: JSON.stringify({ nome, modulos: {} }),
+      });
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({} as any));
+        throw new Error(data.nome?.[0] || `Erro ${res.status}`);
+      }
+      const criado: Cargo = await res.json();
+      setCargos((prev) => [...prev, criado].sort((a, b) => a.nome.localeCompare(b.nome)));
+      setNovoCargo("");
+      toast.success(`Cargo "${nome}" criado — marque os módulos dele.`);
+    } catch (e: any) {
+      toast.error(e.message || "Falha ao criar cargo.");
+    }
+  };
+
+  const excluirCargo = async (cargo: Cargo) => {
+    const emUso = users.filter((u) => u.cargo_id === cargo.id).length;
+    if (!confirm(`Excluir o cargo "${cargo.nome}"?${emUso ? ` ${emUso} usuário(s) ficarão sem cargo.` : ""}`)) return;
+    try {
+      const res = await fetch(`${API_URL}/cargos/${cargo.id}/`, {
+        method: "DELETE", headers: authHeaders(),
+      });
+      if (!res.ok && res.status !== 204) throw new Error(String(res.status));
+      setCargos((prev) => prev.filter((c) => c.id !== cargo.id));
+      setUsers((prev) => prev.map((u) => (u.cargo_id === cargo.id ? { ...u, cargo_id: null, cargo_nome: null } : u)));
+      invalidatePermissionsCache();
+      toast.success(`Cargo "${cargo.nome}" excluído.`);
+    } catch {
+      toast.error("Falha ao excluir o cargo.");
+    }
+  };
+
   const ehEuMesmo = (u: AdminUser) =>
     !!user && u.email?.toLowerCase() === user.email?.toLowerCase();
 
   return (
-    <div className="min-h-screen bg-secondary p-6 md:p-8">
-      <div className="max-w-4xl mx-auto space-y-6">
+    <div className="min-h-screen p-6 md:p-8">
+      <div className="mx-auto max-w-5xl space-y-6">
         <div className="flex items-center justify-between">
           <Button variant="ghost" size="sm" onClick={() => navigate("/")}>
-            <ArrowLeft className="w-4 h-4 mr-1" /> Voltar ao Painel
+            <ArrowLeft className="mr-1 h-4 w-4" /> Voltar ao Painel
           </Button>
           <Button variant="outline" size="sm" onClick={carregar} disabled={loading}>
-            <RefreshCw className={`w-4 h-4 mr-1 ${loading ? "animate-spin" : ""}`} /> Atualizar
+            <RefreshCw className={`mr-1 h-4 w-4 ${loading ? "animate-spin" : ""}`} /> Atualizar
           </Button>
         </div>
 
-        <Card className="border-primary/20 shadow-sm">
+        {/* ── CARGOS & PERMISSÕES (tabela por módulo) ── */}
+        <Card className="glass-card border-0">
           <CardHeader>
             <CardTitle className="flex items-center gap-2 font-heading">
-              <ShieldCheck className="w-5 h-5 text-primary" /> Gestão de Acesso
+              <BadgeCheck className="h-5 w-5 text-[hsl(var(--dunatech-blue))]" /> Cargos & Permissões
             </CardTitle>
             <CardDescription>
-              Por padrão ninguém tem acesso. Libere apenas quem deve ver o painel.
-              Revogar tira o acesso na hora (invalida o token).
+              A política de visualização é <b>por cargo</b>: marque quais módulos cada cargo enxerga.
+              Admins (coroa) enxergam tudo, independente do cargo.
+            </CardDescription>
+          </CardHeader>
+          <CardContent className="space-y-3">
+            {loading ? (
+              <div className="flex items-center justify-center py-8 text-muted-foreground">
+                <Loader2 className="mr-2 h-5 w-5 animate-spin" /> Carregando…
+              </div>
+            ) : (
+              <>
+                <div className="overflow-x-auto">
+                  <Table>
+                    <TableHeader>
+                      <TableRow>
+                        <TableHead className="min-w-[160px] text-xs">Cargo</TableHead>
+                        {modulos.map((m) => (
+                          <TableHead key={m.key} className="text-center text-[11px]" title={m.label}>
+                            {m.label.split(" (")[0]}
+                          </TableHead>
+                        ))}
+                        <TableHead className="w-10" />
+                      </TableRow>
+                    </TableHeader>
+                    <TableBody>
+                      {cargos.map((c) => (
+                        <TableRow key={c.id}>
+                          <TableCell className="text-sm font-medium">
+                            {c.nome}
+                            {savingCargo === c.id && <Loader2 className="ml-2 inline h-3 w-3 animate-spin" />}
+                            <span className="block text-[10px] text-muted-foreground">
+                              {users.filter((u) => u.cargo_id === c.id).length} usuário(s)
+                            </span>
+                          </TableCell>
+                          {modulos.map((m) => (
+                            <TableCell key={m.key} className="text-center">
+                              <Checkbox
+                                checked={!!c.modulos[m.key]}
+                                onCheckedChange={() => toggleModulo(c, m.key)}
+                                disabled={savingCargo === c.id}
+                              />
+                            </TableCell>
+                          ))}
+                          <TableCell>
+                            <button
+                              onClick={() => excluirCargo(c)}
+                              className="rounded p-1 text-muted-foreground/40 transition-colors hover:bg-destructive/10 hover:text-destructive"
+                              title="Excluir cargo"
+                            >
+                              <Trash2 className="h-3.5 w-3.5" />
+                            </button>
+                          </TableCell>
+                        </TableRow>
+                      ))}
+                    </TableBody>
+                  </Table>
+                </div>
+                <div className="flex items-center gap-2 pt-1">
+                  <Input
+                    placeholder="Novo cargo (ex.: Coordenador, Controller…)"
+                    value={novoCargo}
+                    onChange={(e) => setNovoCargo(e.target.value)}
+                    onKeyDown={(e) => e.key === "Enter" && criarCargo()}
+                    className="h-9 max-w-xs text-sm"
+                  />
+                  <Button size="sm" onClick={criarCargo} className="glass-button gap-1 border-0">
+                    <Plus className="h-4 w-4" /> Criar cargo
+                  </Button>
+                </div>
+              </>
+            )}
+          </CardContent>
+        </Card>
+
+        {/* ── GESTÃO DE ACESSO (usuários) ── */}
+        <Card className="glass-card border-0">
+          <CardHeader>
+            <CardTitle className="flex items-center gap-2 font-heading">
+              <ShieldCheck className="h-5 w-5 text-[hsl(var(--dunatech-blue))]" /> Gestão de Acesso
+            </CardTitle>
+            <CardDescription>
+              Por padrão ninguém tem acesso. Libere quem deve ver o painel e atribua o <b>cargo</b> —
+              é ele que define os módulos visíveis.
             </CardDescription>
           </CardHeader>
           <CardContent className="space-y-2">
             {loading ? (
-              <div className="py-12 flex items-center justify-center text-muted-foreground">
-                <Loader2 className="w-5 h-5 animate-spin mr-2" /> Carregando usuários...
+              <div className="flex items-center justify-center py-12 text-muted-foreground">
+                <Loader2 className="mr-2 h-5 w-5 animate-spin" /> Carregando usuários...
               </div>
             ) : users.length === 0 ? (
-              <p className="py-12 text-center text-sm text-muted-foreground">
-                Nenhum usuário encontrado.
-              </p>
+              <p className="py-12 text-center text-sm text-muted-foreground">Nenhum usuário encontrado.</p>
             ) : (
               users.map((u) => {
                 const eu = ehEuMesmo(u);
@@ -112,14 +287,14 @@ export default function UserManagement() {
                 return (
                   <div
                     key={u.id}
-                    className="flex flex-col md:flex-row md:items-center gap-3 p-3 rounded-lg border border-border bg-card"
+                    className="flex flex-col gap-3 rounded-lg border border-border bg-card/60 p-3 md:flex-row md:items-center"
                   >
-                    <div className="flex-1 min-w-0">
-                      <div className="flex items-center gap-2 flex-wrap">
-                        <span className="font-medium truncate">{u.nome}</span>
+                    <div className="min-w-0 flex-1">
+                      <div className="flex flex-wrap items-center gap-2">
+                        <span className="truncate font-medium">{u.nome}</span>
                         {u.is_staff && (
-                          <Badge className="bg-primary/15 text-primary hover:bg-primary/15 gap-1">
-                            <Crown className="w-3 h-3" /> Admin
+                          <Badge className="gap-1 bg-primary/15 text-primary hover:bg-primary/15">
+                            <Crown className="h-3 w-3" /> Admin
                           </Badge>
                         )}
                         {u.is_active ? (
@@ -129,29 +304,54 @@ export default function UserManagement() {
                         )}
                         {eu && <Badge variant="outline">você</Badge>}
                       </div>
-                      <p className="text-xs text-muted-foreground truncate">{u.email}</p>
-                      <p className="text-[11px] text-muted-foreground/70">
-                        Último acesso: {fmtData(u.last_login)}
-                      </p>
+                      <p className="truncate text-xs text-muted-foreground">{u.email}</p>
+                      <p className="text-[11px] text-muted-foreground/70">Último acesso: {fmtData(u.last_login)}</p>
                     </div>
 
-                    <div className="flex items-center gap-2 shrink-0">
+                    {/* Cargo do usuário (RBAC) */}
+                    <div className="shrink-0">
+                      <Select
+                        value={u.cargo_id ?? SEM_CARGO}
+                        onValueChange={(v) =>
+                          patchUser(
+                            u,
+                            { cargo_id: v === SEM_CARGO ? null : v },
+                            v === SEM_CARGO
+                              ? `${u.nome} ficou sem cargo (sem módulos).`
+                              : `Cargo de ${u.nome} atualizado.`,
+                          )
+                        }
+                        disabled={saving}
+                      >
+                        <SelectTrigger className="h-8 w-[190px] text-xs">
+                          <SelectValue placeholder="Sem cargo" />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value={SEM_CARGO}>— Sem cargo —</SelectItem>
+                          {cargos.map((c) => (
+                            <SelectItem key={c.id} value={c.id}>{c.nome}</SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                    </div>
+
+                    <div className="flex shrink-0 items-center gap-2">
                       {u.is_active ? (
                         <Button
                           size="sm" variant="outline"
                           disabled={saving || eu}
                           title={eu ? "Você não pode revogar o próprio acesso" : ""}
-                          onClick={() => patch(u, { is_active: false }, `Acesso de ${u.nome} revogado.`)}
+                          onClick={() => patchUser(u, { is_active: false }, `Acesso de ${u.nome} revogado.`)}
                         >
-                          {saving ? <Loader2 className="w-4 h-4 animate-spin" /> : <><X className="w-4 h-4 mr-1" /> Revogar</>}
+                          {saving ? <Loader2 className="h-4 w-4 animate-spin" /> : <><X className="mr-1 h-4 w-4" /> Revogar</>}
                         </Button>
                       ) : (
                         <Button
                           size="sm"
                           disabled={saving}
-                          onClick={() => patch(u, { is_active: true }, `${u.nome} liberado.`)}
+                          onClick={() => patchUser(u, { is_active: true }, `${u.nome} liberado.`)}
                         >
-                          {saving ? <Loader2 className="w-4 h-4 animate-spin" /> : <><Check className="w-4 h-4 mr-1" /> Liberar</>}
+                          {saving ? <Loader2 className="h-4 w-4 animate-spin" /> : <><Check className="mr-1 h-4 w-4" /> Liberar</>}
                         </Button>
                       )}
 
@@ -160,7 +360,7 @@ export default function UserManagement() {
                           size="sm" variant="ghost"
                           disabled={saving || eu}
                           title={eu ? "Você não pode rebaixar a própria conta" : ""}
-                          onClick={() => patch(u, { is_staff: false }, `${u.nome} não é mais admin.`)}
+                          onClick={() => patchUser(u, { is_staff: false }, `${u.nome} não é mais admin.`)}
                         >
                           Remover admin
                         </Button>
@@ -168,7 +368,7 @@ export default function UserManagement() {
                         <Button
                           size="sm" variant="ghost"
                           disabled={saving}
-                          onClick={() => patch(u, { is_staff: true, is_active: true }, `${u.nome} agora é admin.`)}
+                          onClick={() => patchUser(u, { is_staff: true, is_active: true }, `${u.nome} agora é admin.`)}
                         >
                           Tornar admin
                         </Button>
@@ -186,9 +386,9 @@ export default function UserManagement() {
             href={ADMIN_URL}
             target="_blank"
             rel="noopener noreferrer"
-            className="text-xs text-muted-foreground hover:text-primary inline-flex items-center gap-1"
+            className="inline-flex items-center gap-1 text-xs text-muted-foreground hover:text-primary"
           >
-            <ExternalLink className="w-3 h-3" /> Administração avançada (Django)
+            <ExternalLink className="h-3 w-3" /> Administração avançada (Django)
           </a>
         </p>
       </div>

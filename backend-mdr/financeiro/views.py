@@ -1,13 +1,13 @@
 from rest_framework import viewsets
-from .models import Sede, Setor, VpdConfig, BaseReferencia
-from .serializers import SedeSerializer, SetorSerializer, VpdConfigSerializer, BaseReferenciaSerializer
+from .models import MODULO_KEYS, MODULOS, Cargo, PerfilUsuario, Sede, Setor, VpdConfig, BaseReferencia
+from .serializers import CargoSerializer, SedeSerializer, SetorSerializer, VpdConfigSerializer, BaseReferenciaSerializer
 from .sso_views import LEGACY_DATA_USER_ID
 from rest_framework.authtoken.views import ObtainAuthToken
 from rest_framework.authtoken.models import Token
-from rest_framework.permissions import IsAdminUser
+from rest_framework.permissions import IsAdminUser, IsAuthenticated
 from rest_framework.response import Response
 from rest_framework import status
-from rest_framework.decorators import action
+from rest_framework.decorators import action, api_view, permission_classes
 from django.contrib.auth.models import User
 
 class SedeViewSet(viewsets.ModelViewSet):
@@ -75,8 +75,54 @@ class CustomAuthToken(ObtainAuthToken):
         })
 
 
+class CargoViewSet(viewsets.ModelViewSet):
+    """CRUD de cargos + a tabela de permissões por módulo.
+
+    Leitura: qualquer autenticado (a UI precisa saber nomes). Escrita: só admin.
+    GET /api/cargos/modulos/ devolve a tabela canônica de módulos (key+label)
+    pra montar o grid do menu do ADM sem hardcode no frontend.
+    """
+    queryset = Cargo.objects.all()
+    serializer_class = CargoSerializer
+
+    def get_permissions(self):
+        if self.action in ('list', 'retrieve', 'modulos'):
+            return [IsAuthenticated()]
+        return [IsAdminUser()]
+
+    @action(detail=False, methods=['get'])
+    def modulos(self, request):
+        return Response([{"key": k, "label": l} for k, l in MODULOS])
+
+
+@api_view(['GET'])
+@permission_classes([IsAuthenticated])
+def me_permissions(request):
+    """Permissões efetivas do usuário logado — o frontend monta o menu com isso.
+
+    Admin (is_staff) enxerga tudo. Usuário comum enxerga o que o CARGO dele
+    libera; sem cargo = nenhum módulo (tela de "sem acesso" no front).
+    """
+    u = request.user
+    perfil = PerfilUsuario.objects.filter(user=u).select_related('cargo').first()
+    cargo = perfil.cargo if perfil else None
+    if u.is_staff:
+        modulos = {k: True for k in MODULO_KEYS}
+    elif cargo:
+        modulos = cargo.modulos_efetivos()
+    else:
+        modulos = {k: False for k in MODULO_KEYS}
+    return Response({
+        'is_staff': u.is_staff,
+        'cargo': {'id': str(cargo.id), 'nome': cargo.nome} if cargo else None,
+        'modulos': modulos,
+    })
+
+
 def _user_row(u):
     nome = f"{u.first_name} {u.last_name}".strip() or u.username
+    perfil = getattr(u, 'perfil', None)
+    cargo = perfil.cargo if perfil else None
     return {
         'id': u.id,
         'email': u.email or u.username,
@@ -84,6 +130,8 @@ def _user_row(u):
         'nome': nome,
         'is_active': u.is_active,
         'is_staff': u.is_staff,
+        'cargo_id': str(cargo.id) if cargo else None,
+        'cargo_nome': cargo.nome if cargo else None,
         'last_login': u.last_login.isoformat() if u.last_login else None,
         'date_joined': u.date_joined.isoformat() if u.date_joined else None,
     }
@@ -121,4 +169,19 @@ class UserAdminViewSet(viewsets.ViewSet):
         if is_staff is not None:
             user.is_staff = bool(is_staff)
         user.save()
+
+        # Atribuição de cargo (RBAC): PATCH {"cargo_id": "<uuid>" | null}
+        if 'cargo_id' in request.data:
+            cargo_id = request.data.get('cargo_id')
+            cargo = None
+            if cargo_id:
+                cargo = Cargo.objects.filter(pk=cargo_id).first()
+                if cargo is None:
+                    return Response({'detail': 'Cargo não encontrado.'},
+                                    status=status.HTTP_400_BAD_REQUEST)
+            perfil, _ = PerfilUsuario.objects.get_or_create(user=user)
+            perfil.cargo = cargo
+            perfil.save()
+
+        user.refresh_from_db()
         return Response(_user_row(user))

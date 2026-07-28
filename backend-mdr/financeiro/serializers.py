@@ -1,5 +1,19 @@
 from rest_framework import serializers
-from .models import Sede, Setor, VpdConfig, BaseReferencia
+from .models import Cargo, Sede, Setor, VpdConfig, BaseReferencia
+
+
+class CargoSerializer(serializers.ModelSerializer):
+    id = serializers.UUIDField(required=False)
+
+    class Meta:
+        model = Cargo
+        fields = ['id', 'nome', 'modulos', 'created_at', 'updated_at']
+
+    def to_representation(self, instance):
+        # devolve o dict COMPLETO (toda key da tabela MODULOS presente)
+        data = super().to_representation(instance)
+        data['modulos'] = instance.modulos_efetivos()
+        return data
 
 class SedeSerializer(serializers.ModelSerializer):
     # Permite que o frontend envie o UUID gerado (evita duplicidades no autosave)
