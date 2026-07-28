@@ -17,6 +17,7 @@ from rest_framework import status, viewsets
 from rest_framework.decorators import action
 from rest_framework.response import Response
 
+from .dp_calendario import calcular_dias_uteis
 from .dp_escopo import filtrar_folha
 from .dp_views import _quem, audit
 from .models import (
@@ -84,9 +85,17 @@ def calcular_item(colab: DpColaborador, lanc, comp: DpCompetencia, fiscal: DpTab
         mem["desc_faltas"] = f"({bruto}/{dias_ref})×{f_dias} + ({bruto}/{horas_ref})×{f_horas}"
     sal_faltas = round(bruto - desc_faltas, 2)
 
-    # VT proporcional às faltas DA competência (ver nota no topo do arquivo)
-    vt_faltas = round(vt - (vt / max(comp.dias_uteis, 1)) * f_dias, 2) if vt else 0.0
-    va_faltas = va
+    # VT e VA proporcionais às faltas DA competência: o benefício é diário, então
+    # cada dia de falta desconta 1/dias_úteis do valor cheio (horas viram fração
+    # de dia pela carga do cargo).
+    dias_equiv = f_dias + (f_horas / (horas_ref / dias_ref) if horas_ref else 0)
+    fator_falta = min(dias_equiv / max(comp.dias_uteis, 1), 1.0) if dias_equiv else 0.0
+    vt_faltas = round(vt * (1 - fator_falta), 2) if vt else 0.0
+    va_faltas = round(va * (1 - fator_falta), 2) if va else 0.0
+    if fator_falta:
+        mem["beneficios_proporcionais"] = (
+            f"{dias_equiv:.2f} dia(s) de falta ÷ {comp.dias_uteis} dias úteis = "
+            f"{fator_falta:.1%} de desconto no VT e no VA")
 
     # INSS (só CLT) — tabela da vigência
     if clt:
@@ -143,6 +152,9 @@ def calcular_item(colab: DpColaborador, lanc, comp: DpCompetencia, fiscal: DpTab
         "memoria": mem,
         "ajuste_manual": ajustada,
         "ajuste_motivo": (lanc.ajuste_motivo if lanc else "") or "",
+        # marca a linha de quem sai neste mês (espelha a "Obs. Rescisão" da planilha)
+        "em_rescisao": bool(colab.data_demissao and colab.data_demissao.year == comp.ano
+                            and colab.data_demissao.month == comp.mes),
     }
 
 
@@ -179,6 +191,8 @@ def _comp_row(c: DpCompetencia) -> dict:
         "fechada_por": c.fechada_por,
         "fechada_em": c.fechada_em.isoformat() if c.fechada_em else None,
         "total_itens": c.itens.count(),
+        "calendario": calcular_dias_uteis(c.ano, c.mes),
+        "em_rescisao": c.itens.filter(em_rescisao=True).count(),
     }
 
 
@@ -198,10 +212,12 @@ class DpCompetenciaViewSet(viewsets.ViewSet):
             return Response({"detail": "Informe ano e mês válidos."}, status=400)
         if DpCompetencia.objects.filter(ano=ano, mes=mes).exists():
             return Response({"detail": f"{mes:02d}/{ano} já existe."}, status=400)
+        cal = calcular_dias_uteis(ano, mes)
         comp = DpCompetencia.objects.create(
             ano=ano, mes=mes,
             dias_mes=int(request.data.get("dias_mes") or 30),
-            dias_uteis=int(request.data.get("dias_uteis") or 22),
+            # sugestão automática pelo calendário (o operador pode sobrescrever)
+            dias_uteis=int(request.data.get("dias_uteis") or cal["dias_uteis"]),
             aberta_por=_quem(request),
         )
         try:
@@ -217,6 +233,34 @@ class DpCompetenciaViewSet(viewsets.ViewSet):
         comp = DpCompetencia.objects.filter(pk=pk).first()
         if not comp:
             return Response(status=404)
+        return Response(_comp_row(comp))
+
+    @action(detail=False, methods=["get"])
+    def calendario(self, request):
+        """Dias úteis sugeridos para ano/mês (com a lista de feriados)."""
+        try:
+            ano = int(request.query_params.get("ano"))
+            mes = int(request.query_params.get("mes"))
+        except (TypeError, ValueError):
+            return Response({"detail": "Informe ano e mês."}, status=400)
+        return Response(calcular_dias_uteis(ano, mes))
+
+    @action(detail=True, methods=["post"])
+    def ajustar_dias(self, request, pk=None):
+        """Corrige os dias do mês / dias úteis da competência e recalcula."""
+        comp = DpCompetencia.objects.get(pk=pk)
+        if comp.status == "fechada":
+            return Response({"detail": "Competência fechada."}, status=409)
+        antes = {"dias_mes": comp.dias_mes, "dias_uteis": comp.dias_uteis}
+        try:
+            comp.dias_mes = int(request.data.get("dias_mes") or comp.dias_mes)
+            comp.dias_uteis = int(request.data.get("dias_uteis") or comp.dias_uteis)
+        except (TypeError, ValueError):
+            return Response({"detail": "Valores inválidos."}, status=400)
+        comp.save()
+        recalcular(comp)
+        audit(request, "editar", "dp_competencia", comp.id, antes=antes,
+              depois={"dias_mes": comp.dias_mes, "dias_uteis": comp.dias_uteis})
         return Response(_comp_row(comp))
 
     @action(detail=True, methods=["post"])
@@ -291,7 +335,8 @@ class DpCompetenciaViewSet(viewsets.ViewSet):
                   "faltas_dias", "faltas_horas", "desc_faltas", "desc_inss", "desc_vt",
                   "vt_com_faltas", "va_com_faltas", "saldo_livre", "premiacoes",
                   "acerto_contabil", "total_pagar", "custo_provisoes", "inss_patronal",
-                  "custo_total", "ajuste_manual", "ajuste_motivo", "vt", "va", "cargo_nome"]
+                  "custo_total", "ajuste_manual", "ajuste_motivo", "vt", "va", "cargo_nome",
+                  "em_rescisao", "salario_com_faltas", "salario_com_descontos"]
         items = []
         for it in qs[offset:offset + limit]:
             row = {k: getattr(it, k) for k in campos}
@@ -306,18 +351,79 @@ class DpCompetenciaViewSet(viewsets.ViewSet):
 
     @action(detail=True, methods=["get"])
     def rateio(self, request, pk=None):
-        """Rateio por Centro de Custo (o fechamento do financeiro)."""
-        comp = DpCompetencia.objects.get(pk=pk)
+        """Resumo do Centro de Custo por setor — espelha a aba CC da planilha e é
+        a base da integração com o faturamento (custo de pessoal por carteira).
+
+        Devolve por centro de custo: headcount, salários, VT, VA, saldo livre,
+        prêmios, acertos, INSS patronal, custo mensal, % do custo total, provisões
+        detalhadas (13º, férias, 1/3, FGTS, multa, recesso) e o total.
+        """
         from django.db.models import Count, Sum
-        linhas = (filtrar_folha(comp.itens.all(), request.user).values("centro_custo_nome")
-                  .annotate(headcount=Count("id"), folha=Sum("total_pagar"),
-                            provisoes=Sum("custo_provisoes"), patronal=Sum("inss_patronal"),
-                            custo=Sum("custo_total"))
-                  .order_by("-custo"))
-        return Response([{**l, "folha": round(l["folha"] or 0, 2),
-                          "provisoes": round(l["provisoes"] or 0, 2),
-                          "patronal": round(l["patronal"] or 0, 2),
-                          "custo": round(l["custo"] or 0, 2)} for l in linhas])
+
+        comp = DpCompetencia.objects.get(pk=pk)
+        itens = filtrar_folha(comp.itens.all(), request.user)
+        agrega = dict(
+            headcount=Count("id"), salarios=Sum("salario_bruto"),
+            vt=Sum("vt_com_faltas"), va=Sum("va_com_faltas"), saldo_livre=Sum("saldo_livre"),
+            premios=Sum("premiacoes"), acertos=Sum("acerto_contabil"),
+            folha=Sum("total_pagar"), patronal=Sum("inss_patronal"),
+            decimo=Sum("decimo_mensal"), ferias=Sum("ferias_mensal"),
+            terco=Sum("terco_ferias_mensal"), fgts=Sum("fgts_mensal"),
+            multa=Sum("multa_fgts_mensal"), recesso=Sum("recesso_mensal"),
+            provisoes=Sum("custo_provisoes"), custo=Sum("custo_total"),
+        )
+        linhas = list(itens.values("centro_custo_nome").annotate(**agrega).order_by("-custo"))
+        total_geral = sum(l["custo"] or 0 for l in linhas) or 1
+
+        # hierarquia: cada CC sabe seu núcleo (para somar por grupo no financeiro)
+        from .models import DpCentroCusto
+        pais = {c.nome: (c.pai.nome if c.pai_id else c.nome)
+                for c in DpCentroCusto.objects.select_related("pai").all()}
+
+        def limpa(l):
+            nome = l["centro_custo_nome"]
+            return {
+                "centro_custo_nome": nome,
+                "nucleo": pais.get(nome, nome),
+                "headcount": l["headcount"],
+                "salarios": round(l["salarios"] or 0, 2),
+                "vt": round(l["vt"] or 0, 2), "va": round(l["va"] or 0, 2),
+                "saldo_livre": round(l["saldo_livre"] or 0, 2),
+                "premios": round(l["premios"] or 0, 2),
+                "acertos": round(l["acertos"] or 0, 2),
+                "folha": round(l["folha"] or 0, 2),
+                "patronal": round(l["patronal"] or 0, 2),
+                "decimo": round(l["decimo"] or 0, 2), "ferias": round(l["ferias"] or 0, 2),
+                "terco": round(l["terco"] or 0, 2), "fgts": round(l["fgts"] or 0, 2),
+                "multa_fgts": round(l["multa"] or 0, 2), "recesso": round(l["recesso"] or 0, 2),
+                "provisoes": round(l["provisoes"] or 0, 2),
+                "custo": round(l["custo"] or 0, 2),
+                "percentual": round((l["custo"] or 0) / total_geral * 100, 1),
+            }
+
+        detalhado = [limpa(l) for l in linhas]
+
+        # consolidado por núcleo (ADM, Autor, Réu…) — o corte que o faturamento usa
+        por_nucleo = {}
+        for l in detalhado:
+            n = por_nucleo.setdefault(l["nucleo"], {
+                "nucleo": l["nucleo"], "headcount": 0, "folha": 0.0,
+                "provisoes": 0.0, "patronal": 0.0, "custo": 0.0, "centros": 0})
+            n["headcount"] += l["headcount"]
+            n["centros"] += 1
+            for k in ("folha", "provisoes", "patronal", "custo"):
+                n[k] = round(n[k] + l[k], 2)
+        for n in por_nucleo.values():
+            n["percentual"] = round(n["custo"] / total_geral * 100, 1)
+
+        totais = {k: round(sum(l[k] for l in detalhado), 2) for k in
+                  ("salarios", "vt", "va", "saldo_livre", "premios", "acertos", "folha",
+                   "patronal", "decimo", "ferias", "terco", "fgts", "multa_fgts",
+                   "recesso", "provisoes", "custo")}
+        totais["headcount"] = sum(l["headcount"] for l in detalhado)
+        return Response({"linhas": detalhado,
+                         "nucleos": sorted(por_nucleo.values(), key=lambda x: -x["custo"]),
+                         "totais": totais})
 
     @action(detail=True, methods=["post"])
     def enviar_revisao(self, request, pk=None):

@@ -283,24 +283,47 @@ def dp_relatorio_competencia(request, pk):
     rotulo = f"{comp.mes:02d}/{comp.ano}"
 
     if tipo == "rateio":
-        linhas = (comp.itens.values("centro_custo_nome")
-                  .annotate(hc=Count("id"), folha=Sum("total_pagar"), prov=Sum("custo_provisoes"),
-                            pat=Sum("inss_patronal"), custo=Sum("custo_total"))
-                  .order_by("-custo"))
-        rows = [[l["centro_custo_nome"], l["hc"], round(l["folha"] or 0, 2),
-                 round(l["prov"] or 0, 2), round(l["pat"] or 0, 2), round(l["custo"] or 0, 2)]
-                for l in linhas]
-        tot = ["TOTAL", sum(r[1] for r in rows)] + [round(sum(r[i] for r in rows), 2) for i in (2, 3, 4, 5)]
+        # usa o mesmo resumo detalhado da tela (espelho da aba CC da planilha)
+        from .dp_folha import DpCompetenciaViewSet as _VS
+        vs = _VS()
+        vs.request = request
+        dados = vs.rateio(request, pk=str(comp.pk)).data
+        det, tot_d = dados["linhas"], dados["totais"]
+
+        rows = [[l["centro_custo_nome"], l["headcount"], round(l["folha"] or 0, 2),
+                 round(l["provisoes"] or 0, 2), round(l["patronal"] or 0, 2),
+                 round(l["custo"] or 0, 2)] for l in det]
+        tot = ["TOTAL", tot_d["headcount"], tot_d["folha"], tot_d["provisoes"],
+               tot_d["patronal"], tot_d["custo"]]
 
         if formato == "pdf":
             return _pdf_rateio(comp, rows, tot, _quem(request), rotulo)
 
-        wb, ws = _wb_timbrado("Rateio por Centro de Custo",
-                              f"Competência {rotulo} · status: {comp.status}", _quem(request))
-        _tabela(ws, 5, ["Centro de Custo", "Headcount", "Folha (R$)", "Provisões (R$)",
-                        "INSS Patronal (R$)", "Custo Total (R$)"],
-                rows + [tot], larguras=[34, 11, 15, 15, 16, 16], money_cols={3, 4, 5, 6})
-        return _resposta_excel(wb, f"rateio_cc_{comp.ano}_{comp.mes:02d}.xlsx")
+        wb, ws = _wb_timbrado("Resumo do Centro de Custo por Setor",
+                              f"Competência {rotulo} · situação: {comp.status}", _quem(request))
+        _tabela(ws, 5, ["Centro de Custo", "Núcleo", "Colaboradores", "Salários (R$)",
+                        "VT (R$)", "VA (R$)", "Saldo livre (R$)", "Premiações (R$)",
+                        "Acertos (R$)", "INSS patronal (R$)", "Custo mensal (R$)", "% do custo",
+                        "13º (R$)", "Férias (R$)", "1/3 férias (R$)", "FGTS (R$)",
+                        "Multa FGTS (R$)", "Recesso (R$)", "Total provisões (R$)"],
+                [[l["centro_custo_nome"], l["nucleo"], l["headcount"], l["salarios"], l["vt"],
+                  l["va"], l["saldo_livre"], l["premios"], l["acertos"], l["patronal"],
+                  l["custo"], l["percentual"] / 100, l["decimo"], l["ferias"], l["terco"],
+                  l["fgts"], l["multa_fgts"], l["recesso"], l["provisoes"]] for l in det]
+                + [["TOTAL", "", tot_d["headcount"], tot_d["salarios"], tot_d["vt"], tot_d["va"],
+                    tot_d["saldo_livre"], tot_d["premios"], tot_d["acertos"], tot_d["patronal"],
+                    tot_d["custo"], 1, tot_d["decimo"], tot_d["ferias"], tot_d["terco"],
+                    tot_d["fgts"], tot_d["multa_fgts"], tot_d["recesso"], tot_d["provisoes"]]],
+                larguras=[30, 14, 13, 15, 12, 12, 15, 14, 13, 17, 16, 11, 12, 13, 14, 12, 15, 13, 17],
+                money_cols={4, 5, 6, 7, 8, 9, 10, 11, 13, 14, 15, 16, 17, 18, 19})
+        ws.cell(row=1, column=12).number_format = "0.0%"
+        wsn = wb.create_sheet("Por núcleo")
+        _tabela(wsn, 1, ["Núcleo", "Centros de custo", "Colaboradores", "Folha (R$)",
+                         "Provisões (R$)", "INSS patronal (R$)", "Custo total (R$)", "% do custo"],
+                [[n["nucleo"], n["centros"], n["headcount"], n["folha"], n["provisoes"],
+                  n["patronal"], n["custo"], n["percentual"] / 100] for n in dados["nucleos"]],
+                larguras=[26, 17, 14, 16, 16, 18, 17, 11], money_cols={4, 5, 6, 7})
+        return _resposta_excel(wb, f"resumo_cc_{comp.ano}_{comp.mes:02d}.xlsx")
 
     # folha analítica
     if formato == "pdf":

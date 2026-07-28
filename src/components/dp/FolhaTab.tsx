@@ -3,8 +3,9 @@
 // Fechada é intocável (reabrir só com justificativa, tudo auditado).
 import { useCallback, useEffect, useState } from "react";
 import {
-  CalendarPlus, CheckCircle2, Download, FileText, Loader2, Lock, PencilLine,
-  PieChart, RefreshCw, RotateCcw, Search, SendHorizonal, Unlock,
+  CalendarDays, CalendarPlus, CheckCircle2, Coins, Download, FileText, Loader2, Lock,
+  MoreVertical, PencilLine, PieChart, RefreshCw, RotateCcw, Search, SendHorizonal,
+  Sliders, UserMinus, Unlock,
 } from "lucide-react";
 import { toast } from "sonner";
 
@@ -22,9 +23,14 @@ import {
 import {
   Table, TableBody, TableCell, TableHead, TableHeader, TableRow,
 } from "@/components/ui/table";
-import { Ajuda, TituloAjuda } from "@/components/dp/Ajuda";
 import {
-  type DpCcNo, type DpCompetencia, type DpFolhaItem, type DpFolhaTotais, type DpRateioLinha,
+  DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuLabel,
+  DropdownMenuSeparator, DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
+import { Ajuda, TituloAjuda } from "@/components/dp/Ajuda";
+import ResumoCentroCusto from "@/components/dp/ResumoCentroCusto";
+import {
+  type DpCcNo, type DpCompetencia, type DpFolhaItem, type DpFolhaTotais, type DpRateio,
   REGIME_LABELS, dpApi, fmtBRL, folhaApi, relatoriosApi,
 } from "@/services/dp";
 
@@ -148,7 +154,10 @@ function CompetenciaDetalhe({ comp, editar, onMudou }: {
   const [total, setTotal] = useState(0);
   const [totais, setTotais] = useState<DpFolhaTotais | null>(null);
   const [items, setItems] = useState<DpFolhaItem[]>([]);
-  const [rateio, setRateio] = useState<DpRateioLinha[]>([]);
+  const [rateio, setRateio] = useState<DpRateio | null>(null);
+  const [editandoDias, setEditandoDias] = useState(false);
+  const [diasMes, setDiasMes] = useState(comp.dias_mes);
+  const [diasUteis, setDiasUteis] = useState(comp.dias_uteis);
   const [verRateio, setVerRateio] = useState(false);
   const [loading, setLoading] = useState(false);
   const [agindo, setAgindo] = useState(false);
@@ -233,7 +242,26 @@ function CompetenciaDetalhe({ comp, editar, onMudou }: {
         <CardDescription className="flex flex-wrap gap-x-4 text-xs">
           {comp.enviada_revisao_por && <span>Revisão pedida por <b>{comp.enviada_revisao_por}</b></span>}
           {comp.fechada_por && <span><Lock className="mr-0.5 inline h-3 w-3" /> Fechada por <b>{comp.fechada_por}</b></span>}
-          <span>{comp.dias_mes} dias · {comp.dias_uteis} úteis</span>
+          <span className="inline-flex items-center gap-1.5 rounded-md border border-[hsl(var(--dunatech-blue))]/30 bg-[hsl(var(--dunatech-blue))]/5 px-2 py-0.5">
+            <CalendarDays className="h-3.5 w-3.5 text-[hsl(var(--dunatech-blue))]" />
+            <b>{comp.dias_uteis}</b> dias úteis · {comp.dias_mes} dias no mês
+            <Ajuda titulo="Dias úteis do mês"
+                   texto={`Calculado pelo calendário (segunda a sexta, sem feriados nacionais).${
+                     comp.calendario?.feriados?.length
+                       ? " Feriados neste mês: " + comp.calendario.feriados.map((f) => `${f.data} ${f.nome}`).join(", ") + "."
+                       : " Nenhum feriado neste mês."} É a base do desconto proporcional de vale-transporte e vale-alimentação.`} />
+            {editar && aberta && (
+              <button onClick={() => setEditandoDias(true)}
+                      className="ml-0.5 text-[hsl(var(--dunatech-blue))] underline-offset-2 hover:underline">
+                ajustar
+              </button>
+            )}
+          </span>
+          {!!comp.em_rescisao && (
+            <span className="rounded-md bg-rose-100 px-2 py-0.5 text-rose-700">
+              {comp.em_rescisao} em rescisão neste mês
+            </span>
+          )}
         </CardDescription>
         {totais && (
           <div className="mt-1 grid grid-cols-2 gap-2 md:grid-cols-4">
@@ -302,44 +330,13 @@ function CompetenciaDetalhe({ comp, editar, onMudou }: {
             </Button>
             <Button size="sm" variant={verRateio ? "default" : "outline"} className="gap-1"
                     onClick={() => setVerRateio((v) => !v)}>
-              <PieChart className="h-3.5 w-3.5" /> Rateio por CC
+              <PieChart className="h-3.5 w-3.5" /> {verRateio ? "Ver folha" : "Resumo por centro de custo"}
             </Button>
           </div>
         </div>
 
         {verRateio ? (
-          <div className="overflow-x-auto rounded-md border">
-            <Table>
-              <TableHeader>
-                <TableRow>
-                  <TableHead className="text-xs">Centro de Custo</TableHead>
-                  <TableHead className="text-right text-xs">Pessoas</TableHead>
-                  <TableHead className="text-right text-xs">
-                    <TituloAjuda titulo="Folha" ajuda="Valor efetivamente pago às pessoas no mês (salário com descontos + benefícios + prêmios)." />
-                  </TableHead>
-                  <TableHead className="text-right text-xs">
-                    <TituloAjuda titulo="Provisões" ajuda="Valor reservado por mês para 13º, férias + 1/3, FGTS, multa do FGTS e recesso de estagiários." />
-                  </TableHead>
-                  <TableHead className="text-right text-xs">
-                    <TituloAjuda titulo="INSS patronal" ajuda="Parte do INSS paga pela empresa (não descontada do colaborador)." />
-                  </TableHead>
-                  <TableHead className="text-right text-xs">Custo total</TableHead>
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {rateio.map((l) => (
-                  <TableRow key={l.centro_custo_nome}>
-                    <TableCell className="text-sm font-medium">{l.centro_custo_nome}</TableCell>
-                    <TableCell className="text-right font-mono text-xs">{l.headcount}</TableCell>
-                    <TableCell className="text-right font-mono text-xs">{fmtBRL(l.folha)}</TableCell>
-                    <TableCell className="text-right font-mono text-xs">{fmtBRL(l.provisoes)}</TableCell>
-                    <TableCell className="text-right font-mono text-xs">{fmtBRL(l.patronal)}</TableCell>
-                    <TableCell className="text-right font-mono text-xs font-semibold">{fmtBRL(l.custo)}</TableCell>
-                  </TableRow>
-                ))}
-              </TableBody>
-            </Table>
-          </div>
+          <ResumoCentroCusto rateio={rateio} compId={comp.id} />
         ) : (
           <>
             <div className="overflow-x-auto rounded-md border">
@@ -359,7 +356,16 @@ function CompetenciaDetalhe({ comp, editar, onMudou }: {
                       <TituloAjuda titulo="INSS" ajuda="Desconto do INSS do colaborador, calculado pela tabela progressiva vigente (só CLT)." />
                     </TableHead>
                     <TableHead className="hidden text-right text-xs md:table-cell">
-                      <TituloAjuda titulo="Vale-transporte" ajuda="Desconto de até 6% do salário, previsto em lei, para quem opta pelo vale (só CLT)." />
+                      <TituloAjuda titulo="Desc. VT" ajuda="Desconto de até 6% do salário, previsto em lei, para quem opta pelo vale (só CLT)." />
+                    </TableHead>
+                    <TableHead className="hidden text-right text-xs xl:table-cell">
+                      <TituloAjuda titulo="Vale-transporte" ajuda="Valor do VT no mês, já proporcional às faltas." />
+                    </TableHead>
+                    <TableHead className="hidden text-right text-xs xl:table-cell">
+                      <TituloAjuda titulo="Vale-alimentação" ajuda="Valor do VA no mês, já proporcional às faltas." />
+                    </TableHead>
+                    <TableHead className="hidden text-right text-xs xl:table-cell">
+                      <TituloAjuda titulo="Salário com descontos" ajuda="Salário depois das faltas, do INSS e do vale-transporte — antes de somar benefícios e prêmios." />
                     </TableHead>
                     <TableHead className="hidden text-right text-xs md:table-cell">Prêmios</TableHead>
                     <TableHead className="text-right text-xs">
@@ -387,6 +393,12 @@ function CompetenciaDetalhe({ comp, editar, onMudou }: {
                               ajustado
                             </span>
                           )}
+                          {it.em_rescisao && (
+                            <span title="Colaborador desligado neste mês"
+                                  className="shrink-0 rounded bg-rose-100 px-1 text-[9px] font-semibold uppercase text-rose-700">
+                              rescisão
+                            </span>
+                          )}
                         </span>
                       </TableCell>
                       <TableCell className="hidden max-w-[150px] truncate text-xs lg:table-cell">{it.centro_custo_nome}</TableCell>
@@ -397,6 +409,9 @@ function CompetenciaDetalhe({ comp, editar, onMudou }: {
                       </TableCell>
                       <TableCell className="text-right font-mono text-xs">{fmtBRL(it.desc_inss)}</TableCell>
                       <TableCell className="hidden text-right font-mono text-xs md:table-cell">{fmtBRL(it.desc_vt)}</TableCell>
+                      <TableCell className="hidden text-right font-mono text-xs xl:table-cell">{fmtBRL(it.vt_com_faltas)}</TableCell>
+                      <TableCell className="hidden text-right font-mono text-xs xl:table-cell">{fmtBRL(it.va_com_faltas)}</TableCell>
+                      <TableCell className="hidden text-right font-mono text-xs xl:table-cell">{fmtBRL(it.salario_com_descontos ?? 0)}</TableCell>
                       <TableCell className="hidden text-right font-mono text-xs md:table-cell">
                         {it.premiacoes ? <span className="text-emerald-700">{fmtBRL(it.premiacoes)}</span> : "—"}
                       </TableCell>
@@ -404,13 +419,33 @@ function CompetenciaDetalhe({ comp, editar, onMudou }: {
                       <TableCell className="hidden text-right font-mono text-xs sm:table-cell">{fmtBRL(it.custo_total)}</TableCell>
                       {editar && aberta && (
                         <TableCell className="text-center">
-                          <button
-                            onClick={(e) => { e.stopPropagation(); setAjustando(it); }}
-                            title="Ajuste pontual deste colaborador só nesta competência"
-                            className="rounded p-1 text-muted-foreground/60 transition-colors hover:bg-amber-100 hover:text-amber-700"
-                          >
-                            <PencilLine className="h-3.5 w-3.5" />
-                          </button>
+                          <DropdownMenu>
+                            <DropdownMenuTrigger asChild>
+                              <button
+                                onClick={(e) => e.stopPropagation()}
+                                title="Lançar ocorrências deste colaborador"
+                                className="rounded p-1 text-muted-foreground/60 transition-colors hover:bg-muted hover:text-foreground"
+                              >
+                                <MoreVertical className="h-4 w-4" />
+                              </button>
+                            </DropdownMenuTrigger>
+                            <DropdownMenuContent align="end" className="w-56">
+                              <DropdownMenuLabel className="text-[11px]">
+                                Ocorrências de {it.nome.split(" ")[0]}
+                              </DropdownMenuLabel>
+                              <DropdownMenuSeparator />
+                              <DropdownMenuItem onClick={() => setLancando({ ...it, _aba: "faltas" } as DpFolhaItem)}>
+                                <CalendarDays className="mr-2 h-4 w-4" /> Faltas (dias e horas)
+                              </DropdownMenuItem>
+                              <DropdownMenuItem onClick={() => setLancando({ ...it, _aba: "extras" } as DpFolhaItem)}>
+                                <Coins className="mr-2 h-4 w-4" /> Premiações e acertos
+                              </DropdownMenuItem>
+                              <DropdownMenuSeparator />
+                              <DropdownMenuItem onClick={() => setAjustando(it)}>
+                                <Sliders className="mr-2 h-4 w-4" /> Ajuste pontual (salário/benefícios)
+                              </DropdownMenuItem>
+                            </DropdownMenuContent>
+                          </DropdownMenu>
                         </TableCell>
                       )}
                     </TableRow>
@@ -435,6 +470,59 @@ function CompetenciaDetalhe({ comp, editar, onMudou }: {
           </>
         )}
       </CardContent>
+
+      {editandoDias && (
+        <Dialog open onOpenChange={(o) => !o && setEditandoDias(false)}>
+          <DialogContent className="max-w-sm">
+            <DialogHeader>
+              <DialogTitle className="flex items-center gap-2 text-base">
+                <CalendarDays className="h-4 w-4 text-[hsl(var(--dunatech-blue))]" />
+                Dias do mês — {comp.mes_nome} {comp.ano}
+              </DialogTitle>
+              <DialogDescription>
+                Os dias úteis vêm do calendário (segunda a sexta, sem feriados nacionais).
+                Ajuste se o escritório teve ponto facultativo ou feriado municipal.
+              </DialogDescription>
+            </DialogHeader>
+            {comp.calendario && (
+              <div className="rounded-md border bg-muted/30 p-2 text-xs">
+                <div className="font-medium">Sugestão do calendário: {comp.calendario.dias_uteis} dias úteis</div>
+                <div className="text-muted-foreground">
+                  {comp.calendario.dias_mes} dias no mês · {comp.calendario.fins_de_semana} de fim de semana
+                  {comp.calendario.feriados.length > 0 && (
+                    <> · feriados: {comp.calendario.feriados.map((f) => `${f.data} (${f.nome})`).join(", ")}</>
+                  )}
+                </div>
+              </div>
+            )}
+            <div className="grid grid-cols-2 gap-3">
+              <div>
+                <Label className="text-xs text-muted-foreground">Dias do mês (base da folha)</Label>
+                <Input type="number" value={diasMes} onChange={(e) => setDiasMes(Number(e.target.value))}
+                       className="font-mono" />
+              </div>
+              <div>
+                <Label className="text-xs text-muted-foreground">Dias úteis</Label>
+                <Input type="number" value={diasUteis} onChange={(e) => setDiasUteis(Number(e.target.value))}
+                       className="font-mono" />
+              </div>
+            </div>
+            <p className="text-[11px] text-muted-foreground">
+              Alterar recalcula a folha inteira (o desconto de vale-transporte e vale-alimentação
+              usa os dias úteis).
+            </p>
+            <DialogFooter>
+              <Button variant="outline" onClick={() => setEditandoDias(false)} disabled={agindo}>Cancelar</Button>
+              <Button className="glass-button border-0" disabled={agindo}
+                      onClick={() => { setEditandoDias(false);
+                        acao(() => folhaApi.ajustarDias(comp.id, diasMes, diasUteis),
+                             "Dias atualizados e folha recalculada."); }}>
+                Salvar e recalcular
+              </Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
+      )}
 
       {ajustando && (
         <AjusteDialog comp={comp} item={ajustando}
@@ -489,8 +577,11 @@ function TotalCard({ rotulo, valor, destaque, ajuda }: {
 }
 
 function LancarDialog({ comp, item, onClose, onLancou }: {
-  comp: DpCompetencia; item: DpFolhaItem; onClose: () => void; onLancou: () => void;
+  comp: DpCompetencia; item: DpFolhaItem & { _aba?: string }; onClose: () => void; onLancou: () => void;
 }) {
+  // o menu diz qual bloco abrir: "faltas" (padrão) ou "extras"
+  const soFaltas = item._aba !== "extras";
+  const soExtras = item._aba === "extras";
   const [faltasDias, setFaltasDias] = useState(item.faltas_dias);
   const [faltasHoras, setFaltasHoras] = useState(item.faltas_horas);
   const [premios, setPremios] = useState(item.premiacoes);
@@ -515,22 +606,77 @@ function LancarDialog({ comp, item, onClose, onLancou }: {
     <Dialog open onOpenChange={(o) => !o && onClose()}>
       <DialogContent className="max-w-md">
         <DialogHeader>
-          <DialogTitle className="text-base">
-            Lançamentos — <span className="font-mono text-sm text-muted-foreground">#{item.matricula}</span> {item.nome}
+          <DialogTitle className="flex items-center gap-2 text-base">
+            {soExtras ? <Coins className="h-4 w-4 text-emerald-600" />
+                      : <CalendarDays className="h-4 w-4 text-[hsl(var(--dunatech-blue))]" />}
+            {soExtras ? "Premiações e acertos" : "Faltas do mês"} — {item.nome}
           </DialogTitle>
-          <DialogDescription>A linha é recalculada na hora (memória de cálculo na auditoria).</DialogDescription>
+          <DialogDescription>
+            {soExtras
+              ? "Valores que entram (prêmios) ou corrigem (acerto contábil) o pagamento deste mês."
+              : `As faltas descontam o salário proporcionalmente e reduzem vale-transporte e vale-alimentação na proporção dos ${comp.dias_uteis} dias úteis.`}
+          </DialogDescription>
         </DialogHeader>
-        <div className="grid grid-cols-2 gap-3">
-          <div><Label className="text-xs text-muted-foreground">Faltas (dias)</Label>
-            <Input type="number" step="0.5" value={faltasDias} onChange={(e) => setFaltasDias(Number(e.target.value))} /></div>
-          <div><Label className="text-xs text-muted-foreground">Faltas (horas)</Label>
-            <Input type="number" step="0.5" value={faltasHoras} onChange={(e) => setFaltasHoras(Number(e.target.value))} /></div>
-          <div><Label className="text-xs text-muted-foreground">Premiações/Extras (R$)</Label>
-            <Input type="number" step="0.01" value={premios} onChange={(e) => setPremios(Number(e.target.value))} /></div>
-          <div><Label className="text-xs text-muted-foreground">Acerto contábil (R$)</Label>
-            <Input type="number" step="0.01" value={acerto} onChange={(e) => setAcerto(Number(e.target.value))} /></div>
-          <div className="col-span-2"><Label className="text-xs text-muted-foreground">Observação</Label>
-            <Input value={obs} onChange={(e) => setObs(e.target.value)} /></div>
+
+        {soFaltas && (
+          <div className="space-y-3">
+            <div className="grid grid-cols-2 gap-3">
+              <div>
+                <Label className="flex items-center gap-1 text-xs text-muted-foreground">
+                  Faltas em dias
+                  <Ajuda titulo="Faltas em dias" texto="Cada dia desconta 1/30 do salário e 1 dia de vale-transporte e vale-alimentação." />
+                </Label>
+                <Input type="number" step="0.5" min={0} value={faltasDias}
+                       onChange={(e) => setFaltasDias(Number(e.target.value))} className="font-mono" />
+              </div>
+              <div>
+                <Label className="flex items-center gap-1 text-xs text-muted-foreground">
+                  Faltas em horas
+                  <Ajuda titulo="Faltas em horas" texto="Atrasos e saídas. Cada hora desconta 1/220 do salário (carga do cargo) e vira fração de dia nos benefícios." />
+                </Label>
+                <Input type="number" step="0.5" min={0} value={faltasHoras}
+                       onChange={(e) => setFaltasHoras(Number(e.target.value))} className="font-mono" />
+              </div>
+            </div>
+            {(faltasDias > 0 || faltasHoras > 0) && (
+              <div className="rounded-md border border-amber-300 bg-amber-50 p-2 text-xs text-amber-900">
+                <div className="font-medium">Prévia do desconto</div>
+                <div>
+                  Salário: −{fmtBRL((item.salario_bruto / 30) * faltasDias + (item.salario_bruto / 220) * faltasHoras)}
+                  {" · "}
+                  Benefícios: −{(Math.min(((faltasDias + faltasHoras / (220 / 30)) / Math.max(comp.dias_uteis, 1)), 1) * 100).toFixed(1)}%
+                  {" do VT e do VA"}
+                </div>
+              </div>
+            )}
+          </div>
+        )}
+
+        {soExtras && (
+          <div className="grid grid-cols-2 gap-3">
+            <div>
+              <Label className="flex items-center gap-1 text-xs text-muted-foreground">
+                Premiações / extras (R$)
+                <Ajuda titulo="Premiações e extras" texto="Valores adicionais pagos no mês (bônus, produtividade). Somam ao líquido." />
+              </Label>
+              <Input type="number" step="0.01" value={premios}
+                     onChange={(e) => setPremios(Number(e.target.value))} className="font-mono" />
+            </div>
+            <div>
+              <Label className="flex items-center gap-1 text-xs text-muted-foreground">
+                Acerto contábil (R$)
+                <Ajuda titulo="Acerto contábil" texto="Correção de valores de meses anteriores. Pode ser positivo (a pagar) ou negativo (a descontar)." />
+              </Label>
+              <Input type="number" step="0.01" value={acerto}
+                     onChange={(e) => setAcerto(Number(e.target.value))} className="font-mono" />
+            </div>
+          </div>
+        )}
+
+        <div>
+          <Label className="text-xs text-muted-foreground">Observação</Label>
+          <Input value={obs} onChange={(e) => setObs(e.target.value)}
+                 placeholder={soExtras ? "Ex.: bônus de produtividade do trimestre" : "Ex.: atestado sem comprovação"} />
         </div>
         <DialogFooter>
           <Button variant="outline" onClick={onClose} disabled={salvando}>Cancelar</Button>

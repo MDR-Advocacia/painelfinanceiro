@@ -21,7 +21,7 @@ from rest_framework.response import Response
 from .dp_escopo import filtrar_colaboradores
 from .dp_folha import calcular_inss, tabela_fiscal_para
 from .dp_views import _quem, audit
-from .models import DpColaborador, DpEvento, DpRescisao
+from .models import DpColaborador, DpCompetencia, DpEvento, DpFolhaItem, DpRescisao
 from .views import modulo_permission
 
 _PERM = [modulo_permission(read_any=["pessoal"], write="pessoal")]
@@ -254,12 +254,26 @@ class DpRescisaoViewSet(viewsets.ViewSet):
                                 payload={"tipo": TIPOS.get(tipo, tipo), "motivo": motivo,
                                          "liquido": calc["liquido"]},
                                 autor=_quem(request))
+
+        # a folha do mês do desligamento é atualizada na hora: a linha da pessoa
+        # é recalculada (entra o saldo proporcional) e marcada como rescisão.
+        comp = DpCompetencia.objects.filter(ano=data.year, mes=data.month).first()
+        recalculada = False
+        if comp and comp.status != "fechada":
+            from .dp_folha import calcular_item, tabela_fiscal_para as _tab
+            lanc = comp.lancamentos.filter(colaborador=colab).first()
+            d = calcular_item(colab, lanc, comp, _tab(comp.ano, comp.mes))
+            DpFolhaItem.objects.update_or_create(competencia=comp, colaborador=colab, defaults=d)
+            recalculada = True
         audit(request, "desligar", "dp_colaborador", colab.id,
               antes={"status": "ativo", "nome": colab.nome},
               depois={"status": "inativo", "nome": colab.nome,
                       "data_demissao": str(data), "tipo_desligamento": TIPOS.get(tipo, tipo),
                       "motivo": motivo, "liquido_rescisao": calc["liquido"]})
-        return Response(_rescisao_row(resc), status=status.HTTP_201_CREATED)
+        row = _rescisao_row(resc)
+        row["folha_atualizada"] = recalculada
+        row["competencia"] = f"{data.month:02d}/{data.year}" if comp else None
+        return Response(row, status=status.HTTP_201_CREATED)
 
     @action(detail=True, methods=["get"])
     def termo(self, request, pk=None):

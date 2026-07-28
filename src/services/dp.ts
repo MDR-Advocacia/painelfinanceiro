@@ -102,11 +102,13 @@ export interface DpCompetencia {
   status: "aberta" | "em_revisao" | "fechada";
   aberta_por: string; enviada_revisao_por: string; fechada_por: string;
   fechada_em: string | null; total_itens: number;
+  calendario?: DpCalendario; em_rescisao?: number;
 }
 export interface DpFolhaItem {
   id: string; colaborador_id: string; matricula: number; nome: string; regime: string;
   cargo_nome?: string; centro_custo_nome: string; salario_bruto: number;
   vt?: number; va?: number; ajuste_manual?: boolean; ajuste_motivo?: string;
+  em_rescisao?: boolean; salario_com_faltas?: number; salario_com_descontos?: number;
   faltas_dias: number; faltas_horas: number; desc_faltas: number;
   desc_inss: number; desc_vt: number; vt_com_faltas: number; va_com_faltas: number;
   saldo_livre: number; premiacoes: number; acerto_contabil: number;
@@ -117,8 +119,24 @@ export interface DpFolhaTotais {
   total_pagar: number; provisoes: number; inss_patronal: number; custo_total: number;
 }
 export interface DpRateioLinha {
-  centro_custo_nome: string; headcount: number; folha: number;
-  provisoes: number; patronal: number; custo: number;
+  centro_custo_nome: string; nucleo: string; headcount: number;
+  salarios: number; vt: number; va: number; saldo_livre: number;
+  premios: number; acertos: number; folha: number; patronal: number;
+  decimo: number; ferias: number; terco: number; fgts: number;
+  multa_fgts: number; recesso: number; provisoes: number;
+  custo: number; percentual: number;
+}
+export interface DpNucleoLinha {
+  nucleo: string; centros: number; headcount: number; folha: number;
+  provisoes: number; patronal: number; custo: number; percentual: number;
+}
+export interface DpRateio {
+  linhas: DpRateioLinha[]; nucleos: DpNucleoLinha[];
+  totais: Record<string, number>;
+}
+export interface DpCalendario {
+  dias_mes: number; dias_uteis: number; fins_de_semana: number;
+  feriados: { data: string; nome: string }[];
 }
 
 export const folhaApi = {
@@ -136,7 +154,14 @@ export const folhaApi = {
       .then((r) => j<{ total: number; items: DpFolhaItem[]; totais: DpFolhaTotais }>(r));
   },
   rateio: (id: string) =>
-    fetch(`${API_URL}/dp/competencias/${id}/rateio/`, { headers: authHeaders() }).then((r) => j<DpRateioLinha[]>(r)),
+    fetch(`${API_URL}/dp/competencias/${id}/rateio/`, { headers: authHeaders() }).then((r) => j<DpRateio>(r)),
+  calendario: (ano: number, mes: number) =>
+    fetch(`${API_URL}/dp/competencias/calendario/?ano=${ano}&mes=${mes}`, { headers: authHeaders() })
+      .then((r) => j<DpCalendario>(r)),
+  ajustarDias: (id: string, dias_mes: number, dias_uteis: number) =>
+    fetch(`${API_URL}/dp/competencias/${id}/ajustar_dias/`, {
+      method: "POST", headers: H(), body: JSON.stringify({ dias_mes, dias_uteis }),
+    }).then((r) => j<DpCompetencia>(r)),
   lancar: (id: string, dados: { colaborador_id: string; faltas_dias: number; faltas_horas: number; premiacoes: number; acerto_contabil: number; obs?: string }) =>
     fetch(`${API_URL}/dp/competencias/${id}/lancar/`, { method: "POST", headers: H(), body: JSON.stringify(dados) })
       .then((r) => j<DpFolhaItem>(r)),

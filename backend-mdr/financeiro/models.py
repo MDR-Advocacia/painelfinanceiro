@@ -439,6 +439,7 @@ class DpFolhaItem(models.Model):
     custo_total = models.FloatField(default=0)  # total_pagar + provisões + patronal
     memoria = models.JSONField(default=dict, blank=True)
     ajuste_manual = models.BooleanField(default=False)   # linha com ajuste pontual
+    em_rescisao = models.BooleanField(default=False)     # sai neste mês (rescisão)
     ajuste_motivo = models.TextField(blank=True, default="")
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
