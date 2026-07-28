@@ -106,7 +106,10 @@ export function Sidebar() {
   const podeSetores = pode("setores");
 
   return (
-    <aside className="flex min-h-screen w-72 flex-col border-r border-sidebar-border bg-sidebar">
+    // navy levemente translúcido: o fundo azulado da página atravessa e dá
+    // profundidade, sem perder contraste do texto (fallback opaco onde não
+    // há suporte a backdrop-filter)
+    <aside className="sidebar-glass flex min-h-screen w-72 flex-col border-r border-sidebar-border">
       {/* Header — marca (logo adaptativa: preta no claro, branca no noturno) */}
       <div className="flex h-[72px] items-center gap-3 border-b border-sidebar-border px-4">
         <img src={logoMdr} alt="MDR" className="logo-mdr-onnavy h-11" />

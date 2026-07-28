@@ -11,8 +11,9 @@ from .dp_views import (
 from .dp_folha import DpCompetenciaViewSet
 from .dp_rescisao import DpRescisaoViewSet
 from .dp_relatorios import (
-    dp_dashboard, dp_relatorio_auditoria, dp_relatorio_catalogos, dp_relatorio_competencia,
-    dp_relatorio_dashboard, dp_relatorio_projecao, dp_relatorio_quadro, dp_relatorio_simulacao,
+    dp_dashboard, dp_ficha_financeira, dp_relatorio_auditoria, dp_relatorio_catalogos,
+    dp_relatorio_competencia, dp_relatorio_dashboard, dp_relatorio_projecao,
+    dp_relatorio_quadro, dp_relatorio_simulacao,
 )
 from .dp_simulacao import (
     DpTabelaFiscalViewSet, dp_opcoes_escopo, dp_projecao, dp_simular,
@@ -46,6 +47,7 @@ urlpatterns = [
     path('dp/dashboard/', dp_dashboard),  # KPIs + séries do DP
     path('dp/competencias/<uuid:pk>/relatorio/', dp_relatorio_competencia),  # folha/rateio (excel/pdf)
     path('dp/relatorio-quadro/', dp_relatorio_quadro),  # quadro de pessoal (excel/pdf)
+    path('dp/colaboradores/<uuid:pk>/ficha-financeira/', dp_ficha_financeira),  # PDF por pessoa
     # Previsão de gastos: projeção, aprovisionamento e simulação de cenários
     path('dp/projecao/', dp_projecao),
     path('dp/simular/', dp_simular),

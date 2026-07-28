@@ -33,6 +33,21 @@ export interface DpLideranca {
   papeis: string; centro_custo_id: string | null; centro_custo_nome: string | null;
   email: string; ativo: boolean;
 }
+export interface DpDocumento {
+  id: string; tipo: string; tipo_label: string; nome_original: string;
+  tamanho: number; descricao: string; enviado_por: string;
+  created_at: string; quando_br: string;
+}
+export interface DpPremiacaoLinha {
+  nome: string; cc_id: string | null; valor: number; pessoas: number; media: number; percentual: number;
+}
+export interface DpPremiacoes {
+  competencia: string | null; ano_ref: number | null;
+  mes: DpPremiacaoLinha[]; ano: DpPremiacaoLinha[];
+  serie: { mes: string; valor: number; pessoas: number }[];
+  top: { nome: string; centro_custo: string; valor: number; meses: number }[];
+  total_mes: number; total_ano: number; pessoas_mes: number; pessoas_ano: number;
+}
 export interface DpEvento {
   tipo: string; data_efeito: string; payload: Record<string, unknown>;
   autor: string; created_at: string;
@@ -85,6 +100,36 @@ export const dpApi = {
     fetch(`${API_URL}/dp/colaboradores/${id}/desligar/`, {
       method: "POST", headers: H(), body: JSON.stringify({ data_demissao, observacao }),
     }).then((r) => j<DpColaborador>(r)),
+
+  // ── documentos do colaborador (contrato em PDF) ──
+  documentos: (id: string) =>
+    fetch(`${API_URL}/dp/colaboradores/${id}/documentos/`, { headers: authHeaders() })
+      .then((r) => j<DpDocumento[]>(r)),
+
+  enviarDocumento: async (id: string, arquivo: File, tipo = "contrato", descricao = "") => {
+    const fd = new FormData();
+    fd.append("arquivo", arquivo);
+    fd.append("tipo", tipo);
+    if (descricao) fd.append("descricao", descricao);
+    const res = await fetch(`${API_URL}/dp/colaboradores/${id}/documentos/`, {
+      method: "POST", headers: authHeaders(), body: fd,
+    });
+    return j<DpDocumento>(res);
+  },
+
+  baixarDocumento: (id: string, docId: string, nome: string) =>
+    baixar(`${API_URL}/dp/colaboradores/${id}/documentos/${docId}/baixar/`, nome),
+
+  removerDocumento: async (id: string, docId: string) => {
+    const r = await fetch(`${API_URL}/dp/colaboradores/${id}/documentos/${docId}/`, {
+      method: "DELETE", headers: authHeaders(),
+    });
+    if (!r.ok && r.status !== 204) throw new Error(`Erro ${r.status}`);
+  },
+
+  /** Ficha financeira em PDF: histórico de recebimentos mês a mês. */
+  fichaFinanceira: (id: string, matricula: number) =>
+    baixar(`${API_URL}/dp/colaboradores/${id}/ficha-financeira/`, `ficha-financeira-${matricula}.pdf`),
 
   eventos: (id: string) =>
     fetch(`${API_URL}/dp/colaboradores/${id}/eventos/`, { headers: authHeaders() }).then((r) => j<DpEvento[]>(r)),
@@ -252,6 +297,7 @@ export interface DpDashboard {
   tempo_casa: { faixa: string; quantidade: number }[];
   alertas: { tipo: string; texto: string }[];
   folha_media_salario: number;
+  premiacoes: DpPremiacoes;
 }
 
 async function baixar(url: string, nomePadrao: string) {

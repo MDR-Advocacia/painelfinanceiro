@@ -216,6 +216,23 @@
     filter: brightness(0) invert(1);
   }
 
+  /* Sidebar com leve transparência: o banho azulado do fundo atravessa o
+     navy e dá profundidade. Sem backdrop-filter, cai no navy sólido. */
+  .sidebar-glass {
+    background-color: hsl(var(--sidebar-background));
+  }
+  @supports (backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px)) {
+    .sidebar-glass {
+      background-color: hsl(var(--sidebar-background) / 0.86);
+      backdrop-filter: blur(18px) saturate(140%);
+      -webkit-backdrop-filter: blur(18px) saturate(140%);
+      box-shadow: inset -1px 0 0 hsl(0 0% 100% / 0.06);
+    }
+    .dark .sidebar-glass {
+      background-color: hsl(var(--sidebar-background) / 0.9);
+    }
+  }
+
   /* Variante pra superfícies NAVY (sidebar): logo sempre branca + wordmark
      em gradiente claro (o navy→azul padrão some em fundo navy). */
   .logo-mdr-onnavy {

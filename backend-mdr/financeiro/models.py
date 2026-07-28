@@ -531,6 +531,44 @@ class DpRescisao(models.Model):
         return f"Rescisão {self.colaborador} em {self.data_desligamento}"
 
 
+def _caminho_documento(instance, filename):
+    """Guarda por colaborador: media/colaboradores/<uuid>/<arquivo>."""
+    return f"colaboradores/{instance.colaborador_id}/{filename}"
+
+
+class DpDocumento(models.Model):
+    """Documentos do colaborador (contrato, aditivo, TCE do estagiário…).
+
+    O arquivo vive no volume de dados; o download NUNCA é servido direto pelo
+    nginx — passa por endpoint autenticado com a mesma permissão do módulo,
+    porque contrato é documento sensível.
+    """
+    TIPOS = [
+        ("contrato", "Contrato de trabalho"),
+        ("tce", "Termo de Compromisso de Estágio"),
+        ("aditivo", "Aditivo contratual"),
+        ("rescisao", "Termo de rescisão"),
+        ("outro", "Outro documento"),
+    ]
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    colaborador = models.ForeignKey(DpColaborador, on_delete=models.CASCADE,
+                                    related_name="documentos")
+    tipo = models.CharField(max_length=20, choices=TIPOS, default="contrato")
+    arquivo = models.FileField(upload_to=_caminho_documento)
+    nome_original = models.CharField(max_length=255)
+    tamanho = models.IntegerField(default=0)
+    descricao = models.CharField(max_length=200, blank=True, default="")
+    enviado_por = models.CharField(max_length=150, blank=True, default="")
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        db_table = 'dp_documentos'
+        ordering = ['-created_at']
+
+    def __str__(self):
+        return f"{self.get_tipo_display()} de {self.colaborador.nome}"
+
+
 class DpAuditLog(models.Model):
     """Trilha de auditoria IMUTÁVEL do módulo DP: toda escrita loga quem, quando,
     o quê e o antes→depois. Nunca é editada nem apagada pela aplicação."""

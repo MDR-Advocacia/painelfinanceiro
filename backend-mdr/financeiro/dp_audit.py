@@ -61,6 +61,10 @@ CAMPOS = {
     "observacao": ("Observação", "texto"),
     "justificativa": ("Justificativa", "texto"),
     "obs": ("Observação", "texto"),
+    # documentos
+    "tipo": ("Tipo", "texto"),
+    "arquivo": ("Arquivo", "texto"),
+    "tamanho_kb": ("Tamanho (KB)", "num"),
 }
 
 REGIMES = {"estagiario": "Estagiário (TCE)", "clt": "CLT",
@@ -84,6 +88,7 @@ ACOES = {
     "desfazer_revisao": ("desfez o envio para revisão", "reabrir"),
     "ajuste_pontual": ("fez um ajuste pontual em", "ajuste"),
     "excluir": ("excluiu", "sair"),
+    "anexar": ("anexou um documento de", "criar"),
 }
 
 ENTIDADES = {
@@ -97,6 +102,7 @@ ENTIDADES = {
     "dp_simulacao": "simulação",
     "dp_folha_item": "linha da folha",
     "dp_lideranca": "liderança",
+    "dp_documento": "documento",
 }
 
 
@@ -242,6 +248,11 @@ def humanizar(log) -> dict:
         mudancas = _mudancas(
             {k: v for k, v in antes.items() if k != "colaborador"},
             {k: v for k, v in depois.items() if k not in ("colaborador", "competencia")})
+    elif log.acao == "anexar":
+        d = depois
+        titulo = (f"Anexou {d.get('tipo', 'documento')} de {d.get('colaborador', '')}"
+                  f" — {d.get('arquivo', '')}")
+        mudancas = []
     elif log.acao == "excluir":
         titulo = f"Excluiu {entidade}" + (f": {alvo}" if alvo else "") + " do catálogo"
         mudancas = []

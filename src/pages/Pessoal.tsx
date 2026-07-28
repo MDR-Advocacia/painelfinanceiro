@@ -32,6 +32,7 @@ import ParametrosTab from "@/components/dp/ParametrosTab";
 import SimulacoesTab from "@/components/dp/SimulacoesTab";
 import FolhaTab from "@/components/dp/FolhaTab";
 import { CcPicker, ColaboradorPicker, LiderancaPicker, invalidarArvoreCc } from "@/components/dp/Pickers";
+import DocumentosColaborador from "@/components/dp/DocumentosColaborador";
 import { usePermissions } from "@/hooks/usePermissions";
 import {
   type DpAuditFiltros, type DpCargo, type DpCentroCusto, type DpColaborador,
@@ -470,6 +471,9 @@ function FichaDialog({ colaborador, ccs, cargos, editar, onClose, onMudou }: {
           </div>
         </div>
 
+        {/* Documentos (contrato em PDF) */}
+        <DocumentosColaborador colaborador={c} editar={editar} />
+
         {/* Histórico de eventos */}
         <div className="rounded-lg border bg-muted/30 p-3">
           <div className="mb-1.5 text-xs font-semibold text-muted-foreground">Histórico</div>
@@ -501,6 +505,12 @@ function FichaDialog({ colaborador, ccs, cargos, editar, onClose, onMudou }: {
               <UserMinus className="h-4 w-4" /> Desligar
             </Button>
           )}
+          <Button variant="outline" className="gap-1" disabled={salvando}
+                  title="PDF com todo o histórico de recebimentos desta pessoa"
+                  onClick={() => dpApi.fichaFinanceira(c.id, c.matricula)
+                    .catch((e) => toast.error(e.message))}>
+            <FileText className="h-4 w-4" /> Ficha financeira (PDF)
+          </Button>
           <Button variant="outline" onClick={onClose} disabled={salvando}>Fechar</Button>
           {editar && (
             <Button className="glass-button border-0" onClick={salvar} disabled={salvando}>

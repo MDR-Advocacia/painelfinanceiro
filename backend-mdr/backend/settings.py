@@ -134,6 +134,14 @@ USE_TZ = True
 STATIC_URL = 'static/'
 STATIC_ROOT = BASE_DIR / 'staticfiles'
 
+# Arquivos enviados pelos usuários (contratos dos colaboradores).
+# Vão para DENTRO da pasta de dados — que é o volume persistente do Coolify,
+# o mesmo do SQLite. Fora dela, um redeploy apagaria os documentos.
+MEDIA_ROOT = os.environ.get('MEDIA_ROOT', str(BASE_DIR / 'data' / 'media'))
+MEDIA_URL = '/media/'   # NÃO é servido direto: download passa por endpoint autenticado
+# 25 MB por arquivo (o nginx já aceita 50 MB no POST)
+DP_UPLOAD_MAX_BYTES = int(os.environ.get('DP_UPLOAD_MAX_BYTES', 25 * 1024 * 1024))
+
 # Default primary key field type
 # https://docs.djangoproject.com/en/5.0/ref/settings/#default-auto-field
 

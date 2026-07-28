@@ -3,15 +3,18 @@
 # TODA escrita gera DpAuditLog (imutável) e, quando cadastral, DpEvento.
 from datetime import date, datetime
 
+from django.conf import settings
 from django.db import transaction
 from django.db.models import Count, Max, Q
+from django.http import FileResponse
 from rest_framework import status, viewsets
 from rest_framework.decorators import action, api_view, permission_classes
+from rest_framework.parsers import FormParser, MultiPartParser
 from rest_framework.response import Response
 
 from .models import (
-    DP_MATRICULA_BASE, DpAuditLog, DpCargo, DpCentroCusto, DpColaborador, DpEvento,
-    DpLideranca,
+    DP_MATRICULA_BASE, DpAuditLog, DpCargo, DpCentroCusto, DpColaborador, DpDocumento,
+    DpEvento, DpLideranca,
 )
 from .dp_audit import humanizar
 from .dp_escopo import filtrar_colaboradores
@@ -41,6 +44,16 @@ def audit(request, acao: str, entidade: str, entidade_id, antes=None, depois=Non
         colaborador=colaborador,
         colaborador_nome=(colaborador.nome if colaborador else ""),
     )
+
+
+def _doc_json(d: DpDocumento) -> dict:
+    return {
+        "id": str(d.id), "tipo": d.tipo, "tipo_label": d.get_tipo_display(),
+        "nome_original": d.nome_original, "tamanho": d.tamanho,
+        "descricao": d.descricao, "enviado_por": d.enviado_por,
+        "created_at": d.created_at.isoformat(),
+        "quando_br": d.created_at.strftime("%d/%m/%Y às %H:%M"),
+    }
 
 
 def _snap(obj: DpColaborador) -> dict:
@@ -222,6 +235,72 @@ class DpColaboradorViewSet(viewsets.ModelViewSet):
                                 autor=_quem(request))
         audit(request, "desligar", "dp_colaborador", obj.id, antes=antes, depois=_snap(obj))
         return Response(self.get_serializer(obj).data)
+
+    # ─────────────── documentos do colaborador (contrato em PDF) ───────────────
+
+    @action(detail=True, methods=["get", "post"], parser_classes=[MultiPartParser, FormParser])
+    def documentos(self, request, pk=None):
+        """GET lista os documentos; POST envia um novo (multipart: arquivo,
+        tipo?, descricao?). Só PDF, até o limite do settings."""
+        colab = self.get_object()
+        if request.method == "GET":
+            return Response([_doc_json(d) for d in colab.documentos.all()])
+
+        arq = request.FILES.get("arquivo")
+        if not arq:
+            return Response({"detail": "Anexe o arquivo PDF."}, status=400)
+        if not arq.name.lower().endswith(".pdf"):
+            return Response({"detail": "Só aceitamos PDF por aqui."}, status=400)
+        limite = getattr(settings, "DP_UPLOAD_MAX_BYTES", 25 * 1024 * 1024)
+        if arq.size > limite:
+            return Response({"detail": f"Arquivo grande demais (máximo {limite // (1024*1024)} MB)."},
+                            status=400)
+        # confere a assinatura do PDF (extensão trocada não passa)
+        cabecalho = arq.read(5)
+        arq.seek(0)
+        if cabecalho[:4] != b"%PDF":
+            return Response({"detail": "O arquivo não parece um PDF válido."}, status=400)
+
+        tipo = request.data.get("tipo") or "contrato"
+        doc = DpDocumento.objects.create(
+            colaborador=colab, tipo=tipo, arquivo=arq,
+            nome_original=arq.name[:255], tamanho=arq.size,
+            descricao=(request.data.get("descricao") or "")[:200],
+            enviado_por=_quem(request),
+        )
+        audit(request, "anexar", "dp_documento", doc.id, colaborador=colab,
+              depois={"colaborador": colab.nome, "tipo": doc.get_tipo_display(),
+                      "arquivo": doc.nome_original, "tamanho_kb": round(doc.tamanho / 1024)})
+        return Response(_doc_json(doc), status=201)
+
+    @action(detail=True, methods=["get"], url_path=r"documentos/(?P<doc_id>[^/.]+)/baixar")
+    def baixar_documento(self, request, pk=None, doc_id=None):
+        """Download autenticado — o arquivo NUNCA fica exposto pelo nginx."""
+        colab = self.get_object()
+        doc = colab.documentos.filter(pk=doc_id).first()
+        if not doc:
+            return Response({"detail": "Documento não encontrado."}, status=404)
+        try:
+            f = doc.arquivo.open("rb")
+        except (FileNotFoundError, ValueError):
+            return Response({"detail": "Arquivo sumiu do disco — reenvie o documento."}, status=410)
+        resp = FileResponse(f, content_type="application/pdf")
+        resp["Content-Disposition"] = f'attachment; filename="{doc.nome_original}"'
+        resp["Access-Control-Expose-Headers"] = "Content-Disposition"
+        return resp
+
+    @action(detail=True, methods=["delete"], url_path=r"documentos/(?P<doc_id>[^/.]+)")
+    def remover_documento(self, request, pk=None, doc_id=None):
+        colab = self.get_object()
+        doc = colab.documentos.filter(pk=doc_id).first()
+        if not doc:
+            return Response({"detail": "Documento não encontrado."}, status=404)
+        audit(request, "excluir", "dp_documento", doc.id, colaborador=colab,
+              antes={"colaborador": colab.nome, "tipo": doc.get_tipo_display(),
+                     "arquivo": doc.nome_original})
+        doc.arquivo.delete(save=False)
+        doc.delete()
+        return Response(status=204)
 
     @action(detail=True, methods=["get"])
     def eventos(self, request, pk=None):

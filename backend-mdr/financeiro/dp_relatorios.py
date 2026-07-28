@@ -15,7 +15,7 @@ from rest_framework.response import Response
 
 from .dp_audit import humanizar
 from .dp_escopo import filtrar_colaboradores, filtrar_folha
-from .models import DpCentroCusto, DpColaborador, DpCompetencia, DpEvento
+from .models import DpCentroCusto, DpColaborador, DpCompetencia, DpEvento, DpFolhaItem
 from .views import modulo_permission
 
 _PERM = [modulo_permission(read_any=["pessoal"], write="pessoal")]
@@ -179,7 +179,11 @@ def dp_dashboard(request):
         alertas.append({"tipo": "info",
                         "texto": f"Competência {comp_aberta.mes:02d}/{comp_aberta.ano} está aberta (ainda não fechada)"})
 
+    # ── PREMIAÇÕES: quanto cada centro de custo pagou de prêmio ──
+    premiacoes = _premiacoes_por_cc(request)
+
     return Response({
+        "premiacoes": premiacoes,
         "headcount": headcount, "por_regime": por_regime,
         "admissoes_mes": mov_mes["admissoes"], "desligamentos_mes": mov_mes["desligamentos"],
         "turnover_mes": turnover,
@@ -194,6 +198,65 @@ def dp_dashboard(request):
         "alertas": alertas,
         "folha_media_salario": round(ativos.aggregate(m=Avg("salario_bruto"))["m"] or 0, 2),
     })
+
+
+def _premiacoes_por_cc(request) -> dict:
+    """Premiações pagas: no mês da última competência, no ano e mês a mês.
+
+    Premiação é o único valor 100% discricionário da folha — por isso ganha
+    recorte próprio: quem está distribuindo, quanto e para quantas pessoas.
+    """
+    comps = list(DpCompetencia.objects.order_by("ano", "mes"))
+    if not comps:
+        return {"mes": [], "ano": [], "serie": [], "top": [],
+                "total_mes": 0.0, "total_ano": 0.0, "competencia": None, "ano_ref": None}
+
+    ult = comps[-1]
+    ano_ref = ult.ano
+
+    # nome do CC → id, pro clique na tabela abrir o quadro já filtrado
+    ids_cc = {c.nome: str(c.id) for c in DpCentroCusto.objects.all()}
+
+    def por_cc(qs):
+        linhas = [{"nome": r["centro_custo_nome"] or "(sem centro de custo)",
+                   "cc_id": ids_cc.get(r["centro_custo_nome"] or ""),
+                   "valor": round(r["v"] or 0, 2),
+                   "pessoas": r["n"],
+                   "media": round((r["v"] or 0) / r["n"], 2) if r["n"] else 0.0}
+                  for r in (qs.filter(premiacoes__gt=0).values("centro_custo_nome")
+                            .annotate(v=Sum("premiacoes"), n=Count("colaborador_id", distinct=True))
+                            .order_by("-v"))]
+        total = sum(x["valor"] for x in linhas)
+        for x in linhas:
+            x["percentual"] = round(x["valor"] / total * 100, 1) if total else 0.0
+        return linhas, round(total, 2)
+
+    itens_mes = filtrar_folha(DpFolhaItem.objects.filter(competencia=ult), request.user)
+    itens_ano = filtrar_folha(
+        DpFolhaItem.objects.filter(competencia__ano=ano_ref), request.user)
+    linhas_mes, total_mes = por_cc(itens_mes)
+    linhas_ano, total_ano = por_cc(itens_ano)
+
+    serie = []
+    for c in comps[-12:]:
+        ag = filtrar_folha(DpFolhaItem.objects.filter(competencia=c), request.user).aggregate(
+            v=Sum("premiacoes"), n=Count("id", filter=Q(premiacoes__gt=0)))
+        serie.append({"mes": f"{c.ano}-{c.mes:02d}", "valor": round(ag["v"] or 0, 2),
+                      "pessoas": ag["n"] or 0})
+
+    top = [{"nome": r["nome"], "centro_custo": r["centro_custo_nome"],
+            "valor": round(r["v"] or 0, 2), "meses": r["n"]}
+           for r in (itens_ano.filter(premiacoes__gt=0)
+                     .values("nome", "centro_custo_nome")
+                     .annotate(v=Sum("premiacoes"), n=Count("id")).order_by("-v")[:10])]
+
+    return {
+        "competencia": f"{ult.mes:02d}/{ult.ano}", "ano_ref": ano_ref,
+        "mes": linhas_mes, "ano": linhas_ano, "serie": serie, "top": top,
+        "total_mes": total_mes, "total_ano": total_ano,
+        "pessoas_mes": itens_mes.filter(premiacoes__gt=0).count(),
+        "pessoas_ano": itens_ano.filter(premiacoes__gt=0).values("colaborador_id").distinct().count(),
+    }
 
 
 # ─────────────────────────────── HELPERS EXCEL ───────────────────────────────
@@ -828,5 +891,224 @@ def _pdf_termo_rescisao(r, usuario: str) -> HttpResponse:
     doc.build(story)
     resp = HttpResponse(buf.getvalue(), content_type="application/pdf")
     resp["Content-Disposition"] = f'attachment; filename="rescisao_{c.matricula}.pdf"'
+    resp["Access-Control-Expose-Headers"] = "Content-Disposition"
+    return resp
+
+
+# ────────────────── FICHA FINANCEIRA DO COLABORADOR (PDF) ──────────────────
+
+@api_view(["GET"])
+@permission_classes(_PERM)
+def dp_ficha_financeira(request, pk):
+    """Histórico completo de recebimentos de UMA pessoa, mês a mês, em PDF
+    timbrado: o que entrou, o que foi descontado, benefícios, custo pro
+    escritório, médias e — se houver — a rescisão."""
+    from .models import DpColaborador, DpFolhaItem, DpRescisao
+
+    colab = DpColaborador.objects.filter(pk=pk).select_related(
+        "centro_custo", "cargo", "supervisor", "coordenador").first()
+    if not colab:
+        return Response({"detail": "Colaborador não encontrado."}, status=404)
+    if not filtrar_colaboradores(DpColaborador.objects.filter(pk=pk), request.user).exists():
+        return Response({"detail": "Fora do seu escopo de acesso."}, status=403)
+
+    itens = (DpFolhaItem.objects.filter(colaborador=colab)
+             .select_related("competencia")
+             .order_by("competencia__ano", "competencia__mes"))
+    rescisao = DpRescisao.objects.filter(colaborador=colab).order_by("-data_desligamento").first()
+    return _pdf_ficha_financeira(colab, list(itens), rescisao, _quem(request))
+
+
+def _pdf_ficha_financeira(colab, itens, rescisao, usuario: str) -> HttpResponse:
+    from reportlab.lib import colors
+    from reportlab.lib.pagesizes import A4, landscape
+    from reportlab.lib.styles import ParagraphStyle
+    from reportlab.lib.units import mm
+    from reportlab.platypus import (Image, KeepTogether, Paragraph, SimpleDocTemplate,
+                                    Spacer, Table, TableStyle)
+
+    navy = colors.HexColor("#0A1940")
+    azul = colors.HexColor("#1E7BFF")
+    cinza = colors.HexColor("#666666")
+    buf = BytesIO()
+    doc = SimpleDocTemplate(buf, pagesize=landscape(A4), topMargin=11 * mm,
+                            bottomMargin=11 * mm, leftMargin=11 * mm, rightMargin=11 * mm,
+                            title=f"Ficha financeira — {colab.nome}")
+    st_tit = ParagraphStyle("t", fontSize=15, textColor=navy, fontName="Helvetica-Bold")
+    st_sub = ParagraphStyle("s", fontSize=7.5, textColor=cinza)
+    st_sec = ParagraphStyle("sec", fontSize=9.5, textColor=navy, fontName="Helvetica-Bold",
+                            spaceBefore=4, spaceAfter=2)
+    st_min = ParagraphStyle("m", fontSize=7, textColor=cinza)
+
+    story = []
+    if os.path.exists(_LOGO):
+        story.append(Image(_LOGO, width=40 * mm, height=14.2 * mm, hAlign="LEFT"))
+    story.append(Spacer(1, 3 * mm))
+    story.append(Paragraph("Ficha financeira do colaborador", st_tit))
+    story.append(Paragraph(
+        f"Documento interno · gerado por {usuario} em {datetime.now().strftime('%d/%m/%Y %H:%M')}",
+        st_sub))
+    story.append(Spacer(1, 4 * mm))
+
+    # ── bloco cadastral ──
+    def _d(v):
+        return v.strftime("%d/%m/%Y") if v else "—"
+
+    ident = [
+        ["Nome", colab.nome, "Matrícula", str(colab.matricula)],
+        ["Contrato", colab.get_regime_display(), "Situação",
+         "Ativo" if colab.status == "ativo" else f"Desligado em {_d(colab.data_demissao)}"],
+        ["Cargo", colab.cargo.nome if colab.cargo_id else "—",
+         "Centro de custo", colab.centro_custo.nome if colab.centro_custo_id else "—"],
+        ["Unidade", colab.unidade or "—", "Admissão", _d(colab.data_admissao or colab.data_entrada)],
+        ["Supervisor", colab.supervisor.nome if colab.supervisor_id else "—",
+         "Coordenador", colab.coordenador.nome if colab.coordenador_id else "—"],
+    ]
+    t_id = Table(ident, colWidths=[26 * mm, 92 * mm, 30 * mm, 87 * mm])
+    t_id.setStyle(TableStyle([
+        ("FONTSIZE", (0, 0), (-1, -1), 8),
+        ("TEXTCOLOR", (0, 0), (0, -1), cinza), ("TEXTCOLOR", (2, 0), (2, -1), cinza),
+        ("FONTNAME", (1, 0), (1, -1), "Helvetica-Bold"),
+        ("FONTNAME", (3, 0), (3, -1), "Helvetica-Bold"),
+        ("BACKGROUND", (0, 0), (-1, -1), colors.HexColor("#F2F6FF")),
+        ("BOX", (0, 0), (-1, -1), 0.4, colors.HexColor("#CCD6EE")),
+        ("TOPPADDING", (0, 0), (-1, -1), 3), ("BOTTOMPADDING", (0, 0), (-1, -1), 3),
+        ("LEFTPADDING", (0, 0), (-1, -1), 5),
+    ]))
+    story.append(t_id)
+    story.append(Spacer(1, 5 * mm))
+
+    # ── histórico mês a mês ──
+    story.append(Paragraph("Histórico de recebimentos", st_sec))
+    headers = ["Competência", "Salário", "Faltas", "Desc. faltas", "INSS", "Desc. VT",
+               "Vale-transp.", "Vale-alim.", "Saldo livre", "Prêmios", "Acertos",
+               "Líquido a pagar", "Custo total"]
+    linhas, tot = [], {k: 0.0 for k in
+                       ("sal", "descf", "inss", "descvt", "vt", "va", "saldo", "prem",
+                        "acerto", "pagar", "custo")}
+    for it in itens:
+        comp = it.competencia
+        faltas = []
+        if it.faltas_dias:
+            faltas.append(f"{it.faltas_dias:g}d")
+        if it.faltas_horas:
+            faltas.append(f"{it.faltas_horas:g}h")
+        linhas.append([
+            f"{comp.mes:02d}/{comp.ano}", _brl(it.salario_bruto), " ".join(faltas) or "—",
+            _brl(it.desc_faltas), _brl(it.desc_inss), _brl(it.desc_vt),
+            _brl(getattr(it, "vt_com_faltas", None) or it.vt),
+            _brl(getattr(it, "va_com_faltas", None) or it.va),
+            _brl(it.saldo_livre), _brl(it.premiacoes), _brl(it.acerto_contabil),
+            _brl(it.total_pagar), _brl(it.custo_total),
+        ])
+        tot["sal"] += it.salario_bruto or 0
+        tot["descf"] += it.desc_faltas or 0
+        tot["inss"] += it.desc_inss or 0
+        tot["descvt"] += it.desc_vt or 0
+        tot["vt"] += getattr(it, "vt_com_faltas", None) or it.vt or 0
+        tot["va"] += getattr(it, "va_com_faltas", None) or it.va or 0
+        tot["saldo"] += it.saldo_livre or 0
+        tot["prem"] += it.premiacoes or 0
+        tot["acerto"] += it.acerto_contabil or 0
+        tot["pagar"] += it.total_pagar or 0
+        tot["custo"] += it.custo_total or 0
+
+    if linhas:
+        linhas.append(["TOTAL", _brl(tot["sal"]), "", _brl(tot["descf"]), _brl(tot["inss"]),
+                       _brl(tot["descvt"]), _brl(tot["vt"]), _brl(tot["va"]), _brl(tot["saldo"]),
+                       _brl(tot["prem"]), _brl(tot["acerto"]), _brl(tot["pagar"]),
+                       _brl(tot["custo"])])
+        t = Table([headers] + linhas, colWidths=[22, 21, 14, 21, 20, 19, 21, 21, 21, 20, 20, 25, 22],
+                  repeatRows=1)
+        estilo = [
+            ("BACKGROUND", (0, 0), (-1, 0), navy),
+            ("TEXTCOLOR", (0, 0), (-1, 0), colors.white),
+            ("FONTNAME", (0, 0), (-1, 0), "Helvetica-Bold"),
+            ("FONTSIZE", (0, 0), (-1, -1), 6.6),
+            ("ROWBACKGROUNDS", (0, 1), (-1, -2), [colors.white, colors.HexColor("#F2F6FF")]),
+            ("GRID", (0, 0), (-1, -1), 0.3, colors.HexColor("#CCD6EE")),
+            ("ALIGN", (1, 0), (-1, -1), "RIGHT"),
+            ("TOPPADDING", (0, 0), (-1, -1), 3), ("BOTTOMPADDING", (0, 0), (-1, -1), 3),
+            ("BACKGROUND", (0, -1), (-1, -1), azul),
+            ("TEXTCOLOR", (0, -1), (-1, -1), colors.white),
+            ("FONTNAME", (0, -1), (-1, -1), "Helvetica-Bold"),
+        ]
+        # destaca os meses com premiação (o que o operador procura na hora)
+        for i, it in enumerate(itens, start=1):
+            if it.premiacoes:
+                estilo.append(("BACKGROUND", (9, i), (9, i), colors.HexColor("#DCFCE7")))
+                estilo.append(("TEXTCOLOR", (9, i), (9, i), colors.HexColor("#15803D")))
+        t.setStyle(TableStyle(estilo))
+        story.append(t)
+
+        # ── resumo ──
+        n = len(itens)
+        story.append(Spacer(1, 4 * mm))
+        story.append(Paragraph("Resumo do período", st_sec))
+        meses_prem = sum(1 for i in itens if i.premiacoes)
+        resumo = [
+            ["Meses apurados", str(n),
+             "Média mensal recebida", _brl(tot["pagar"] / n if n else 0)],
+            ["Total recebido no período", _brl(tot["pagar"]),
+             "Custo médio pro escritório", _brl(tot["custo"] / n if n else 0)],
+            ["Total de premiações", _brl(tot["prem"]),
+             "Meses com premiação", f"{meses_prem} de {n}"],
+            ["Total descontado (faltas + INSS + VT)",
+             _brl(tot["descf"] + tot["inss"] + tot["descvt"]),
+             "Benefícios recebidos (VT + VA)", _brl(tot["vt"] + tot["va"])],
+        ]
+        t_r = Table(resumo, colWidths=[62 * mm, 52 * mm, 62 * mm, 59 * mm])
+        t_r.setStyle(TableStyle([
+            ("FONTSIZE", (0, 0), (-1, -1), 8),
+            ("TEXTCOLOR", (0, 0), (0, -1), cinza), ("TEXTCOLOR", (2, 0), (2, -1), cinza),
+            ("FONTNAME", (1, 0), (1, -1), "Helvetica-Bold"),
+            ("FONTNAME", (3, 0), (3, -1), "Helvetica-Bold"),
+            ("ALIGN", (1, 0), (1, -1), "RIGHT"), ("ALIGN", (3, 0), (3, -1), "RIGHT"),
+            ("BACKGROUND", (0, 0), (-1, -1), colors.HexColor("#F2F6FF")),
+            ("BOX", (0, 0), (-1, -1), 0.4, colors.HexColor("#CCD6EE")),
+            ("INNERGRID", (0, 0), (-1, -1), 0.3, colors.HexColor("#DDE5F5")),
+            ("TOPPADDING", (0, 0), (-1, -1), 3), ("BOTTOMPADDING", (0, 0), (-1, -1), 3),
+            ("LEFTPADDING", (0, 0), (-1, -1), 5),
+        ]))
+        story.append(t_r)
+    else:
+        story.append(Paragraph(
+            "Esta pessoa ainda não aparece em nenhuma folha calculada.", st_min))
+
+    # ── rescisão, quando houver ──
+    if rescisao:
+        story.append(Spacer(1, 5 * mm))
+        bloco = [Paragraph("Rescisão", st_sec)]
+        verbas = [[v.get("descricao", ""), _brl(v.get("valor", 0))]
+                  for v in (rescisao.verbas or [])]
+        descontos = [[d.get("descricao", ""), f"- {_brl(d.get('valor', 0))}"]
+                     for d in (rescisao.descontos or [])]
+        dados = ([["Desligamento", _d(rescisao.data_desligamento)],
+                  ["Motivo", rescisao.get_tipo_display()]]
+                 + verbas + descontos
+                 + [["LÍQUIDO DA RESCISÃO", _brl(rescisao.liquido)]])
+        t_v = Table(dados, colWidths=[150 * mm, 40 * mm])
+        t_v.setStyle(TableStyle([
+            ("FONTSIZE", (0, 0), (-1, -1), 7.5),
+            ("ALIGN", (1, 0), (1, -1), "RIGHT"),
+            ("GRID", (0, 0), (-1, -1), 0.3, colors.HexColor("#CCD6EE")),
+            ("BACKGROUND", (0, -1), (-1, -1), azul),
+            ("TEXTCOLOR", (0, -1), (-1, -1), colors.white),
+            ("FONTNAME", (0, -1), (-1, -1), "Helvetica-Bold"),
+            ("TOPPADDING", (0, 0), (-1, -1), 3), ("BOTTOMPADDING", (0, 0), (-1, -1), 3),
+        ]))
+        bloco.append(t_v)
+        story.append(KeepTogether(bloco))
+
+    story.append(Spacer(1, 5 * mm))
+    story.append(Paragraph(
+        "Documento gerado pelo Controle de Pessoal — uso interno. Os valores refletem as "
+        "competências calculadas no sistema na data da emissão.", st_min))
+    story.append(Paragraph("MDR Advocacia · Painel Financeiro — powered by Duna.Tech", st_min))
+    doc.build(story)
+
+    resp = HttpResponse(buf.getvalue(), content_type="application/pdf")
+    nome = f"ficha-financeira-{colab.matricula}.pdf"
+    resp["Content-Disposition"] = f'attachment; filename="{nome}"'
     resp["Access-Control-Expose-Headers"] = "Content-Disposition"
     return resp

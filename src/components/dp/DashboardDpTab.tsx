@@ -15,7 +15,7 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Ajuda, TituloAjuda } from "@/components/dp/Ajuda";
 import {
-  type DpDashboard, REGIME_LABELS, exportApi, fmtBRL, fmtCompetencia,
+  type DpDashboard, type DpPremiacoes, REGIME_LABELS, exportApi, fmtBRL, fmtCompetencia,
   fmtCompetenciaLonga, relatoriosApi,
 } from "@/services/dp";
 
@@ -328,6 +328,9 @@ export default function DashboardDpTab({ onAbrirQuadro }: {
         </Painel>
       )}
 
+      {/* Premiações pagas por centro de custo */}
+      {d.premiacoes && <PremiacoesPainel dados={d.premiacoes} drill={drill} />}
+
       {/* Custo médio por tipo de contrato */}
       {d.custo_por_regime?.length > 0 && (
         <Painel titulo="Custo médio por tipo de contrato"
@@ -405,5 +408,157 @@ function Bloco({ rotulo, valor, sub, destaque }: {
       <div className={`font-mono text-sm font-bold ${destaque ? "text-[hsl(var(--dunatech-blue))]" : ""}`}>{valor}</div>
       {sub && <div className="text-[10px] text-muted-foreground">{sub}</div>}
     </div>
+  );
+}
+
+
+/* ─────────────── PREMIAÇÕES POR CENTRO DE CUSTO ─────────────── */
+
+function PremiacoesPainel({ dados, drill }: {
+  dados: DpPremiacoes;
+  drill: (f: FiltroQuadro, rotulo: string) => void;
+}) {
+  const [visao, setVisao] = useState<"mes" | "ano">("mes");
+  const linhas = visao === "mes" ? dados.mes : dados.ano;
+  const total = visao === "mes" ? dados.total_mes : dados.total_ano;
+  const pessoas = visao === "mes" ? dados.pessoas_mes : dados.pessoas_ano;
+  const rotulo = visao === "mes"
+    ? `competência ${dados.competencia ?? "—"}`
+    : `ano de ${dados.ano_ref ?? "—"}`;
+
+  return (
+    <Card className="glass-card border-0">
+      <CardHeader className="pb-2">
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <CardTitle className="text-sm">
+            <TituloAjuda
+              titulo="Premiações pagas por centro de custo"
+              ajuda="Premiação é o único valor da folha que é decisão de gestão — não vem de regra nem de cálculo. Este quadro mostra quanto cada centro de custo distribuiu, para quantas pessoas e qual o valor médio, para dar visibilidade a essa escolha." />
+          </CardTitle>
+          <div className="flex rounded-md border p-0.5 text-xs">
+            <button onClick={() => setVisao("mes")}
+                    className={`rounded px-2 py-0.5 transition-colors ${visao === "mes"
+                      ? "bg-[hsl(var(--dunatech-blue))] text-white" : "text-muted-foreground hover:text-foreground"}`}>
+              No mês
+            </button>
+            <button onClick={() => setVisao("ano")}
+                    className={`rounded px-2 py-0.5 transition-colors ${visao === "ano"
+                      ? "bg-[hsl(var(--dunatech-blue))] text-white" : "text-muted-foreground hover:text-foreground"}`}>
+              No ano
+            </button>
+          </div>
+        </div>
+      </CardHeader>
+      <CardContent className="space-y-3">
+        {total === 0 ? (
+          <p className="py-6 text-center text-sm text-muted-foreground">
+            Nenhuma premiação lançada {visao === "mes" ? `na ${rotulo}` : `em ${dados.ano_ref ?? "—"}`}.
+            <br />
+            <span className="text-xs">
+              As premiações entram pela Folha, no menu de ocorrências (⋮) de cada pessoa.
+            </span>
+          </p>
+        ) : (
+          <>
+            <div className="grid gap-3 sm:grid-cols-3">
+              <Bloco rotulo="Total premiado" valor={fmtBRL(total)} sub={rotulo} destaque />
+              <Bloco rotulo="Pessoas premiadas" valor={String(pessoas)}
+                     sub={`${linhas.length} centro(s) de custo`} />
+              <Bloco rotulo="Prêmio médio" valor={fmtBRL(pessoas ? total / pessoas : 0)}
+                     sub="por pessoa premiada" />
+            </div>
+
+            <div className="h-[220px] w-full">
+              <ResponsiveContainer width="100%" height="100%">
+                <BarChart data={linhas.slice(0, 10)} layout="vertical"
+                          margin={{ left: 8, right: 16, top: 4, bottom: 4 }}>
+                  <CartesianGrid strokeDasharray="3 3" horizontal={false} opacity={0.25} />
+                  <XAxis type="number" tick={{ fontSize: 10 }}
+                         tickFormatter={(v) => `${(v / 1000).toFixed(1)}k`} />
+                  <YAxis type="category" dataKey="nome" width={150} tick={{ fontSize: 10 }} />
+                  <RTooltip formatter={(v: number, k) => [k === "valor" ? fmtBRL(v) : v,
+                                                          k === "valor" ? "Premiações" : "Pessoas"]} />
+                  <Bar dataKey="valor" radius={[0, 4, 4, 0]}>
+                    {linhas.slice(0, 10).map((_, i) => (
+                      <Cell key={i} fill={CORES[i % CORES.length]} />
+                    ))}
+                  </Bar>
+                </BarChart>
+              </ResponsiveContainer>
+            </div>
+
+            <div className="overflow-x-auto">
+              <table className="w-full min-w-[520px] text-sm">
+                <thead>
+                  <tr className="border-b text-xs text-muted-foreground">
+                    <th className="py-1.5 text-left font-medium">Centro de custo</th>
+                    <th className="py-1.5 text-right font-medium">Premiado</th>
+                    <th className="py-1.5 text-right font-medium">Pessoas</th>
+                    <th className="py-1.5 text-right font-medium">Prêmio médio</th>
+                    <th className="py-1.5 text-right font-medium">% do total</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {linhas.map((l) => (
+                    <tr key={l.nome}
+                        className={`border-b last:border-0 ${l.cc_id ? "cursor-pointer hover:bg-muted/50" : ""}`}
+                        title={l.cc_id ? "Ver as pessoas deste centro de custo" : ""}
+                        onClick={() => l.cc_id && drill({ cc: l.cc_id, status: "ativo" }, l.nome)}>
+                      <td className="py-1.5">{l.nome}</td>
+                      <td className="py-1.5 text-right font-mono text-xs font-semibold">{fmtBRL(l.valor)}</td>
+                      <td className="py-1.5 text-right font-mono text-xs">{l.pessoas}</td>
+                      <td className="py-1.5 text-right font-mono text-xs">{fmtBRL(l.media)}</td>
+                      <td className="py-1.5 text-right font-mono text-xs text-muted-foreground">
+                        {l.percentual.toFixed(1)}%
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+
+            {dados.top.length > 0 && (
+              <details className="rounded-lg border bg-muted/20 p-2 text-xs">
+                <summary className="cursor-pointer font-medium">
+                  Quem mais recebeu prêmio em {dados.ano_ref} ({dados.top.length} pessoas)
+                </summary>
+                <ul className="mt-2 space-y-1">
+                  {dados.top.map((t, i) => (
+                    <li key={i} className="flex items-baseline gap-2">
+                      <span className="w-4 text-right font-mono text-muted-foreground">{i + 1}.</span>
+                      <span className="truncate">{t.nome}</span>
+                      <span className="text-muted-foreground">· {t.centro_custo}</span>
+                      <span className="ml-auto shrink-0 font-mono font-semibold">{fmtBRL(t.valor)}</span>
+                      <span className="shrink-0 text-muted-foreground">
+                        em {t.meses} {t.meses === 1 ? "mês" : "meses"}
+                      </span>
+                    </li>
+                  ))}
+                </ul>
+              </details>
+            )}
+
+            {dados.serie.length > 1 && (
+              <div className="h-[160px] w-full">
+                <div className="mb-1 text-[11px] font-medium text-muted-foreground">
+                  Premiações mês a mês
+                </div>
+                <ResponsiveContainer width="100%" height="100%">
+                  <LineChart data={dados.serie} margin={{ left: 4, right: 12, top: 4, bottom: 4 }}>
+                    <CartesianGrid strokeDasharray="3 3" opacity={0.25} />
+                    <XAxis dataKey="mes" tickFormatter={fmtCompetencia} tick={{ fontSize: 10 }} />
+                    <YAxis tick={{ fontSize: 10 }} tickFormatter={(v) => `${(v / 1000).toFixed(0)}k`} />
+                    <RTooltip formatter={(v: number) => fmtBRL(v)}
+                              labelFormatter={(l) => fmtCompetenciaLonga(String(l))} />
+                    <Line type="monotone" dataKey="valor" stroke="#27AE60" strokeWidth={2}
+                          dot={{ r: 3 }} name="Premiações" />
+                  </LineChart>
+                </ResponsiveContainer>
+              </div>
+            )}
+          </>
+        )}
+      </CardContent>
+    </Card>
   );
 }
