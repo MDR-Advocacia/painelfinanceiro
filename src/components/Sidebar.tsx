@@ -23,6 +23,7 @@ import {
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { ThemeToggle } from "@/components/ThemeToggle";
 import logoMdr from "@/assets/logo-mdr.png";
 import { getSetorResumo, getStatusColor, getStatusLabel } from "@/utils/calculations";
 import { validateName } from "@/utils/security";
@@ -104,11 +105,11 @@ export function Sidebar() {
 
   return (
     <aside className="flex min-h-screen w-72 flex-col border-r bg-muted/40">
-      {/* Header — marca */}
-      <div className="flex h-14 items-center gap-3 border-b px-4 lg:h-[60px]">
-        <img src={logoMdr} alt="MDR" className="h-8" />
+      {/* Header — marca (logo adaptativa: preta no claro, branca no noturno) */}
+      <div className="flex h-[72px] items-center gap-3 border-b px-4">
+        <img src={logoMdr} alt="MDR" className="logo-mdr-auto h-11" />
         <div className="leading-tight">
-          <h1 className="painel-wordmark font-heading text-sm font-bold">Painel Financeiro</h1>
+          <h1 className="painel-wordmark font-heading text-base font-bold">Painel Financeiro</h1>
           <p className="text-[10px] tracking-wider text-muted-foreground">MDR ADVOCACIA</p>
         </div>
       </div>
@@ -290,8 +291,9 @@ export function Sidebar() {
         )}
       </nav>
 
-      {/* Rodapé — sair + assinatura DunaTech (padrão da família Flow) */}
+      {/* Rodapé — tema + sair + assinatura DunaTech (padrão da família Flow) */}
       <div className="border-t px-3 py-3">
+        <ThemeToggle />
         <button
           onClick={handleSignOut}
           className="flex w-full items-center gap-3 rounded-lg px-3 py-2 text-xs text-muted-foreground transition-colors hover:bg-destructive/10 hover:text-destructive"

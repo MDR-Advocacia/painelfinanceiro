@@ -78,7 +78,7 @@ export function Projections() {
               <h4 className="font-heading text-sm font-semibold mb-4">Evolução Acumulada (12 meses)</h4>
               <ResponsiveContainer width="100%" height={320}>
                 <LineChart data={projectionData}>
-                  <CartesianGrid strokeDasharray="3 3" stroke="hsl(220, 20%, 90%)" />
+                  <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))" />
                   <XAxis dataKey="mes" tick={{ fontSize: 11 }} />
                   <YAxis tick={{ fontSize: 11 }} tickFormatter={v => `${(v / 1000).toFixed(0)}k`} />
                   <RTooltip formatter={(v: number) => formatCurrency(v)} />

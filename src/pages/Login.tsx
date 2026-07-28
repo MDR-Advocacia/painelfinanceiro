@@ -38,8 +38,8 @@ export default function Login() {
       <Card className="w-full max-w-md border-0 shadow-2xl backdrop-blur-xl">
         <CardContent className="pt-8 pb-8 px-8">
           <div className="flex flex-col items-center mb-8">
-            {/* brightness(0) deixa a logo PRETA sólida preservando a transparência */}
-            <img src={logoMdr} alt="MDR Logo" className="h-16 mb-4" style={{ filter: "brightness(0)" }} />
+            {/* logo adaptativa: preta no claro, branca no modo noturno */}
+            <img src={logoMdr} alt="MDR Logo" className="logo-mdr-auto h-16 mb-4" />
             <h1 className="painel-wordmark font-heading text-xl font-bold">
               Painel Financeiro
             </h1>

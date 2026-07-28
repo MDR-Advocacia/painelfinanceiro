@@ -79,7 +79,7 @@ export function RankingAnalysis() {
                 <h4 className="font-heading text-sm font-semibold mb-4">Ranking de Margem Bruta (%)</h4>
                 <ResponsiveContainer width="100%" height={Math.max(200, resumos.length * 50)}>
                   <BarChart data={chartData} layout="vertical" margin={{ left: 20 }}>
-                    <CartesianGrid strokeDasharray="3 3" stroke="hsl(220, 20%, 90%)" />
+                    <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))" />
                     <XAxis type="number" tick={{ fontSize: 11 }} unit="%" />
                     <YAxis type="category" dataKey="name" tick={{ fontSize: 11 }} width={120} />
                     <RTooltip formatter={(v: number) => `${v}%`} />
