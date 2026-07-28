@@ -116,7 +116,7 @@ export function Sidebar() {
   const podeSetores = pode("setores");
 
   return (
-    <aside className="sidebar-glass relative flex min-h-screen w-72 shrink-0 flex-col border-r border-sidebar-border">
+    <aside className="sidebar-glass relative flex h-screen w-72 shrink-0 flex-col border-r border-sidebar-border">
       {/* fio de luz na borda direita: separa sem peso de borda */}
       <div aria-hidden className="pointer-events-none absolute inset-y-0 right-0 w-px bg-gradient-to-b from-transparent via-white/12 to-transparent" />
 

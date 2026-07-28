@@ -63,7 +63,7 @@ const MainContent = () => {
 
   if (loading || permsLoading) {
     return (
-      <main className="flex min-h-screen flex-1 items-center justify-center">
+      <main className="flex flex-1 items-center justify-center">
         <div className="flex flex-col items-center gap-2">
           <div className="h-8 w-8 animate-spin rounded-full border-4 border-primary border-t-transparent"></div>
           <p className="animate-pulse text-muted-foreground">Carregando ecossistema MDR...</p>
@@ -77,7 +77,7 @@ const MainContent = () => {
   const nenhum = !ORDEM_FALLBACK.some((m) => pode(m)) && !pode("sedes") && !pode("setores");
 
   return (
-    <main className="relative z-10 min-h-screen flex-1 overflow-y-auto p-6 md:p-8">
+    <main className="relative z-10 flex-1 overflow-y-auto p-6 md:p-8">
       {nenhum ? (
         <SemAcesso semNenhum />
       ) : bloqueado ? (
@@ -99,7 +99,7 @@ const MainContent = () => {
 };
 
 const Index = () => (
-  <div className="relative flex min-h-screen bg-background">
+  <div className="relative flex h-screen overflow-hidden bg-background">
     {/* halos de marca no fundo — profundidade sem ruído */}
     <div aria-hidden className="aurora" />
     <Sidebar />

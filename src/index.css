@@ -282,6 +282,16 @@
     flex-shrink: 0;
   }
 
+  /* Área cuja rolagem é espelhada por uma barra flutuante: a barra nativa
+     sai de cena pra não aparecer duplicada. */
+  .sem-barra-nativa {
+    scrollbar-width: none;
+    -ms-overflow-style: none;
+  }
+  .sem-barra-nativa::-webkit-scrollbar {
+    display: none;
+  }
+
   /* ── BARRA SUPERIOR ──────────────────────────────────────────────── */
   .topbar {
     background: hsl(var(--background) / 0.72);

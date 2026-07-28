@@ -52,7 +52,7 @@ export function TabelaRolavel({ children, className = "" }: {
         // o <Table> do shadcn já vem com o próprio wrapper rolável; anulando o
         // overflow dele, quem rola passa a ser ESTE container — que é o que a
         // barra flutuante espelha
-        className="overflow-x-auto [&>div]:overflow-visible"
+        className="sem-barra-nativa overflow-x-auto [&>div]:overflow-visible"
       >
         {children}
       </div>
