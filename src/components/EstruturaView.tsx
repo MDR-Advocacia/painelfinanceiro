@@ -26,11 +26,12 @@ import {
 import { Ajuda } from "@/components/dp/Ajuda";
 import { Kpi, PageHeader, SectionTitle } from "@/components/Pagina";
 import { usePermissions } from "@/hooks/usePermissions";
+import { useApp } from "@/contexts/AppContext";
 import { formatCurrency } from "@/utils/calculations";
 import EquipesDialog from "@/components/EquipesDialog";
 import {
   type EfAlocacao, type EfCentro, type EfEquipe, type EfEstrutura, type EfLinha,
-  EF_EVENTOS, avisarEstruturaMudou, estruturaApi,
+  EF_EVENTOS, abrirDetalheCentro, abrirDetalheEquipe, avisarEstruturaMudou, estruturaApi,
 } from "@/services/estrutura";
 
 const AREA_UI: Record<string, { rotulo: string; cls: string }> = {
@@ -40,6 +41,7 @@ const AREA_UI: Record<string, { rotulo: string; cls: string }> = {
 };
 
 export function EstruturaView() {
+  const { setView } = useApp();
   const { podeEditar } = usePermissions();
   const editar = podeEditar("estrutura");
   const [dados, setDados] = useState<EfEstrutura | null>(null);
@@ -142,7 +144,8 @@ export function EstruturaView() {
                       </>} />
         <div className="grid gap-4 xl:grid-cols-2">
           {dados.centros.map((c) => (
-            <CentroCard key={c.id} centro={c} equipes={equipes} editar={editar} onMudou={mudou} />
+            <CentroCard key={c.id} centro={c} equipes={equipes} editar={editar} onMudou={mudou}
+                        aoAbrirDetalhe={setView} />
           ))}
         </div>
       </div>
@@ -162,7 +165,8 @@ export function EstruturaView() {
                       </>} />
         <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
           {dados.infraestrutura.map((c) => (
-            <InfraCard key={c.id} centro={c} equipes={equipes} editar={editar} onMudou={mudou} />
+            <InfraCard key={c.id} centro={c} equipes={equipes} editar={editar} onMudou={mudou}
+                       aoAbrirDetalhe={setView} />
           ))}
         </div>
       </div>
@@ -193,8 +197,9 @@ export function EstruturaView() {
 
 /* ─────────────────────── centro de faturamento ─────────────────────── */
 
-function CentroCard({ centro, equipes, editar, onMudou }: {
+function CentroCard({ centro, equipes, editar, onMudou, aoAbrirDetalhe }: {
   centro: EfCentro; equipes: EfEquipe[]; editar: boolean; onMudou: () => void;
+  aoAbrirDetalhe: (v: any) => void;
 }) {
   const margem = centro.receita_total - centro.custo_total;
   const [novaLinha, setNovaLinha] = useState(false);
@@ -206,7 +211,11 @@ function CentroCard({ centro, equipes, editar, onMudou }: {
             <span className="flex h-8 w-8 items-center justify-center rounded-lg bg-[hsl(var(--dunatech-blue))]/10">
               <Landmark className="h-4 w-4 text-[hsl(var(--dunatech-blue))]" />
             </span>
-            {centro.nome}
+            <button onClick={() => abrirDetalheCentro(centro.id, aoAbrirDetalhe)}
+                    title="Abrir a página deste centro"
+                    className="transition-colors hover:text-[hsl(var(--dunatech-blue))] hover:underline">
+              {centro.nome}
+            </button>
             {editar && (
               <span className="flex gap-0.5 opacity-0 transition-opacity group-hover:opacity-100">
                 <BotaoRenomear atual={centro.nome}
@@ -237,7 +246,8 @@ function CentroCard({ centro, equipes, editar, onMudou }: {
 
         <div className="space-y-2">
           {centro.linhas.map((l) => (
-            <LinhaBloco key={l.id} linha={l} equipes={equipes} editar={editar} onMudou={onMudou} />
+            <LinhaBloco key={l.id} linha={l} equipes={equipes} editar={editar} onMudou={onMudou}
+                        aoAbrirDetalhe={aoAbrirDetalhe} />
           ))}
           {editar && (novaLinha ? (
             <NovaLinhaInline centroId={centro.id}
@@ -346,8 +356,9 @@ function NovoCentroDialog({ tipo, onClose, onCriou }: {
   );
 }
 
-function LinhaBloco({ linha, equipes, editar, onMudou }: {
+function LinhaBloco({ linha, equipes, editar, onMudou, aoAbrirDetalhe }: {
   linha: EfLinha; equipes: EfEquipe[]; editar: boolean; onMudou: () => void;
+  aoAbrirDetalhe: (v: any) => void;
 }) {
   const area = AREA_UI[linha.area];
   const fora = linha.alocacoes.length > 0 && Math.abs(linha.soma_percentual - 100) > 0.5;
@@ -382,7 +393,7 @@ function LinhaBloco({ linha, equipes, editar, onMudou }: {
 
       <div className="mt-2 flex flex-wrap items-center gap-1.5">
         {linha.alocacoes.map((a) => (
-          <AlocacaoChip key={a.id} a={a} editar={editar} onMudou={onMudou} />
+          <AlocacaoChip key={a.id} a={a} editar={editar} onMudou={onMudou} aoAbrirDetalhe={aoAbrirDetalhe} />
         ))}
         {linha.alocacoes.length === 0 && (
           <span className="text-xs italic text-muted-foreground">nenhuma equipe alocada</span>
@@ -434,7 +445,9 @@ function LinhaBloco({ linha, equipes, editar, onMudou }: {
 }
 
 /** Chip da equipe na linha: nome · % (editável) · custo rateado. */
-function AlocacaoChip({ a, editar, onMudou }: { a: EfAlocacao; editar: boolean; onMudou: () => void }) {
+function AlocacaoChip({ a, editar, onMudou, aoAbrirDetalhe }: {
+  a: EfAlocacao; editar: boolean; onMudou: () => void; aoAbrirDetalhe: (v: any) => void;
+}) {
   const [editando, setEditando] = useState(false);
   const [valor, setValor] = useState(String(a.percentual));
 
@@ -452,7 +465,11 @@ function AlocacaoChip({ a, editar, onMudou }: { a: EfAlocacao; editar: boolean; 
           title={a.custo_total != null
             ? `${a.equipe} — ${a.pessoas} pessoa(s) no CC "${a.centro_custo}" · custo rateado ${formatCurrency(a.custo_total)}`
             : `${a.equipe} — sem centro de custo do DP vinculado ainda`}>
-      <span className="font-medium">{a.equipe}</span>
+      <button onClick={() => abrirDetalheEquipe(a.equipe_id, aoAbrirDetalhe)}
+              title={`Abrir a página da equipe ${a.equipe}`}
+              className="font-medium transition-colors hover:text-[hsl(var(--dunatech-blue))] hover:underline">
+        {a.equipe}
+      </button>
       {editando ? (
         <Input autoFocus value={valor} onChange={(e) => setValor(e.target.value)}
                onBlur={salvar} onKeyDown={(e) => e.key === "Enter" && salvar()}
@@ -484,10 +501,12 @@ function AlocacaoChip({ a, editar, onMudou }: { a: EfAlocacao; editar: boolean; 
 
 /* ─────────────────────── centro de infraestrutura ─────────────────────── */
 
-function InfraCard({ centro, equipes, editar, onMudou }: {
+function InfraCard({ centro, equipes, editar, onMudou, aoAbrirDetalhe }: {
   centro: EfCentro; equipes: EfEquipe[]; editar: boolean; onMudou: () => void;
+  aoAbrirDetalhe: (v: any) => void;
 }) {
   const [adicionando, setAdicionando] = useState(false);
+  const [novaLinha, setNovaLinha] = useState(false);
   const jaAlocadas = new Set(centro.alocacoes.map((a) => a.equipe_id));
   return (
     <Card className="glass-card border-0">
@@ -503,9 +522,28 @@ function InfraCard({ centro, equipes, editar, onMudou }: {
             {formatCurrency(centro.custo_total)}
           </span>
         </div>
+        {/* linhas de infraestrutura (subdivisões internas do centro) */}
+        {centro.linhas.length > 0 && (
+          <div className="space-y-2">
+            {centro.linhas.map((l) => (
+              <LinhaBloco key={l.id} linha={l} equipes={equipes} editar={editar} onMudou={onMudou}
+                          aoAbrirDetalhe={aoAbrirDetalhe} />
+            ))}
+          </div>
+        )}
+        {editar && (novaLinha ? (
+          <NovaLinhaInline centroId={centro.id}
+                           onFechar={() => setNovaLinha(false)}
+                           onCriou={() => { setNovaLinha(false); onMudou(); }} />
+        ) : (
+          <button onClick={() => setNovaLinha(true)}
+                  className="flex w-full items-center justify-center gap-1 rounded-lg border border-dashed border-muted-foreground/30 py-1 text-[0.65rem] text-muted-foreground transition-colors hover:border-[hsl(var(--dunatech-blue))] hover:text-[hsl(var(--dunatech-blue))]">
+            <Plus className="h-3 w-3" /> linha de infraestrutura
+          </button>
+        ))}
         <div className="flex flex-wrap items-center gap-1.5">
           {centro.alocacoes.map((a) => (
-            <AlocacaoChip key={a.id} a={a} editar={editar} onMudou={onMudou} />
+            <AlocacaoChip key={a.id} a={a} editar={editar} onMudou={onMudou} aoAbrirDetalhe={aoAbrirDetalhe} />
           ))}
           {editar && (
             adicionando ? (

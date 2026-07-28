@@ -14,6 +14,7 @@ CAMPOS = {
     "area": ("Área", "texto"),
     "centro_custo": ("Centro de custo", "texto"),
     "supervisor": ("Supervisor", "texto"),
+    "equipe_estrutura": ("Equipe (estrutura)", "texto"),
     "e_supervisor": ("É supervisor", "sim_nao"),
     "e_coordenador": ("É coordenador", "sim_nao"),
     "coordenador": ("Coordenador", "texto"),

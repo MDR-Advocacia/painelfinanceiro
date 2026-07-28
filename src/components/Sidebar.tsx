@@ -37,7 +37,8 @@ import { Input } from "@/components/ui/input";
 import { ThemeToggle } from "@/components/ThemeToggle";
 import { PainelLogo } from "@/components/BrandMark";
 import {
-  type EfEstrutura, EF_EVENTOS, abrirGerenciadorEquipes, estruturaApi, focarCentro,
+  type EfEquipe, type EfEstrutura, EF_EVENTOS, abrirDetalheCentro,
+  abrirDetalheEquipe, estruturaApi,
 } from "@/services/estrutura";
 import { getSetorResumo, getStatusColor, getStatusLabel } from "@/utils/calculations";
 import { validateName } from "@/utils/security";
@@ -98,9 +99,13 @@ export function Sidebar() {
   // ── Estrutura de Faturamento no menu: centros, infra e equipes ──
   const podeEstrutura = pode("estrutura");
   const [estrutura, setEstrutura] = useState<EfEstrutura | null>(null);
+  const [equipesMenu, setEquipesMenu] = useState<EfEquipe[]>([]);
   useEffect(() => {
     if (!podeEstrutura) return;
-    const carregar = () => estruturaApi.carregar().then(setEstrutura).catch(() => undefined);
+    const carregar = () => {
+      estruturaApi.carregar().then(setEstrutura).catch(() => undefined);
+      estruturaApi.equipes().then(setEquipesMenu).catch(() => undefined);
+    };
     carregar();
     // a tela avisa quando algo muda (criar centro, alocar equipe…)
     window.addEventListener(EF_EVENTOS.mudou, carregar);
@@ -109,8 +114,11 @@ export function Sidebar() {
 
   const irParaCentro = (centroId: string) => {
     setActiveSetor(null);
-    setView("estrutura" as any);
-    focarCentro(centroId);
+    abrirDetalheCentro(centroId, setView);
+  };
+  const irParaEquipe = (equipeId: string) => {
+    setActiveSetor(null);
+    abrirDetalheEquipe(equipeId, setView);
   };
 
   const handleAdd = () => {
@@ -260,27 +268,32 @@ export function Sidebar() {
           </div>
         )}
 
-        {/* EQUIPES */}
-        {podeEstrutura && estrutura && (
+        {/* EQUIPES — cada uma tem página própria */}
+        {podeEstrutura && equipesMenu.length > 0 && (
           <div className="space-y-0.5">
-            <SectionHeader title="Equipes"
-                           contagem={(estrutura.centros.flatMap((c) => c.linhas.flatMap((l) => l.alocacoes))
-                             .concat(estrutura.infraestrutura.flatMap((c) => c.alocacoes))
-                             .map((a) => a.equipe_id)
-                             .filter((v, i, arr) => arr.indexOf(v) === i).length)
-                             + estrutura.sem_alocacao.length}
+            <SectionHeader title="Equipes" contagem={equipesMenu.length}
                            collapsed={!!collapsed["ef-equipes"]} onToggle={() => toggle("ef-equipes")} />
             {!collapsed["ef-equipes"] && (
-              <button onClick={() => { setActiveSetor(null); setView("estrutura" as any); abrirGerenciadorEquipes(); }}
-                      className="nav-link">
-                <span className="nav-ico"><Users className="h-full w-full" strokeWidth={1.8} /></span>
-                <span className="flex-1 truncate text-left">Gerenciar equipes</span>
-              </button>
-            )}
-            {!collapsed["ef-equipes"] && estrutura.sem_alocacao.length > 0 && (
-              <p className="px-3 pt-0.5 text-[0.62rem] leading-snug text-warning/80">
-                {estrutura.sem_alocacao.length} equipe{estrutura.sem_alocacao.length === 1 ? "" : "s"} sem alocação
-              </p>
+              <>
+                {equipesMenu.map((e) => (
+                  <button key={e.id} onClick={() => irParaEquipe(e.id)}
+                          data-active={false} className="nav-link py-1.5">
+                    <span className="nav-ico"><Users className="h-full w-full" strokeWidth={1.8} /></span>
+                    <span className="min-w-0 flex-1 text-left">
+                      <span className="block truncate">{e.nome ?? e.equipe}</span>
+                    </span>
+                    {(e.colaboradores ?? 0) > 0 && (
+                      <span className="shrink-0 rounded-full bg-white/[0.07] px-1.5 text-[0.6rem] font-semibold tabular-nums text-sidebar-foreground/50">
+                        {e.colaboradores}
+                      </span>
+                    )}
+                  </button>
+                ))}
+                <button onClick={() => { setActiveSetor(null); setView("estrutura-admin" as any); }}
+                        className="flex w-full items-center gap-2 rounded-lg px-3 py-1.5 text-xs text-sidebar-foreground/45 transition-colors hover:bg-white/[0.04] hover:text-white">
+                  <Plus className="h-3.5 w-3.5" /> Administração da estrutura
+                </button>
+              </>
             )}
           </div>
         )}

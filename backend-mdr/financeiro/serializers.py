@@ -1,7 +1,7 @@
 from rest_framework import serializers
 from .models import (
     Cargo, Sede, Setor, VpdConfig, BaseReferencia,
-    DpCargo, DpCentroCusto, DpColaborador, DpLideranca, DpTabelaFiscal,
+    DpCargo, DpCentroCusto, DpColaborador, DpLideranca, DpTabelaFiscal, Equipe,
 )
 
 
@@ -78,12 +78,16 @@ class DpColaboradorSerializer(serializers.ModelSerializer):
     coordenador_nome = serializers.CharField(source='coordenador.nome', read_only=True, default=None)
     coordenador_id = serializers.PrimaryKeyRelatedField(
         source='coordenador', queryset=DpLideranca.objects.all(), allow_null=True, required=False)
+    equipe_nome = serializers.CharField(source='equipe_ref.nome', read_only=True, default=None)
+    equipe_id = serializers.PrimaryKeyRelatedField(
+        source='equipe_ref', queryset=Equipe.objects.all(), allow_null=True, required=False)
 
     class Meta:
         model = DpColaborador
         fields = [
             'id', 'matricula', 'nome', 'sexo', 'cpf', 'unidade', 'area',
             'centro_custo_id', 'centro_custo_nome', 'equipe',
+            'equipe_id', 'equipe_nome',
             'supervisor_id', 'supervisor_nome', 'coordenador_id', 'coordenador_nome',
             'cargo_id', 'cargo_nome', 'regime', 'regime_label', 'status',
             'data_entrada', 'data_admissao', 'data_demissao',

@@ -291,6 +291,10 @@ class DpColaborador(models.Model):
                                      related_name="colaboradores")
     supervisor = models.ForeignKey(DpLideranca, on_delete=models.SET_NULL, null=True,
                                    blank=True, related_name="supervisionados")
+    # enquadramento na EQUIPE da Estrutura de Faturamento (funcionário→equipe→
+    # centro): é por aqui que o custo real da pessoa desce pras linhas
+    equipe_ref = models.ForeignKey("financeiro.Equipe", on_delete=models.SET_NULL,
+                                   null=True, blank=True, related_name="colaboradores")
     coordenador = models.ForeignKey(DpLideranca, on_delete=models.SET_NULL, null=True,
                                     blank=True, related_name="coordenados")
     equipe = models.CharField(max_length=120, blank=True, default="")

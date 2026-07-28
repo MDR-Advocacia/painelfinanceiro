@@ -29,6 +29,27 @@ def _ultimo_periodo(linhas) -> str | None:
     return max(pers) if pers else None
 
 
+def _custo_por_equipe(ultima_fechada) -> dict:
+    """Custo por EQUIPE somando a folha das pessoas ENQUADRADAS nela — a conta
+    exata que a normalização funcionário→equipe permite."""
+    if not ultima_fechada:
+        return {}
+    from .models import DpColaborador
+    equipe_de = dict(DpColaborador.objects.exclude(equipe_ref=None)
+                     .values_list("id", "equipe_ref_id"))
+    saida = {}
+    for it in (DpFolhaItem.objects.filter(competencia=ultima_fechada)
+               .values("colaborador_id", "custo_total", "total_pagar")):
+        eq = equipe_de.get(it["colaborador_id"])
+        if not eq:
+            continue
+        d = saida.setdefault(str(eq), {"pessoas": 0, "custo_total": 0.0, "a_pagar": 0.0})
+        d["pessoas"] += 1
+        d["custo_total"] = round(d["custo_total"] + (it["custo_total"] or 0), 2)
+        d["a_pagar"] = round(d["a_pagar"] + (it["total_pagar"] or 0), 2)
+    return saida
+
+
 def _custo_por_cc(ultima_fechada) -> dict:
     """Custo TOTAL (com provisões e patronal) e a-pagar por centro de custo,
     da última competência FECHADA — decisão acordada: margem usa custo total e
@@ -68,6 +89,7 @@ def estrutura(request):
         fechada = DpCompetencia.objects.order_by("-ano", "-mes").first()
         custo_parcial = fechada is not None
     custo_cc = _custo_por_cc(fechada)
+    custo_eq = _custo_por_equipe(fechada)
 
     # O percentual divide a RECEITA da linha. Pro CUSTO a conta é outra: uma
     # equipe que atende N linhas (Ajuizamento atende 6) tem o custo dela
@@ -79,18 +101,26 @@ def estrutura(request):
         soma_por_equipe[a.equipe_id] = soma_por_equipe.get(a.equipe_id, 0) + (a.percentual or 0)
 
     def json_alocacao(a):
-        cc = a.equipe.centro_custo
-        base = custo_cc.get(cc.nome) if cc else None
+        # 1ª escolha: folha das pessoas ENQUADRADAS na equipe (normalização);
+        # fallback: agregado do centro de custo vinculado (equipe ainda sem gente)
+        base = custo_eq.get(str(a.equipe_id))
+        origem = "pessoas"
+        if not base:
+            cc = a.equipe.centro_custo
+            base = custo_cc.get(cc.nome) if cc else None
+            origem = "centro_custo" if base else None
         soma_eq = soma_por_equipe.get(a.equipe_id) or 0
         fator = ((a.percentual or 0) / soma_eq) if soma_eq else 0.0
         return {
+            "custo_origem": origem,
             "id": str(a.id),
             "equipe_id": str(a.equipe_id),
             "equipe": a.equipe.nome,
             "slug": a.equipe.slug,
             "grupo": a.equipe.grupo,
             "percentual": a.percentual,
-            "centro_custo": cc.nome if cc else None,
+            "centro_custo": (a.equipe.centro_custo.nome
+                              if a.equipe.centro_custo_id else None),
             # custo da equipe RATEADO pela participação dela nesta linha
             "custo_total": round(base["custo_total"] * fator, 2) if base else None,
             "a_pagar": round(base["a_pagar"] * fator, 2) if base else None,
@@ -107,7 +137,9 @@ def estrutura(request):
             "alocacoes": [json_alocacao(a) for a in alocs],
         }
 
-    saida = {"periodo": per,
+    periodos = sorted({p for l in linhas for p, f in (l.periodos or {}).items()
+                       if (f or {}).get("bruto")}, reverse=True)
+    saida = {"periodo": per, "periodos": periodos,
              "competencia_custo": (f"{fechada.mes:02d}/{fechada.ano}" if fechada else None),
              "custo_parcial": custo_parcial,
              "centros": [], "infraestrutura": []}
@@ -241,15 +273,22 @@ def remover_alocacao(request, pk):
 @permission_classes(_PERM)
 def equipes(request):
     """Catálogo de equipes (pro combobox de alocação)."""
+    from .models import DpColaborador
     alocs = {}
     for a in Alocacao.objects.select_related("linha__centro", "centro"):
         alocs.setdefault(str(a.equipe_id), []).append(
             str(a.linha or a.centro))
+    gente = {}
+    for r in (DpColaborador.objects.filter(status="ativo").exclude(equipe_ref=None)
+              .values("equipe_ref_id")):
+        k = str(r["equipe_ref_id"])
+        gente[k] = gente.get(k, 0) + 1
     return Response([
         {"id": str(e.id), "nome": e.nome, "slug": e.slug, "grupo": e.grupo,
          "centro_custo": e.centro_custo.nome if e.centro_custo_id else None,
          "centro_custo_id": str(e.centro_custo_id) if e.centro_custo_id else None,
-         "alocada_em": alocs.get(str(e.id), [])}
+         "alocada_em": alocs.get(str(e.id), []),
+         "colaboradores": gente.get(str(e.id), 0)}
         for e in Equipe.objects.filter(ativo=True)
     ])
 
@@ -387,10 +426,204 @@ def equipe_crud(request, pk=None):
               depois={"nome": e.nome, "grupo": e.grupo,
                       "centro_custo": e.centro_custo.nome if e.centro_custo_id else None})
         return Response({"ok": True})
-    # DELETE — equipe alocada não some
+    # DELETE — equipe alocada ou com gente enquadrada não some
     if e.alocacoes.exists():
         return Response({"detail": "Equipe está alocada — remova das linhas antes de excluir."},
                         status=409)
+    if e.colaboradores.exists():
+        return Response({"detail": "Equipe tem colaboradores enquadrados — mova as pessoas "
+                                   "antes de excluir."}, status=409)
     audit(request, "excluir", "ef_equipe", e.id, antes={"nome": e.nome})
     e.delete()
     return Response(status=204)
+
+
+# ─────────────────────────── PÁGINAS DE DETALHE ───────────────────────────
+
+def _competencia_custo():
+    """Última fechada; sem nenhuma, a mais recente (sinalizada como parcial)."""
+    fechada = (DpCompetencia.objects.filter(status="fechada")
+               .order_by("-ano", "-mes").first())
+    if fechada:
+        return fechada, False
+    aberta = DpCompetencia.objects.order_by("-ano", "-mes").first()
+    return aberta, aberta is not None
+
+
+@api_view(["GET"])
+@permission_classes(_PERM)
+def centro_detalhe(request, pk):
+    """A página do centro: série de receita mês a mês POR LINHA, alocações,
+    custo real e margem — tudo que existe sobre aquele cliente."""
+    from .models import DpColaborador
+
+    c = CentroFaturamento.objects.filter(pk=pk).first()
+    if not c:
+        return Response(status=404)
+    linhas = list(c.linhas.prefetch_related("alocacoes__equipe__centro_custo"))
+
+    comp, custo_parcial = _competencia_custo()
+    custo_cc = _custo_por_cc(comp)
+    custo_eq = _custo_por_equipe(comp)
+    soma_por_equipe = {}
+    for a in Alocacao.objects.all():
+        soma_por_equipe[a.equipe_id] = soma_por_equipe.get(a.equipe_id, 0) + (a.percentual or 0)
+
+    def custo_alocacao(a):
+        base = custo_eq.get(str(a.equipe_id))
+        if not base:
+            cc = a.equipe.centro_custo
+            base = custo_cc.get(cc.nome) if cc else None
+        if not base:
+            return None, None, None
+        soma = soma_por_equipe.get(a.equipe_id) or 0
+        fator = ((a.percentual or 0) / soma) if soma else 0.0
+        return (round(base["custo_total"] * fator, 2),
+                round(base["a_pagar"] * fator, 2), base["pessoas"])
+
+    # série mensal: total do centro + abertura por linha
+    meses = sorted({per for l in linhas for per, f in (l.periodos or {}).items()
+                    if (f or {}).get("bruto")})
+    series = []
+    for m in meses:
+        por_linha = {l.nome: round((l.periodos or {}).get(m, {}).get("bruto", 0) or 0, 2)
+                     for l in linhas}
+        series.append({"mes": m, "total": round(sum(por_linha.values()), 2),
+                       "por_linha": por_linha})
+
+    ult = meses[-1] if meses else None
+    saida_linhas = []
+    custo_centro = pagar_centro = 0.0
+    equipes_do_centro = {}
+    for l in sorted(linhas, key=lambda x: x.ordem):
+        alocs = []
+        for a in sorted(l.alocacoes.all(), key=lambda x: -x.percentual):
+            custo, pagar, pessoas = custo_alocacao(a)
+            custo_centro += custo or 0
+            pagar_centro += pagar or 0
+            eqd = equipes_do_centro.setdefault(str(a.equipe_id), {
+                "id": str(a.equipe_id), "nome": a.equipe.nome, "grupo": a.equipe.grupo,
+                "custo_total": 0.0, "linhas": []})
+            eqd["custo_total"] = round(eqd["custo_total"] + (custo or 0), 2)
+            eqd["linhas"].append({"linha": l.nome, "percentual": a.percentual})
+            alocs.append({"id": str(a.id), "equipe_id": str(a.equipe_id),
+                          "equipe": a.equipe.nome, "percentual": a.percentual,
+                          "custo_total": custo, "a_pagar": pagar, "pessoas": pessoas})
+        receita_ult = round((l.periodos or {}).get(ult, {}).get("bruto", 0) or 0, 2) if ult else 0
+        saida_linhas.append({
+            "id": str(l.id), "nome": l.nome, "area": l.area, "ativo": l.ativo,
+            "receita_ultimo": receita_ult,
+            "receita_acumulada": round(sum((f or {}).get("bruto", 0) or 0
+                                           for f in (l.periodos or {}).values()), 2),
+            "soma_percentual": round(sum(a["percentual"] or 0 for a in alocs), 2),
+            "alocacoes": alocs,
+        })
+
+    # pessoas nas equipes deste centro (enquadradas via DP)
+    ids_eq = list(equipes_do_centro.keys())
+    pessoas_por_eq = {}
+    for r in (DpColaborador.objects.filter(status="ativo", equipe_ref_id__in=ids_eq)
+              .values("equipe_ref_id")):
+        k = str(r["equipe_ref_id"])
+        pessoas_por_eq[k] = pessoas_por_eq.get(k, 0) + 1
+    for k, d in equipes_do_centro.items():
+        d["pessoas"] = pessoas_por_eq.get(k, 0)
+
+    receita_ult_total = round(sum(l["receita_ultimo"] for l in saida_linhas), 2)
+    return Response({
+        "id": str(c.id), "nome": c.nome, "tipo": c.tipo,
+        "periodo": ult, "meses": meses, "series": series,
+        "linhas": saida_linhas,
+        "equipes": sorted(equipes_do_centro.values(), key=lambda x: -x["custo_total"]),
+        "receita_ultimo": receita_ult_total,
+        "receita_acumulada": round(sum(l["receita_acumulada"] for l in saida_linhas), 2),
+        "custo_total": round(custo_centro, 2),
+        "a_pagar": round(pagar_centro, 2),
+        "margem": round(receita_ult_total - custo_centro, 2),
+        "competencia_custo": f"{comp.mes:02d}/{comp.ano}" if comp else None,
+        "custo_parcial": custo_parcial,
+    })
+
+
+@api_view(["GET"])
+@permission_classes(_PERM)
+def equipe_detalhe(request, pk):
+    """A página da equipe: QUEM ESTÁ NELA (pessoas do DP com cargo, salário e
+    custo real da folha), onde está alocada e quanto de receita representa."""
+    from .models import DpColaborador, DpFolhaItem as FI
+
+    e = Equipe.objects.select_related("centro_custo").filter(pk=pk).first()
+    if not e:
+        return Response(status=404)
+
+    comp, custo_parcial = _competencia_custo()
+    folha = {}
+    if comp:
+        folha = {i["colaborador_id"]: i for i in
+                 FI.objects.filter(competencia=comp)
+                 .values("colaborador_id", "custo_total", "total_pagar",
+                         "salario_bruto", "ferias_dias", "em_rescisao")}
+
+    pessoas = []
+    resumo_cargos = {}
+    custo_total = pagar_total = 0.0
+    qs = (DpColaborador.objects.filter(equipe_ref=e)
+          .select_related("cargo", "centro_custo", "supervisor")
+          .order_by("-status", "nome"))
+    for cme in qs:
+        fi = folha.get(cme.id, {})
+        custo = round(fi.get("custo_total") or 0, 2)
+        if cme.status == "ativo":
+            custo_total += custo
+            pagar_total += fi.get("total_pagar") or 0
+            cargo = cme.cargo.nome if cme.cargo_id else "(sem cargo)"
+            rc = resumo_cargos.setdefault(cargo, {"cargo": cargo, "n": 0, "custo": 0.0})
+            rc["n"] += 1
+            rc["custo"] = round(rc["custo"] + custo, 2)
+        pessoas.append({
+            "id": str(cme.id), "matricula": cme.matricula, "nome": cme.nome,
+            "cargo": cme.cargo.nome if cme.cargo_id else None,
+            "regime": cme.regime, "status": cme.status,
+            "supervisor": cme.supervisor.nome if cme.supervisor_id else None,
+            "salario_bruto": cme.salario_bruto,
+            "custo_total": custo or None,
+            "a_pagar": round(fi.get("total_pagar") or 0, 2) or None,
+            "ferias_dias": fi.get("ferias_dias") or 0,
+            "em_rescisao": bool(fi.get("em_rescisao")),
+        })
+
+    # onde a equipe está alocada + a receita que a participação representa
+    alocs = []
+    for a in (Alocacao.objects.filter(equipe=e)
+              .select_related("linha__centro", "centro")):
+        if a.linha:
+            pers = {p for p, f in (a.linha.periodos or {}).items() if (f or {}).get("bruto")}
+            ult = max(pers) if pers else None
+            receita = (a.linha.periodos or {}).get(ult, {}).get("bruto", 0) if ult else 0
+            alocs.append({"id": str(a.id), "tipo": "linha",
+                          "centro": a.linha.centro.nome, "centro_id": str(a.linha.centro_id),
+                          "destino": a.linha.nome, "area": a.linha.area,
+                          "percentual": a.percentual,
+                          "receita_participacao": round((receita or 0) * (a.percentual or 0) / 100, 2)})
+        else:
+            alocs.append({"id": str(a.id), "tipo": "centro",
+                          "centro": a.centro.nome, "centro_id": str(a.centro_id),
+                          "destino": a.centro.nome, "area": None,
+                          "percentual": a.percentual, "receita_participacao": 0})
+
+    ativos = [p for p in pessoas if p["status"] == "ativo"]
+    return Response({
+        "id": str(e.id), "nome": e.nome, "slug": e.slug, "grupo": e.grupo,
+        "centro_custo": e.centro_custo.nome if e.centro_custo_id else None,
+        "pessoas": pessoas,
+        "resumo_cargos": sorted(resumo_cargos.values(), key=lambda x: -x["custo"]),
+        "alocacoes": sorted(alocs, key=lambda x: -x["receita_participacao"]),
+        "totais": {
+            "ativos": len(ativos),
+            "custo_total": round(custo_total, 2),
+            "a_pagar": round(pagar_total, 2),
+            "receita_participacao": round(sum(a["receita_participacao"] for a in alocs), 2),
+        },
+        "competencia_custo": f"{comp.mes:02d}/{comp.ano}" if comp else None,
+        "custo_parcial": custo_parcial,
+    })

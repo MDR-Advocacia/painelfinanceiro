@@ -20,9 +20,42 @@ export interface EfEquipe {
   id: string; nome?: string; equipe?: string; slug: string; grupo: string;
   centro_custo: string | null; centro_custo_id?: string | null;
   alocada_em?: string[];
+  colaboradores?: number;
+}
+export interface EfCentroDetalhe {
+  id: string; nome: string; tipo: string;
+  periodo: string | null; meses: string[];
+  series: { mes: string; total: number; por_linha: Record<string, number> }[];
+  linhas: {
+    id: string; nome: string; area: string; ativo: boolean;
+    receita_ultimo: number; receita_acumulada: number; soma_percentual: number;
+    alocacoes: { id: string; equipe_id: string; equipe: string; percentual: number;
+                 custo_total: number | null; a_pagar: number | null; pessoas: number | null }[];
+  }[];
+  equipes: { id: string; nome: string; grupo: string; pessoas: number; custo_total: number;
+             linhas: { linha: string; percentual: number }[] }[];
+  receita_ultimo: number; receita_acumulada: number;
+  custo_total: number; a_pagar: number; margem: number;
+  competencia_custo: string | null; custo_parcial: boolean;
+}
+export interface EfEquipeDetalhe {
+  id: string; nome: string; slug: string; grupo: string; centro_custo: string | null;
+  pessoas: {
+    id: string; matricula: number; nome: string; cargo: string | null;
+    regime: string; status: string; supervisor: string | null;
+    salario_bruto: number; custo_total: number | null; a_pagar: number | null;
+    ferias_dias: number; em_rescisao: boolean;
+  }[];
+  resumo_cargos: { cargo: string; n: number; custo: number }[];
+  alocacoes: { id: string; tipo: "linha" | "centro"; centro: string; centro_id: string;
+               destino: string; area: string | null; percentual: number;
+               receita_participacao: number }[];
+  totais: { ativos: number; custo_total: number; a_pagar: number; receita_participacao: number };
+  competencia_custo: string | null; custo_parcial: boolean;
 }
 export interface EfEstrutura {
   periodo: string | null;
+  periodos?: string[];
   competencia_custo: string | null;
   custo_parcial: boolean;
   centros: EfCentro[];
@@ -40,6 +73,14 @@ async function j<T>(res: Response): Promise<T> {
 const H = () => ({ "Content-Type": "application/json", ...authHeaders() });
 
 export const estruturaApi = {
+  centroDetalhe: (id: string) =>
+    fetch(`${API_URL}/estrutura/centros/${id}/detalhe/`, { headers: authHeaders() })
+      .then((r) => j<EfCentroDetalhe>(r)),
+
+  equipeDetalhe: (id: string) =>
+    fetch(`${API_URL}/estrutura/equipes/${id}/detalhe/`, { headers: authHeaders() })
+      .then((r) => j<EfEquipeDetalhe>(r)),
+
   carregar: (periodo?: string) =>
     fetch(`${API_URL}/estrutura/${periodo ? `?periodo=${periodo}` : ""}`, { headers: authHeaders() })
       .then((r) => j<EfEstrutura>(r)),
@@ -123,6 +164,33 @@ export const EF_EVENTOS = {
 
 export function focarCentro(centroId: string) {
   window.dispatchEvent(new CustomEvent(EF_EVENTOS.foco, { detail: { centroId } }));
+}
+
+// ── Seleção das páginas de detalhe ──
+// A view do app é uma string; o id do centro/equipe aberto vive aqui (module
+// state + sessionStorage pra sobreviver ao refresh da página).
+let selecionado: { tipo: "centro" | "equipe"; id: string } | null = null;
+try {
+  const salvo = sessionStorage.getItem("ef_selecionado");
+  if (salvo) selecionado = JSON.parse(salvo);
+} catch { /* primeira visita */ }
+
+export function lerSelecionado() {
+  return selecionado;
+}
+function selecionar(tipo: "centro" | "equipe", id: string) {
+  selecionado = { tipo, id };
+  try { sessionStorage.setItem("ef_selecionado", JSON.stringify(selecionado)); } catch { /* sem storage */ }
+}
+/** Abre a página dedicada do centro. */
+export function abrirDetalheCentro(id: string, setView: (v: any) => void) {
+  selecionar("centro", id);
+  setView("estrutura-centro");
+}
+/** Abre a página dedicada da equipe. */
+export function abrirDetalheEquipe(id: string, setView: (v: any) => void) {
+  selecionar("equipe", id);
+  setView("estrutura-equipe");
 }
 export function abrirGerenciadorEquipes() {
   window.dispatchEvent(new CustomEvent(EF_EVENTOS.equipes));

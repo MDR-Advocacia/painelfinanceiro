@@ -10,6 +10,9 @@ import HonorariosBB from "./HonorariosBB";
 import { StrategicConfig } from "@/components/StrategicConfig";
 import Pessoal from "./Pessoal";
 import EstruturaView from "@/components/EstruturaView";
+import CentroDetalhe from "@/components/CentroDetalhe";
+import EquipeDetalhe from "@/components/EquipeDetalhe";
+import AdminEstrutura from "@/components/AdminEstrutura";
 import { SaveIndicator } from "@/components/SaveIndicator";
 import { usePermissions } from "@/hooks/usePermissions";
 import { ShieldAlert } from "lucide-react";
@@ -23,6 +26,9 @@ const VIEW_MODULO: Record<string, string> = {
   honorarios: "honorarios",
   "config-estrategica": "config-estrategica",
   estrutura: "estrutura",
+  "estrutura-centro": "estrutura",
+  "estrutura-equipe": "estrutura",
+  "estrutura-admin": "estrutura",
   sede: "sedes",
   setor: "setores",
   pessoal: "pessoal",
@@ -95,6 +101,9 @@ const MainContent = () => {
           {view === "config-estrategica" && <StrategicConfig />}
           {view === "pessoal" && <Pessoal />}
           {view === "estrutura" && <EstruturaView />}
+          {view === "estrutura-centro" && <CentroDetalhe />}
+          {view === "estrutura-equipe" && <EquipeDetalhe />}
+          {view === "estrutura-admin" && <AdminEstrutura />}
         </>
       )}
     </main>

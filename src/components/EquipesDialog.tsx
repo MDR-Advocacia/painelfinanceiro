@@ -27,9 +27,8 @@ const GRUPOS = [
   { v: "infra", label: "Infraestrutura" },
 ];
 
-export default function EquipesDialog({ editar, onClose }: {
-  editar: boolean; onClose: () => void;
-}) {
+/** A tabela em si — usada no diálogo e na página de Administração. */
+export function EquipesTabela({ editar }: { editar: boolean }) {
   const [equipes, setEquipes] = useState<EfEquipe[]>([]);
   const [carregando, setCarregando] = useState(true);
   const [novoNome, setNovoNome] = useState("");
@@ -61,18 +60,7 @@ export default function EquipesDialog({ editar, onClose }: {
   };
 
   return (
-    <Dialog open onOpenChange={(o) => !o && onClose()}>
-      <DialogContent className="max-h-[88vh] max-w-3xl overflow-y-auto">
-        <DialogHeader>
-          <DialogTitle className="flex items-center gap-2 text-base">
-            <Users className="h-4 w-4 text-[hsl(var(--dunatech-blue))]" /> Equipes
-          </DialogTitle>
-          <DialogDescription>
-            O vocabulário único da casa (o mesmo do Flow). O centro de custo do DP é de onde
-            desce o custo real da folha para as linhas de faturamento.
-          </DialogDescription>
-        </DialogHeader>
-
+    <div className="space-y-3">
         {carregando ? (
           <p className="py-8 text-center text-sm text-muted-foreground">
             <Loader2 className="mr-1 inline h-4 w-4 animate-spin" /> Carregando…
@@ -172,6 +160,26 @@ export default function EquipesDialog({ editar, onClose }: {
             </Button>
           </div>
         )}
+    </div>
+  );
+}
+
+export default function EquipesDialog({ editar, onClose }: {
+  editar: boolean; onClose: () => void;
+}) {
+  return (
+    <Dialog open onOpenChange={(o) => !o && onClose()}>
+      <DialogContent className="max-h-[88vh] max-w-3xl overflow-y-auto">
+        <DialogHeader>
+          <DialogTitle className="flex items-center gap-2 text-base">
+            <Users className="h-4 w-4 text-[hsl(var(--dunatech-blue))]" /> Equipes
+          </DialogTitle>
+          <DialogDescription>
+            O vocabulário único da casa (o mesmo do Flow). O centro de custo do DP é de onde
+            desce o custo real da folha para as linhas de faturamento.
+          </DialogDescription>
+        </DialogHeader>
+        <EquipesTabela editar={editar} />
       </DialogContent>
     </Dialog>
   );
