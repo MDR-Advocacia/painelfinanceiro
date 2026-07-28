@@ -32,3 +32,7 @@ dist/
 npm-debug.log*
 .vscode/
 .DS_Store
+# artefatos locais
+.playwright-cli/
+__pycache__/
+*.pyc
