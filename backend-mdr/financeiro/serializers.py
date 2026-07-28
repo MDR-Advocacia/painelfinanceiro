@@ -69,7 +69,8 @@ class CargoSerializer(serializers.ModelSerializer):
 
     class Meta:
         model = Cargo
-        fields = ['id', 'nome', 'modulos', 'created_at', 'updated_at']
+        fields = ['id', 'nome', 'modulos', 'escopo_unidades', 'escopo_areas',
+                  'escopo_ccs', 'escopo_setores', 'escopo_sedes', 'created_at', 'updated_at']
 
     def to_representation(self, instance):
         # devolve o dict COMPLETO (toda key da tabela MODULOS presente)

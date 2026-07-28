@@ -14,6 +14,7 @@ from rest_framework.decorators import api_view, permission_classes
 from rest_framework.response import Response
 
 from .dp_folha import calcular_item, elegiveis, tabela_fiscal_para
+from .dp_escopo import filtrar_colaboradores
 from .dp_views import audit
 from .models import DpCargo, DpCentroCusto, DpColaborador, DpCompetencia, DpTabelaFiscal
 from .serializers import DpTabelaFiscalSerializer
@@ -59,11 +60,14 @@ def _agrega(itens: list) -> dict:
     }
 
 
-def _quadro_base(ano: int, mes: int) -> list:
-    """Fotografia calculada do quadro atual pra competência de referência."""
+def _quadro_base(ano: int, mes: int, user=None) -> list:
+    """Fotografia calculada do quadro (respeita o escopo/subnucleo do cargo)."""
     comp = _FakeComp(ano, mes)
     fiscal = tabela_fiscal_para(ano, mes)
-    return [calcular_item(c, None, comp, fiscal) for c in elegiveis(comp)]
+    qs = elegiveis(comp)
+    if user is not None:
+        qs = filtrar_colaboradores(qs, user)
+    return [calcular_item(c, None, comp, fiscal) for c in qs]
 
 
 @api_view(["GET"])
@@ -88,7 +92,7 @@ def dp_projecao(request):
     crescimento = f("crescimento", 0.0)
 
     hoje = date.today()
-    base = _quadro_base(hoje.year, hoje.month)
+    base = _quadro_base(hoje.year, hoje.month, request.user)
     ag0 = _agrega(base)
 
     linhas, acumulado = [], {"decimo": 0.0, "ferias": 0.0, "terco": 0.0,
@@ -143,14 +147,14 @@ def dp_simular(request):
     comp = _FakeComp(hoje.year, hoje.month)
     fiscal = tabela_fiscal_para(hoje.year, hoje.month)
 
-    atual = _quadro_base(hoje.year, hoje.month)
+    atual = _quadro_base(hoje.year, hoje.month, request.user)
     ag_atual = _agrega(atual)
 
     # cenário: quadro atual (com reajuste) − desligados + admissões simuladas
     reaj = float(body.get("reajuste_percent") or 0)
     fora = set(str(x) for x in (body.get("desligamentos") or []))
     cenario = []
-    for c in elegiveis(comp):
+    for c in filtrar_colaboradores(elegiveis(comp), request.user):
         if str(c.id) in fora:
             continue
         if reaj:
@@ -237,3 +241,18 @@ class DpTabelaFiscalViewSet(viewsets.ModelViewSet):
                       "fgts": obj.fgts_percent, "multa": obj.multa_fgts_percent,
                       "patronal": obj.inss_patronal_percent,
                       "provisao_base": obj.provisao_base, "inss_faixas": obj.inss_faixas})
+
+
+@api_view(["GET"])
+@permission_classes([__import__("rest_framework.permissions", fromlist=["IsAuthenticated"]).IsAuthenticated])
+def dp_opcoes_escopo(request):
+    """Opções pro seletor de escopo (subnúcleos) no menu do ADM."""
+    from .models import Sede, Setor
+    return Response({
+        "unidades": sorted({u for u in DpColaborador.objects.values_list("unidade", flat=True) if u}),
+        "areas": sorted({a for a in DpColaborador.objects.values_list("area", flat=True) if a}),
+        "centros_custo": [{"id": str(c.id), "nome": c.nome}
+                          for c in DpCentroCusto.objects.all().order_by("codigo", "nome")],
+        "setores": [{"id": str(s.id), "nome": s.nome} for s in Setor.objects.all().order_by("nome")],
+        "sedes": [{"id": str(s.id), "nome": s.nome} for s in Sede.objects.all().order_by("nome")],
+    })

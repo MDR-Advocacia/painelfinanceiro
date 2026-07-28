@@ -17,9 +17,10 @@ import {
 import {
   Table, TableBody, TableCell, TableHead, TableHeader, TableRow,
 } from "@/components/ui/table";
+import { Ajuda, TituloAjuda } from "@/components/dp/Ajuda";
 import {
   type DpCargo, type DpCentroCusto, type DpTabelaFiscal,
-  exportApi, fmtBRL, previsaoApi,
+  exportApi, fmtBRL, fmtData, previsaoApi,
 } from "@/services/dp";
 
 export default function ParametrosTab({ ccs, cargos, editar, onMudou }: {
@@ -92,7 +93,9 @@ function FiscaisBloco({ editar }: { editar: boolean }) {
         <div className="flex flex-wrap items-start justify-between gap-3">
           <div>
             <CardTitle className="flex items-center gap-2 text-base">
-              <Sliders className="h-4 w-4 text-[hsl(var(--dunatech-blue))]" /> Parâmetros fiscais (por vigência)
+              <Sliders className="h-4 w-4 text-[hsl(var(--dunatech-blue))]" />
+              <TituloAjuda titulo="Parâmetros fiscais (por vigência)"
+                           ajuda="Percentuais e faixas usados no cálculo da folha. Cada conjunto vale a partir de uma data: ao virar o ano, crie uma nova vigência em vez de alterar a antiga — assim os meses já fechados continuam com os valores da época." />
             </CardTitle>
             <CardDescription>
               Cada competência usa a tabela vigente no seu mês — alterar aqui <b>não mexe</b> em meses já fechados.
@@ -103,7 +106,7 @@ function FiscaisBloco({ editar }: { editar: boolean }) {
               <SelectTrigger className="h-9 w-[190px] text-xs"><SelectValue placeholder="Vigência…" /></SelectTrigger>
               <SelectContent>
                 {lista.map((t) => (
-                  <SelectItem key={t.id} value={t.id}>Vigente desde {t.vigencia_inicio}</SelectItem>
+                  <SelectItem key={t.id} value={t.id}>Vigente desde {fmtData(t.vigencia_inicio)}</SelectItem>
                 ))}
               </SelectContent>
             </Select>
@@ -120,7 +123,11 @@ function FiscaisBloco({ editar }: { editar: boolean }) {
           <div className="grid gap-4 lg:grid-cols-2">
             <div>
               <div className="mb-2 text-xs font-semibold text-muted-foreground">
-                Tabela INSS progressiva (faixa · alíquota · parcela a deduzir)
+                <span className="inline-flex items-center gap-1.5">
+                  Tabela do INSS (faixa · alíquota · parcela a deduzir)
+                  <Ajuda titulo="Tabela do INSS"
+                         texto="O desconto do INSS é progressivo: aplica-se a alíquota da faixa em que o salário se enquadra e subtrai-se a parcela a deduzir. A última linha é o teto." />
+                </span>
               </div>
               <Table>
                 <TableHeader>

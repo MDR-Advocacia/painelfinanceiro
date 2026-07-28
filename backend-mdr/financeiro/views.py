@@ -58,10 +58,18 @@ class SedeViewSet(viewsets.ModelViewSet):
     serializer_class = SedeSerializer
     permission_classes = [modulo_permission(read_any=_LEITORES_AGREGADOS, write="sedes")]
 
+    def get_queryset(self):
+        from .dp_escopo import filtrar_sedes
+        return filtrar_sedes(super().get_queryset(), self.request.user)
+
 class SetorViewSet(viewsets.ModelViewSet):
     queryset = Setor.objects.all()
     serializer_class = SetorSerializer
     permission_classes = [modulo_permission(read_any=_LEITORES_AGREGADOS, write="setores")]
+
+    def get_queryset(self):
+        from .dp_escopo import filtrar_setores
+        return filtrar_setores(super().get_queryset(), self.request.user)
 
 class VpdConfigViewSet(viewsets.ModelViewSet):
     queryset = VpdConfig.objects.all()

@@ -22,6 +22,8 @@ import { useNavigate } from "react-router-dom";
 import { toast } from "sonner";
 import { API_URL, ADMIN_URL, authHeaders, useAuth } from "@/hooks/useAuth";
 import { invalidatePermissionsCache } from "@/hooks/usePermissions";
+import EscopoCargoDialog from "@/components/dp/EscopoCargoDialog";
+import { Ajuda, TituloAjuda } from "@/components/dp/Ajuda";
 
 interface AdminUser {
   id: number;
@@ -43,7 +45,17 @@ interface Cargo {
   nome: string;
   // RBAC v2: níveis por módulo (boolean = legado, true→editar)
   modulos: Record<string, Nivel | boolean>;
+  // RBAC v3: alcance (subnúcleos) — vazio = sem restrição
+  escopo_unidades?: string[];
+  escopo_areas?: string[];
+  escopo_ccs?: string[];
+  escopo_setores?: string[];
+  escopo_sedes?: string[];
 }
+
+const contaEscopo = (c: Cargo) =>
+  (c.escopo_unidades?.length ?? 0) + (c.escopo_areas?.length ?? 0) +
+  (c.escopo_ccs?.length ?? 0) + (c.escopo_setores?.length ?? 0) + (c.escopo_sedes?.length ?? 0);
 
 const nivelDe = (v: Nivel | boolean | undefined): Nivel =>
   v === true || v === "editar" ? "editar" : v === "ver" ? "ver" : "nada";
@@ -71,6 +83,7 @@ export default function UserManagement() {
   const [savingId, setSavingId] = useState<number | null>(null);
   const [savingCargo, setSavingCargo] = useState<string | null>(null);
   const [novoCargo, setNovoCargo] = useState("");
+  const [escopoCargo, setEscopoCargo] = useState<Cargo | null>(null);
 
   const carregar = async () => {
     setLoading(true);
@@ -211,8 +224,8 @@ export default function UserManagement() {
               </div>
             ) : (
               <>
-                <div className="overflow-x-auto">
-                  <Table>
+                <div className="-mx-2 overflow-x-auto px-2">
+                  <Table className="min-w-[720px]">
                     <TableHeader>
                       <TableRow>
                         <TableHead className="min-w-[160px] text-xs">Cargo</TableHead>
@@ -221,6 +234,10 @@ export default function UserManagement() {
                             {m.label.split(" (")[0]}
                           </TableHead>
                         ))}
+                        <TableHead className="text-center text-[11px]">
+                          <TituloAjuda titulo="Alcance"
+                                       ajuda="Até onde o cargo enxerga dentro dos módulos: pode ser limitado a unidades, áreas, centros de custo, sedes ou setores específicos. Sem restrição = vê tudo." />
+                        </TableHead>
                         <TableHead className="w-10" />
                       </TableRow>
                     </TableHeader>
@@ -251,6 +268,23 @@ export default function UserManagement() {
                               </TableCell>
                             );
                           })}
+                          <TableCell className="text-center">
+                            {(() => {
+                              const n = contaEscopo(c);
+                              return (
+                                <button
+                                  type="button"
+                                  onClick={() => setEscopoCargo(c)}
+                                  title={n ? `Restrito a ${n} recorte(s) — clique para ajustar` : "Sem restrição — clique para limitar"}
+                                  className={`rounded-full border px-2 py-0.5 text-[10px] font-medium transition-colors ${
+                                    n ? "border-amber-300 bg-amber-50 text-amber-800 hover:bg-amber-100"
+                                      : "border-muted-foreground/25 text-muted-foreground hover:border-[hsl(var(--dunatech-blue))] hover:text-[hsl(var(--dunatech-blue))]"}`}
+                                >
+                                  {n ? `${n} recorte(s)` : "Tudo"}
+                                </button>
+                              );
+                            })()}
+                          </TableCell>
                           <TableCell>
                             <button
                               onClick={() => excluirCargo(c)}
@@ -400,6 +434,18 @@ export default function UserManagement() {
             )}
           </CardContent>
         </Card>
+
+        {escopoCargo && (
+          <EscopoCargoDialog
+            cargo={escopoCargo}
+            onClose={() => setEscopoCargo(null)}
+            onSalvou={(atualizado) => {
+              setCargos((prev) => prev.map((c) => (c.id === atualizado.id ? { ...c, ...atualizado } : c)));
+              invalidatePermissionsCache();
+              setEscopoCargo(null);
+            }}
+          />
+        )}
 
         <p className="text-center">
           <a

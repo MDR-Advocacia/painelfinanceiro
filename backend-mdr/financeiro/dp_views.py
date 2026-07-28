@@ -12,6 +12,8 @@ from rest_framework.response import Response
 from .models import (
     DP_MATRICULA_BASE, DpAuditLog, DpCargo, DpCentroCusto, DpColaborador, DpEvento,
 )
+from .dp_audit import humanizar
+from .dp_escopo import filtrar_colaboradores
 from .serializers import DpCargoSerializer, DpCentroCustoSerializer, DpColaboradorSerializer
 from .views import modulo_permission
 
@@ -95,7 +97,7 @@ class DpColaboradorViewSet(viewsets.ModelViewSet):
     permission_classes = _PERM
 
     def list(self, request, *args, **kwargs):
-        qs = self.get_queryset()
+        qs = filtrar_colaboradores(self.get_queryset(), request.user)
         busca = (request.query_params.get("busca") or "").strip()
         if busca:
             f = Q(nome__icontains=busca) | Q(cpf__icontains=busca)
@@ -192,7 +194,7 @@ class DpColaboradorViewSet(viewsets.ModelViewSet):
     @action(detail=False, methods=["get"])
     def resumo(self, request):
         """KPIs do quadro pro topo da tela."""
-        qs = DpColaborador.objects.all()
+        qs = filtrar_colaboradores(DpColaborador.objects.all(), request.user)
         ativos = qs.filter(status="ativo")
         por_regime = {r: ativos.filter(regime=r).count() for r, _ in
                       [("estagiario", ""), ("clt", ""), ("associado", ""), ("pj", "")]}
@@ -216,12 +218,9 @@ def dp_audit_list(request):
         offset = max(int(request.query_params.get("offset", 0)), 0)
     except ValueError:
         limit, offset = 50, 0
-    return Response({"total": total, "items": [
-        {"usuario": a.usuario, "acao": a.acao, "entidade": a.entidade,
-         "entidade_id": a.entidade_id, "antes": a.antes, "depois": a.depois,
-         "created_at": a.created_at.isoformat()}
-        for a in qs[offset:offset + limit]
-    ]})
+    # devolve TRADUZIDO (linguagem humana) — a UI nao mostra JSON
+    return Response({"total": total,
+                     "items": [humanizar(a) for a in qs[offset:offset + limit]]})
 
 
 # ─────────────────────────── IMPORTADOR DA PLANILHA ───────────────────────────

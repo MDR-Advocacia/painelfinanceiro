@@ -27,9 +27,11 @@ export interface DpEvento {
 export interface DpResumo {
   ativos: number; inativos: number; por_regime: Record<string, number>;
 }
+export interface DpAuditMudanca { campo: string; de: string | null; para: string }
 export interface DpAuditItem {
-  usuario: string; acao: string; entidade: string; entidade_id: string;
-  antes: unknown; depois: unknown; created_at: string;
+  id: number; usuario: string; quando: string; quando_br: string;
+  acao: string; verbo: string; tom: string; entidade: string; alvo: string;
+  titulo: string; mudancas: DpAuditMudanca[]; resumo: string;
 }
 
 async function j<T>(res: Response): Promise<T> {
@@ -44,7 +46,7 @@ const H = () => ({ "Content-Type": "application/json", ...authHeaders() });
 export const dpApi = {
   resumo: () => fetch(`${API_URL}/dp/colaboradores/resumo/`, { headers: authHeaders() }).then((r) => j<DpResumo>(r)),
 
-  listar: (p: { busca?: string; regime?: string; status?: string; cc?: string; limit?: number; offset?: number }) => {
+  listar: (p: { busca?: string; regime?: string; status?: string; cc?: string; unidade?: string; limit?: number; offset?: number }) => {
     const qs = new URLSearchParams();
     Object.entries(p).forEach(([k, v]) => { if (v !== undefined && v !== "") qs.set(k, String(v)); });
     return fetch(`${API_URL}/dp/colaboradores/?${qs}`, { headers: authHeaders() })
@@ -146,6 +148,18 @@ export interface DpDashboard {
   custo_competencia: { mes: string; status: string; headcount: number; folha: number; provisoes: number; patronal: number; custo_total: number } | null;
   serie_mov: { mes: string; admissoes: number; desligamentos: number }[];
   serie_custo: { mes: string; status: string; headcount: number; folha: number; provisoes: number; patronal: number; custo_total: number }[];
+  // análises extras
+  por_unidade: { nome: string; quantidade: number }[];
+  por_area: { nome: string; quantidade: number }[];
+  por_cc_qtd: { nome: string; quantidade: number; salario_medio: number }[];
+  custo_por_cc: { nome: string; quantidade: number; custo: number; custo_medio: number }[];
+  custo_por_regime: { regime: string; quantidade: number; custo: number; custo_medio: number }[];
+  custo_medio_pessoa: number;
+  participacao: { folha?: number; provisoes?: number; patronal?: number };
+  variacao_custo: { percent: number; valor: number } | null;
+  tempo_casa: { faixa: string; quantidade: number }[];
+  alertas: { tipo: string; texto: string }[];
+  folha_media_salario: number;
 }
 
 async function baixar(url: string, nomePadrao: string) {
@@ -275,10 +289,41 @@ export const exportApi = {
   },
 };
 
+export interface DpOpcoesEscopo {
+  unidades: string[]; areas: string[];
+  centros_custo: { id: string; nome: string }[];
+  setores: { id: string; nome: string }[];
+  sedes: { id: string; nome: string }[];
+}
+export const escopoApi = {
+  opcoes: () => fetch(`${API_URL}/dp/opcoes-escopo/`, { headers: authHeaders() }).then((r) => j<DpOpcoesEscopo>(r)),
+};
+
 export const REGIME_LABELS: Record<string, string> = {
   estagiario: "Estagiário (TCE)", clt: "CLT", associado: "Associado", pj: "PJ",
 };
 export const fmtBRL = (v: number) =>
   new Intl.NumberFormat("pt-BR", { style: "currency", currency: "BRL" }).format(v || 0);
 export const fmtData = (iso: string | null) =>
-  iso ? new Date(iso + "T12:00:00").toLocaleDateString("pt-BR") : "—";
+  iso ? new Date(iso.slice(0, 10) + "T12:00:00").toLocaleDateString("pt-BR") : "—";
+
+/** "2026-07" -> "jul/2026" (nunca mostrar aaaa-mm cru) */
+export const fmtCompetencia = (mesAno: string) => {
+  const [a, m] = (mesAno || "").split("-");
+  const nomes = ["jan", "fev", "mar", "abr", "mai", "jun", "jul", "ago", "set", "out", "nov", "dez"];
+  const i = Number(m) - 1;
+  return nomes[i] ? `${nomes[i]}/${a}` : mesAno;
+};
+
+/** "2026-07" -> "Julho de 2026" */
+export const fmtCompetenciaLonga = (mesAno: string) => {
+  const [a, m] = (mesAno || "").split("-");
+  const nomes = ["Janeiro", "Fevereiro", "Março", "Abril", "Maio", "Junho",
+    "Julho", "Agosto", "Setembro", "Outubro", "Novembro", "Dezembro"];
+  const i = Number(m) - 1;
+  return nomes[i] ? `${nomes[i]} de ${a}` : mesAno;
+};
+
+export const STATUS_COMPETENCIA: Record<string, string> = {
+  aberta: "Aberta", em_revisao: "Em revisão", fechada: "Fechada",
+};

@@ -96,12 +96,23 @@ class Cargo(models.Model):
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     nome = models.CharField(max_length=100, unique=True)
     modulos = models.JSONField(default=dict, blank=True)
+    # ── ESCOPO (subnúcleos): restringe o cargo a certos recortes.
+    # LISTA VAZIA = sem restrição (enxerga tudo do módulo liberado).
+    escopo_unidades = models.JSONField(default=list, blank=True)  # nomes de unidades (DP)
+    escopo_areas = models.JSONField(default=list, blank=True)     # ADM/TI/JUR/DIR (DP)
+    escopo_ccs = models.JSONField(default=list, blank=True)       # ids de DpCentroCusto
+    escopo_setores = models.JSONField(default=list, blank=True)   # ids de Setor (financeiro)
+    escopo_sedes = models.JSONField(default=list, blank=True)     # ids de Sede (financeiro)
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 
     class Meta:
         db_table = 'cargos'
         ordering = ['nome']
+
+    def tem_escopo(self) -> bool:
+        return any([self.escopo_unidades, self.escopo_areas, self.escopo_ccs,
+                    self.escopo_setores, self.escopo_sedes])
 
     def __str__(self):
         return self.nome

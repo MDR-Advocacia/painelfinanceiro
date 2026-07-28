@@ -24,7 +24,8 @@ import {
   Table, TableBody, TableCell, TableHead, TableHeader, TableRow,
 } from "@/components/ui/table";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import DashboardDpTab from "@/components/dp/DashboardDpTab";
+import DashboardDpTab, { type FiltroQuadro } from "@/components/dp/DashboardDpTab";
+import { Ajuda, TituloAjuda } from "@/components/dp/Ajuda";
 import ParametrosTab from "@/components/dp/ParametrosTab";
 import SimulacoesTab from "@/components/dp/SimulacoesTab";
 import FolhaTab from "@/components/dp/FolhaTab";
@@ -52,6 +53,10 @@ const EVENTO_LABEL: Record<string, string> = {
 export default function Pessoal() {
   const { podeEditar } = usePermissions();
   const editar = podeEditar("pessoal");
+  // aba controlada: o painel manda abrir o Quadro já filtrado (drill-down)
+  const [aba, setAba] = useState("dash");
+  const [filtroQuadro, setFiltroQuadro] = useState<FiltroQuadro | null>(null);
+  const [rotuloFiltro, setRotuloFiltro] = useState("");
 
   const [resumo, setResumo] = useState<DpResumo | null>(null);
   const [ccs, setCcs] = useState<DpCentroCusto[]>([]);
@@ -74,7 +79,7 @@ export default function Pessoal() {
           </p>
         </div>
         {resumo && (
-          <div className="flex flex-wrap gap-3">
+          <div className="grid w-full grid-cols-3 gap-2 sm:w-auto sm:grid-cols-6">
             <KPI label="Ativos" valor={resumo.ativos} />
             <KPI label="CLT" valor={resumo.por_regime.clt} />
             <KPI label="Estagiários" valor={resumo.por_regime.estagiario} />
@@ -85,8 +90,8 @@ export default function Pessoal() {
         )}
       </div>
 
-      <Tabs defaultValue="dash">
-        <TabsList>
+      <Tabs value={aba} onValueChange={setAba}>
+        <TabsList className="flex h-auto w-full flex-wrap justify-start gap-1">
           <TabsTrigger value="dash" className="gap-2"><LayoutDashboard className="h-4 w-4" /> Dashboard</TabsTrigger>
           <TabsTrigger value="quadro" className="gap-2"><Users className="h-4 w-4" /> Quadro</TabsTrigger>
           <TabsTrigger value="folha" className="gap-2"><Wallet className="h-4 w-4" /> Folha</TabsTrigger>
@@ -99,10 +104,16 @@ export default function Pessoal() {
         </TabsList>
 
         <TabsContent value="dash" className="mt-4">
-          <DashboardDpTab />
+          <DashboardDpTab onAbrirQuadro={(f, rotulo) => {
+            setFiltroQuadro(f);
+            setRotuloFiltro(rotulo);
+            setAba("quadro");
+          }} />
         </TabsContent>
         <TabsContent value="quadro" className="mt-4">
-          <QuadroTab ccs={ccs} cargos={cargos} editar={editar} onMudou={carregarBase} />
+          <QuadroTab ccs={ccs} cargos={cargos} editar={editar} onMudou={carregarBase}
+                     filtroExterno={filtroQuadro} rotuloFiltro={rotuloFiltro}
+                     onLimparFiltroExterno={() => { setFiltroQuadro(null); setRotuloFiltro(""); }} />
         </TabsContent>
         <TabsContent value="folha" className="mt-4">
           <FolhaTab editar={editar} />
@@ -137,13 +148,27 @@ function KPI({ label, valor, tom }: { label: string; valor: number; tom?: "rose"
 
 /* ─────────────────────────── QUADRO ─────────────────────────── */
 
-function QuadroTab({ ccs, cargos, editar, onMudou }: {
+function QuadroTab({ ccs, cargos, editar, onMudou, filtroExterno, rotuloFiltro, onLimparFiltroExterno }: {
   ccs: DpCentroCusto[]; cargos: DpCargo[]; editar: boolean; onMudou: () => void;
+  filtroExterno?: FiltroQuadro | null; rotuloFiltro?: string;
+  onLimparFiltroExterno?: () => void;
 }) {
   const [busca, setBusca] = useState("");
   const [regime, setRegime] = useState(TODOS);
   const [status, setStatus] = useState("ativo");
   const [cc, setCc] = useState(TODOS);
+  const [unidade, setUnidade] = useState("");
+
+  // drill-down do painel: aplica o filtro que veio de lá
+  useEffect(() => {
+    if (!filtroExterno) return;
+    setRegime(filtroExterno.regime ?? TODOS);
+    setStatus(filtroExterno.status ?? TODOS);
+    setCc(filtroExterno.cc ?? TODOS);
+    setUnidade(filtroExterno.unidade ?? "");
+    setBusca(filtroExterno.busca ?? "");
+    setPagina(0);
+  }, [filtroExterno]);
   const [pagina, setPagina] = useState(0);
   const [total, setTotal] = useState(0);
   const [items, setItems] = useState<DpColaborador[]>([]);
@@ -155,12 +180,12 @@ function QuadroTab({ ccs, cargos, editar, onMudou }: {
     setLoading(true);
     dpApi.listar({
       busca, regime: regime === TODOS ? "" : regime, status: status === TODOS ? "" : status,
-      cc: cc === TODOS ? "" : cc, limit: PAGE, offset: pagina * PAGE,
+      cc: cc === TODOS ? "" : cc, unidade, limit: PAGE, offset: pagina * PAGE,
     })
       .then((r) => { setItems(r.items); setTotal(r.total); })
       .catch((e) => toast.error(e.message))
       .finally(() => setLoading(false));
-  }, [busca, regime, status, cc, pagina]);
+  }, [busca, regime, status, cc, unidade, pagina]);
   useEffect(() => { carregar(); }, [carregar]);
 
   const totalPaginas = Math.max(1, Math.ceil(total / PAGE));
@@ -168,6 +193,21 @@ function QuadroTab({ ccs, cargos, editar, onMudou }: {
   return (
     <Card className="glass-card border-0">
       <CardContent className="space-y-3 pt-5">
+        {(rotuloFiltro || unidade) && (
+          <div className="flex flex-wrap items-center gap-2 rounded-lg border border-[hsl(var(--dunatech-blue))]/30 bg-[hsl(var(--dunatech-blue))]/5 px-3 py-2 text-xs">
+            <span className="font-medium">
+              Filtrado pelo painel{rotuloFiltro ? `: ${rotuloFiltro}` : ""}
+              {unidade ? ` · unidade ${unidade}` : ""}
+            </span>
+            <button className="ml-auto text-[hsl(var(--dunatech-blue))] hover:underline"
+                    onClick={() => {
+                      setRegime(TODOS); setStatus("ativo"); setCc(TODOS); setUnidade(""); setBusca("");
+                      onLimparFiltroExterno?.();
+                    }}>
+              limpar filtro
+            </button>
+          </div>
+        )}
         <div className="flex flex-wrap items-center gap-2">
           <div className="relative">
             <Search className="absolute left-2.5 top-2.5 h-4 w-4 text-muted-foreground" />
@@ -222,14 +262,22 @@ function QuadroTab({ ccs, cargos, editar, onMudou }: {
           <Table>
             <TableHeader>
               <TableRow>
-                <TableHead className="text-xs">Matrícula</TableHead>
+                <TableHead className="text-xs">
+                  <TituloAjuda titulo="Matrícula" ajuda="Número interno do colaborador. A faixa indica o tipo de contrato: 10xx estagiário, 20xx CLT, 30xx associado, 40xx PJ." />
+                </TableHead>
                 <TableHead className="text-xs">Nome</TableHead>
-                <TableHead className="text-xs">Regime</TableHead>
-                <TableHead className="text-xs">Cargo</TableHead>
-                <TableHead className="text-xs">Centro de Custo</TableHead>
-                <TableHead className="text-xs">Unidade</TableHead>
-                <TableHead className="text-right text-xs">Salário</TableHead>
-                <TableHead className="text-center text-xs">Status</TableHead>
+                <TableHead className="text-xs">
+                  <TituloAjuda titulo="Contrato" ajuda="Tipo de vínculo: Estagiário (TCE), CLT, Associado ou PJ. Define quais encargos e provisões se aplicam." />
+                </TableHead>
+                <TableHead className="hidden text-xs md:table-cell">Cargo</TableHead>
+                <TableHead className="hidden text-xs lg:table-cell">
+                  <TituloAjuda titulo="Centro de custo" ajuda="Setor ou carteira que recebe o custo desta pessoa no rateio mensal." />
+                </TableHead>
+                <TableHead className="hidden text-xs lg:table-cell">Unidade</TableHead>
+                <TableHead className="text-right text-xs">
+                  <TituloAjuda titulo="Salário bruto" ajuda="Valor do salário antes dos descontos (INSS, vale-transporte)." />
+                </TableHead>
+                <TableHead className="text-center text-xs">Situação</TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
@@ -242,9 +290,9 @@ function QuadroTab({ ccs, cargos, editar, onMudou }: {
                       {c.regime_label}
                     </span>
                   </TableCell>
-                  <TableCell className="max-w-[170px] truncate text-xs">{c.cargo_nome || "—"}</TableCell>
-                  <TableCell className="max-w-[180px] truncate text-xs">{c.centro_custo_nome}</TableCell>
-                  <TableCell className="text-xs">{c.unidade || "—"}</TableCell>
+                  <TableCell className="hidden max-w-[170px] truncate text-xs md:table-cell">{c.cargo_nome || "—"}</TableCell>
+                  <TableCell className="hidden max-w-[180px] truncate text-xs lg:table-cell">{c.centro_custo_nome}</TableCell>
+                  <TableCell className="hidden text-xs lg:table-cell">{c.unidade || "—"}</TableCell>
                   <TableCell className="text-right font-mono text-xs">{fmtBRL(c.salario_bruto)}</TableCell>
                   <TableCell className="text-center">
                     {c.status === "ativo"
@@ -663,6 +711,20 @@ function ImportarTab({ onImportou }: { onImportou: () => void }) {
 
 /* ─────────────────────────── AUDITORIA ─────────────────────────── */
 
+const TOM_UI: Record<string, { cls: string; rotulo: string }> = {
+  criar: { cls: "bg-emerald-100 text-emerald-700", rotulo: "Cadastro" },
+  editar: { cls: "bg-sky-100 text-sky-700", rotulo: "Alteração" },
+  sair: { cls: "bg-rose-100 text-rose-700", rotulo: "Desligamento" },
+  importar: { cls: "bg-violet-100 text-violet-700", rotulo: "Importação" },
+  simular: { cls: "bg-amber-100 text-amber-800", rotulo: "Simulação" },
+  abrir: { cls: "bg-sky-100 text-sky-700", rotulo: "Competência" },
+  recalcular: { cls: "bg-slate-100 text-slate-700", rotulo: "Recálculo" },
+  lancar: { cls: "bg-indigo-100 text-indigo-700", rotulo: "Lançamento" },
+  revisao: { cls: "bg-amber-100 text-amber-800", rotulo: "Revisão" },
+  fechar: { cls: "bg-emerald-100 text-emerald-700", rotulo: "Fechamento" },
+  reabrir: { cls: "bg-rose-100 text-rose-700", rotulo: "Reabertura" },
+};
+
 function AuditoriaTab() {
   const [pagina, setPagina] = useState(0);
   const [total, setTotal] = useState(0);
@@ -681,41 +743,69 @@ function AuditoriaTab() {
   return (
     <Card className="glass-card border-0">
       <CardHeader>
-        <div className="flex items-center justify-between gap-2">
-          <CardTitle className="text-base">Trilha de auditoria</CardTitle>
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <CardTitle className="text-base">
+            <TituloAjuda titulo="Histórico de alterações"
+                         ajuda="Registro permanente de tudo que foi feito no módulo: quem fez, quando, o que mudou e de qual valor para qual valor. Não pode ser apagado nem editado." />
+          </CardTitle>
           <Button size="sm" variant="outline" className="h-7 gap-1 text-xs"
                   onClick={() => exportApi.auditoria().catch((e) => toast.error(e.message))}>
             <Download className="h-3.5 w-3.5" /> Excel
           </Button>
         </div>
-        <CardDescription>Toda escrita do módulo, imutável: quem, quando e o antes→depois.</CardDescription>
+        <CardDescription>Cada linha conta o que aconteceu, em português.</CardDescription>
       </CardHeader>
       <CardContent className="space-y-3">
         {loading ? (
           <p className="py-6 text-center text-sm text-muted-foreground">
             <Loader2 className="mr-1 inline h-4 w-4 animate-spin" /> Carregando…
           </p>
+        ) : items.length === 0 ? (
+          <p className="py-8 text-center text-sm text-muted-foreground">Nada registrado ainda.</p>
         ) : (
-          <div className="space-y-1.5">
-            {items.map((a, i) => (
-              <details key={i} className="rounded-md border bg-card/60 px-3 py-2 text-xs">
-                <summary className="flex cursor-pointer flex-wrap items-center gap-2">
-                  <span className="font-mono text-muted-foreground">
-                    {new Date(a.created_at).toLocaleString("pt-BR", { dateStyle: "short", timeStyle: "short" })}
-                  </span>
-                  <Badge variant="outline" className="text-[10px]">{a.acao}</Badge>
-                  <span className="font-medium">{a.entidade}</span>
-                  <span className="ml-auto text-muted-foreground">{a.usuario}</span>
-                </summary>
-                <pre className="mt-2 max-h-40 overflow-auto rounded bg-muted/50 p-2 text-[10px]">
-                  {JSON.stringify({ antes: a.antes, depois: a.depois }, null, 2)}
-                </pre>
-              </details>
-            ))}
-            {items.length === 0 && <p className="py-6 text-center text-sm text-muted-foreground">Nada registrado ainda.</p>}
-          </div>
+          <ol className="relative space-y-3 border-l pl-4">
+            {items.map((a) => {
+              const ui = TOM_UI[a.tom] ?? TOM_UI.editar;
+              return (
+                <li key={a.id} className="relative">
+                  <span className="absolute -left-[21px] top-1.5 h-2.5 w-2.5 rounded-full bg-[hsl(var(--dunatech-blue))] ring-2 ring-background" />
+                  <div className="rounded-lg border bg-card/60 p-3">
+                    <div className="flex flex-wrap items-center gap-2">
+                      <span className={`rounded-full px-2 py-0.5 text-[10px] font-medium ${ui.cls}`}>{ui.rotulo}</span>
+                      <span className="text-sm font-medium">{a.titulo}</span>
+                      <span className="ml-auto whitespace-nowrap text-[11px] text-muted-foreground">
+                        {a.quando_br}
+                      </span>
+                    </div>
+                    <div className="mt-1 text-[11px] text-muted-foreground">
+                      por <span className="font-medium text-foreground">{a.usuario}</span>
+                      {a.resumo ? ` · ${a.resumo}` : ""}
+                    </div>
+                    {a.mudancas.length > 0 && (
+                      <ul className="mt-2 space-y-1 border-t pt-2 text-xs">
+                        {a.mudancas.map((m, i) => (
+                          <li key={i} className="flex flex-wrap items-baseline gap-1.5">
+                            <span className="font-medium">{m.campo}:</span>
+                            {m.de ? (
+                              <>
+                                <span className="rounded bg-rose-50 px-1 text-rose-700 line-through">{m.de}</span>
+                                <span className="text-muted-foreground">→</span>
+                                <span className="rounded bg-emerald-50 px-1 font-medium text-emerald-700">{m.para}</span>
+                              </>
+                            ) : (
+                              <span className="rounded bg-emerald-50 px-1 font-medium text-emerald-700">{m.para}</span>
+                            )}
+                          </li>
+                        ))}
+                      </ul>
+                    )}
+                  </div>
+                </li>
+              );
+            })}
+          </ol>
         )}
-        <div className="flex items-center justify-between text-xs text-muted-foreground">
+        <div className="flex flex-wrap items-center justify-between gap-2 text-xs text-muted-foreground">
           <span>Página {pagina + 1} de {totalPaginas} · {total} registro(s)</span>
           <div className="flex gap-1.5">
             <Button size="sm" variant="outline" className="h-7 text-xs" disabled={pagina === 0}

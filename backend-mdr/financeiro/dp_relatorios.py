@@ -13,6 +13,8 @@ from django.http import HttpResponse
 from rest_framework.decorators import api_view, permission_classes
 from rest_framework.response import Response
 
+from .dp_audit import humanizar
+from .dp_escopo import filtrar_colaboradores, filtrar_folha
 from .models import DpCentroCusto, DpColaborador, DpCompetencia, DpEvento
 from .views import modulo_permission
 
@@ -29,7 +31,7 @@ NAVY = "0A1940"
 @permission_classes(_PERM)
 def dp_dashboard(request):
     hoje = date.today()
-    ativos = DpColaborador.objects.filter(status="ativo")
+    ativos = filtrar_colaboradores(DpColaborador.objects.filter(status="ativo"), request.user)
     headcount = ativos.count()
     por_regime = dict(ativos.values_list("regime").annotate(n=Count("id")))
 
@@ -62,11 +64,106 @@ def dp_dashboard(request):
     ult = serie_custo[-1] if serie_custo else None
     mov_mes = serie_mov[-1] if serie_mov else {"admissoes": 0, "desligamentos": 0}
     turnover = round(mov_mes["desligamentos"] / headcount * 100, 2) if headcount else 0.0
+
+    # ── análises extras (mais profundidade no painel) ──
+    from django.db.models import Avg
+
+    por_unidade = [{"nome": r["unidade"] or "(sem unidade)", "quantidade": r["n"]}
+                   for r in ativos.values("unidade").annotate(n=Count("id")).order_by("-n")]
+    por_area = [{"nome": r["area"] or "(sem área)", "quantidade": r["n"]}
+                for r in ativos.values("area").annotate(n=Count("id")).order_by("-n")]
+    por_cc_qtd = [{"nome": r["centro_custo__nome"] or "(sem centro de custo)",
+                   "quantidade": r["n"],
+                   "salario_medio": round(r["media"] or 0, 2)}
+                  for r in ativos.values("centro_custo__nome")
+                  .annotate(n=Count("id"), media=Avg("salario_bruto")).order_by("-n")]
+
+    # custo por centro de custo (da última competência calculada)
+    custo_por_cc, custo_medio_pessoa, participacao = [], 0.0, {}
+    comp_ult = DpCompetencia.objects.order_by("-ano", "-mes").first()
+    if comp_ult:
+        itens_ult = filtrar_folha(comp_ult.itens.all(), request.user)
+        custo_por_cc = [{"nome": r["centro_custo_nome"], "quantidade": r["n"],
+                         "custo": round(r["custo"] or 0, 2),
+                         "custo_medio": round((r["custo"] or 0) / r["n"], 2) if r["n"] else 0}
+                        for r in itens_ult.values("centro_custo_nome")
+                        .annotate(n=Count("id"), custo=Sum("custo_total")).order_by("-custo")]
+        ag_ult = itens_ult.aggregate(pagar=Sum("total_pagar"), prov=Sum("custo_provisoes"),
+                                     pat=Sum("inss_patronal"), custo=Sum("custo_total"),
+                                     n=Count("id"))
+        total_ult = ag_ult["custo"] or 0
+        custo_medio_pessoa = round(total_ult / ag_ult["n"], 2) if ag_ult["n"] else 0
+        if total_ult:
+            participacao = {
+                "folha": round((ag_ult["pagar"] or 0) / total_ult * 100, 1),
+                "provisoes": round((ag_ult["prov"] or 0) / total_ult * 100, 1),
+                "patronal": round((ag_ult["pat"] or 0) / total_ult * 100, 1),
+            }
+
+    # custo médio por tipo de contrato (da última competência)
+    custo_por_regime = []
+    if comp_ult:
+        for r in (filtrar_folha(comp_ult.itens.all(), request.user).values("regime")
+                  .annotate(n=Count("id"), custo=Sum("custo_total")).order_by("-custo")):
+            custo_por_regime.append({
+                "regime": r["regime"], "quantidade": r["n"],
+                "custo": round(r["custo"] or 0, 2),
+                "custo_medio": round((r["custo"] or 0) / r["n"], 2) if r["n"] else 0})
+
+    # variação do custo vs mês anterior
+    variacao = None
+    if len(serie_custo) >= 2:
+        atual_v, ant_v = serie_custo[-1]["custo_total"], serie_custo[-2]["custo_total"]
+        if ant_v:
+            variacao = {"percent": round((atual_v - ant_v) / ant_v * 100, 1),
+                        "valor": round(atual_v - ant_v, 2)}
+
+    # tempo de casa (faixas) — ativos
+    from datetime import timedelta
+    faixas_casa = {"Até 6 meses": 0, "6 a 12 meses": 0, "1 a 2 anos": 0, "Mais de 2 anos": 0}
+    for c in ativos.only("data_admissao", "data_entrada"):
+        ref = c.data_admissao or c.data_entrada
+        if not ref:
+            continue
+        dias = (hoje - ref).days
+        if dias <= 182:
+            faixas_casa["Até 6 meses"] += 1
+        elif dias <= 365:
+            faixas_casa["6 a 12 meses"] += 1
+        elif dias <= 730:
+            faixas_casa["1 a 2 anos"] += 1
+        else:
+            faixas_casa["Mais de 2 anos"] += 1
+
+    # alertas operacionais
+    alertas = []
+    sem_cc = ativos.filter(centro_custo__isnull=True).count()
+    sem_cargo = ativos.filter(cargo__isnull=True).count()
+    sem_salario = ativos.filter(salario_bruto__lte=0).count()
+    if sem_cargo:
+        alertas.append({"tipo": "atencao", "texto": f"{sem_cargo} colaborador(es) ativo(s) sem cargo definido"})
+    if sem_salario:
+        alertas.append({"tipo": "critico", "texto": f"{sem_salario} colaborador(es) ativo(s) sem salário cadastrado"})
+    if sem_cc:
+        alertas.append({"tipo": "critico", "texto": f"{sem_cc} colaborador(es) sem centro de custo"})
+    comp_aberta = DpCompetencia.objects.filter(status="aberta").order_by("-ano", "-mes").first()
+    if comp_aberta:
+        alertas.append({"tipo": "info",
+                        "texto": f"Competência {comp_aberta.mes:02d}/{comp_aberta.ano} está aberta (ainda não fechada)"})
+
     return Response({
         "headcount": headcount, "por_regime": por_regime,
         "admissoes_mes": mov_mes["admissoes"], "desligamentos_mes": mov_mes["desligamentos"],
         "turnover_mes": turnover,
         "custo_competencia": ult, "serie_mov": serie_mov, "serie_custo": serie_custo,
+        # extras
+        "por_unidade": por_unidade, "por_area": por_area, "por_cc_qtd": por_cc_qtd,
+        "custo_por_cc": custo_por_cc, "custo_por_regime": custo_por_regime,
+        "custo_medio_pessoa": custo_medio_pessoa, "participacao": participacao,
+        "variacao_custo": variacao,
+        "tempo_casa": [{"faixa": k, "quantidade": v} for k, v in faixas_casa.items()],
+        "alertas": alertas,
+        "folha_media_salario": round(ativos.aggregate(m=Avg("salario_bruto"))["m"] or 0, 2),
     })
 
 
@@ -379,12 +476,17 @@ def dp_relatorio_auditoria(request):
     except ValueError:
         limit = 2000
     logs = DpAuditLog.objects.all()[:limit]
-    rows = [[a.created_at.strftime("%d/%m/%Y %H:%M:%S"), a.usuario, a.acao, a.entidade,
-             a.entidade_id, str(a.antes or "")[:500], str(a.depois or "")[:500]] for a in logs]
+    rows = []
+    for a in logs:
+        h = humanizar(a)
+        detalhe = "; ".join(
+            (f"{m['campo']}: {m['de']} -> {m['para']}" if m["de"] else f"{m['campo']}: {m['para']}")
+            for m in h["mudancas"]) or "—"
+        rows.append([h["quando_br"], h["usuario"], h["titulo"], detalhe])
     wb, ws = _wb_timbrado("Trilha de Auditoria — Controle de Pessoal",
                           f"{len(rows)} registro(s) mais recentes", _quem(request))
-    _tabela(ws, 5, ["Data/hora", "Usuário", "Ação", "Entidade", "ID", "Antes", "Depois"],
-            rows, larguras=[18, 26, 16, 20, 22, 60, 60])
+    _tabela(ws, 5, ["Quando", "Quem", "O que aconteceu", "Detalhes da alteração"],
+            rows, larguras=[20, 28, 62, 78])
     return _resposta_excel(wb, "auditoria_dp.xlsx")
 
 
@@ -512,7 +614,8 @@ def dp_relatorio_projecao(request):
 def dp_relatorio_quadro(request):
     """Excel do Quadro de Pessoal (com filtro de status opcional)."""
     status_f = request.query_params.get("status", "")
-    qs = DpColaborador.objects.select_related("centro_custo", "cargo").all()
+    qs = filtrar_colaboradores(
+        DpColaborador.objects.select_related("centro_custo", "cargo").all(), request.user)
     if status_f:
         qs = qs.filter(status=status_f)
     if request.query_params.get("formato") == "pdf":

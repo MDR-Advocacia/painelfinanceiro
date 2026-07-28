@@ -20,9 +20,10 @@ import {
 import {
   Table, TableBody, TableCell, TableHead, TableHeader, TableRow,
 } from "@/components/ui/table";
+import { Ajuda, TituloAjuda } from "@/components/dp/Ajuda";
 import {
   type DpAdmissaoSim, type DpCargo, type DpCentroCusto, type DpProjecao, type DpSimulacao,
-  REGIME_LABELS, exportApi, fmtBRL, previsaoApi,
+  REGIME_LABELS, exportApi, fmtBRL, fmtCompetencia, previsaoApi,
 } from "@/services/dp";
 
 const APROV_LABEL: Record<string, string> = {
@@ -66,7 +67,9 @@ function ProjecaoBloco() {
         <div className="flex flex-wrap items-start justify-between gap-3">
           <div>
             <CardTitle className="flex items-center gap-2 text-base">
-              <TrendingUp className="h-4 w-4 text-[hsl(var(--dunatech-blue))]" /> Projeção de gastos
+              <TrendingUp className="h-4 w-4 text-[hsl(var(--dunatech-blue))]" />
+              <TituloAjuda titulo="Projeção de gastos"
+                           ajuda="Estimativa do custo de pessoal nos próximos meses partindo do quadro atual. Ajuste o reajuste anual e o crescimento previsto para simular." />
             </CardTitle>
             <CardDescription>
               Projeta o custo do quadro atual e o <b>aprovisionamento acumulado</b> (13º, férias, FGTS…).
@@ -100,28 +103,34 @@ function ProjecaoBloco() {
         {d && (
           <>
             <div className="grid grid-cols-2 gap-3 md:grid-cols-4">
-              <Mini rotulo="Custo mensal atual" valor={fmtBRL(d.base.custo_total)} />
-              <Mini rotulo={`Custo ${d.premissas.meses} meses`} valor={fmtBRL(d.custo_12m)} destaque />
-              <Mini rotulo="A provisionar (período)" valor={fmtBRL(d.aprovisionamento.total)} />
-              <Mini rotulo="Headcount base" valor={String(d.base.headcount)} />
+              <Mini rotulo="Custo mensal hoje" valor={fmtBRL(d.base.custo_total)}
+                    ajuda="Quanto o quadro atual custa por mês, já com benefícios, provisões e encargos." />
+              <Mini rotulo={`Custo em ${d.premissas.meses} meses`} valor={fmtBRL(d.custo_12m)} destaque
+                    ajuda="Soma projetada do custo de pessoal no período, considerando o reajuste e o crescimento informados." />
+              <Mini rotulo="A reservar no período" valor={fmtBRL(d.aprovisionamento.total)}
+                    ajuda="Total que deve ficar guardado para pagar 13º, férias, FGTS e recesso quando vencerem." />
+              <Mini rotulo="Pessoas hoje" valor={String(d.base.headcount)}
+                    ajuda="Quantidade de colaboradores usada como base da projeção." />
             </div>
 
             <ResponsiveContainer width="100%" height={230}>
-              <AreaChart data={d.linhas}>
+              <AreaChart data={d.linhas.map((l) => ({ ...l, rotulo: fmtCompetencia(l.mes) }))}>
                 <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))" />
-                <XAxis dataKey="mes" tick={{ fontSize: 10 }} />
-                <YAxis tick={{ fontSize: 10 }} tickFormatter={(v) => `${(v / 1000).toFixed(0)}k`} />
+                <XAxis dataKey="rotulo" tick={{ fontSize: 10 }} />
+                <YAxis tick={{ fontSize: 10 }} tickFormatter={(v) => `${(v / 1000).toFixed(0)} mil`} />
                 <RTooltip formatter={(v: number) => fmtBRL(v)} />
                 <Area type="monotone" dataKey="custo_total" name="Custo mensal" stroke="#1E7BFF" fill="#1E7BFF" fillOpacity={0.15} strokeWidth={2} />
-                <Area type="monotone" dataKey="provisionado_acumulado" name="Provisionado acumulado" stroke="#0A1940" fill="#0A1940" fillOpacity={0.08} strokeWidth={2} />
+                <Area type="monotone" dataKey="provisionado_acumulado" name="Reserva acumulada" stroke="#0A1940" fill="#0A1940" fillOpacity={0.08} strokeWidth={2} />
                 <Legend wrapperStyle={{ fontSize: 11 }} />
               </AreaChart>
             </ResponsiveContainer>
 
             <div className="grid gap-4 lg:grid-cols-2">
               <div className="rounded-lg border bg-card/60 p-3">
-                <div className="mb-2 text-xs font-semibold text-muted-foreground">
-                  Aprovisionamento acumulado ({d.premissas.meses} meses)
+                <div className="mb-2 flex items-center gap-1.5 text-xs font-semibold text-muted-foreground">
+                  Reserva necessária ({d.premissas.meses} meses)
+                  <Ajuda titulo="Reserva necessária"
+                         texto="Dinheiro que precisa estar guardado para honrar 13º, férias + 1/3, FGTS, multa do FGTS e recesso de estagiários acumulados no período." />
                 </div>
                 <Table>
                   <TableBody>
@@ -134,7 +143,7 @@ function ProjecaoBloco() {
                       )
                     ))}
                     <TableRow>
-                      <TableCell className="py-1.5 text-sm font-bold">TOTAL a reservar</TableCell>
+                      <TableCell className="py-1.5 text-sm font-bold">Total a reservar</TableCell>
                       <TableCell className="py-1.5 text-right font-mono text-sm font-bold text-[hsl(var(--dunatech-blue))]">
                         {fmtBRL(d.aprovisionamento.total)}
                       </TableCell>
@@ -147,14 +156,16 @@ function ProjecaoBloco() {
                   <TableHeader>
                     <TableRow>
                       <TableHead className="text-xs">Mês</TableHead>
-                      <TableHead className="text-right text-xs">Custo total</TableHead>
-                      <TableHead className="text-right text-xs">Provisionado acum.</TableHead>
+                      <TableHead className="text-right text-xs">Custo do mês</TableHead>
+                      <TableHead className="text-right text-xs">
+                        <TituloAjuda titulo="Reserva acumulada" ajuda="Soma das provisões desde o início do período — é o valor que deveria estar guardado até aquele mês." />
+                      </TableHead>
                     </TableRow>
                   </TableHeader>
                   <TableBody>
                     {d.linhas.map((l) => (
                       <TableRow key={l.mes}>
-                        <TableCell className="py-1.5 font-mono text-xs">{l.mes}</TableCell>
+                        <TableCell className="py-1.5 font-mono text-xs">{fmtCompetencia(l.mes)}</TableCell>
                         <TableCell className="py-1.5 text-right font-mono text-xs">{fmtBRL(l.custo_total)}</TableCell>
                         <TableCell className="py-1.5 text-right font-mono text-xs text-muted-foreground">{fmtBRL(l.provisionado_acumulado)}</TableCell>
                       </TableRow>
@@ -202,7 +213,9 @@ function SimulacaoBloco({ ccs, cargos }: { ccs: DpCentroCusto[]; cargos: DpCargo
     <Card className="glass-card border-0">
       <CardHeader className="pb-3">
         <CardTitle className="flex items-center gap-2 text-base">
-          <FlaskConical className="h-4 w-4 text-[hsl(var(--dunatech-blue))]" /> Simulação de cenários
+          <FlaskConical className="h-4 w-4 text-[hsl(var(--dunatech-blue))]" />
+          <TituloAjuda titulo="Simulação de cenários"
+                       ajuda="Monte um cenário hipotético (abrir um setor, contratar, dar reajuste) e veja o impacto no custo antes de decidir. Nada é gravado." />
         </CardTitle>
         <CardDescription>
           Monte um cenário (novo setor, contratações, reajuste) e veja o <b>impacto financeiro estimado</b>.
@@ -295,10 +308,14 @@ function SimulacaoBloco({ ccs, cargos }: { ccs: DpCentroCusto[]; cargos: DpCargo
               </div>
             </div>
             <div className="grid grid-cols-2 gap-3 md:grid-cols-4">
-              <Mini rotulo="Impacto mensal" valor={fmtBRL(res.impacto_mensal)} destaque />
-              <Mini rotulo={`Impacto em ${res.meses} meses`} valor={fmtBRL(res.impacto_anual)} />
-              <Mini rotulo="Custo médio/contratação" valor={fmtBRL(res.custo_medio_por_novo)} />
-              <Mini rotulo="Headcount" valor={`${res.atual.headcount} → ${res.cenario.headcount}`} />
+              <Mini rotulo="Impacto por mês" valor={fmtBRL(res.impacto_mensal)} destaque
+                    ajuda="Quanto o custo mensal de pessoal aumenta (ou diminui) se este cenário virar realidade." />
+              <Mini rotulo={`Impacto em ${res.meses} meses`} valor={fmtBRL(res.impacto_anual)}
+                    ajuda="O impacto mensal multiplicado pelo período informado." />
+              <Mini rotulo="Custo por contratação" valor={fmtBRL(res.custo_medio_por_novo)}
+                    ajuda="Custo médio mensal de cada pessoa contratada no cenário, com encargos e provisões." />
+              <Mini rotulo="Pessoas" valor={`${res.atual.headcount} → ${res.cenario.headcount}`}
+                    ajuda="Tamanho do quadro antes e depois do cenário." />
             </div>
             <ResponsiveContainer width="100%" height={190}>
               <BarChart data={[
@@ -320,7 +337,7 @@ function SimulacaoBloco({ ccs, cargos }: { ccs: DpCentroCusto[]; cargos: DpCargo
               <Table>
                 <TableHeader>
                   <TableRow>
-                    <TableHead className="text-xs">Centro de Custo (novo)</TableHead>
+                    <TableHead className="text-xs">Centro de custo (novo)</TableHead>
                     <TableHead className="text-right text-xs">Vagas</TableHead>
                     <TableHead className="text-right text-xs">Custo mensal</TableHead>
                   </TableRow>
@@ -369,10 +386,14 @@ function NumMini({ rotulo, valor, set, w }: {
   );
 }
 
-function Mini({ rotulo, valor, destaque }: { rotulo: string; valor: string; destaque?: boolean }) {
+function Mini({ rotulo, valor, destaque, ajuda }: {
+  rotulo: string; valor: string; destaque?: boolean; ajuda?: string;
+}) {
   return (
     <div className={`rounded-lg border px-3 py-2 ${destaque ? "border-[hsl(var(--dunatech-blue))]/40 bg-[hsl(var(--dunatech-blue))]/10" : "bg-card/60"}`}>
-      <div className="text-[10px] uppercase tracking-wider text-muted-foreground">{rotulo}</div>
+      <div className="flex items-center gap-1 text-[10px] uppercase tracking-wider text-muted-foreground">
+        <span>{rotulo}</span>{ajuda && <Ajuda titulo={rotulo} texto={ajuda} />}
+      </div>
       <div className={`font-mono text-sm font-bold ${destaque ? "text-[hsl(var(--dunatech-blue))]" : ""}`}>{valor}</div>
     </div>
   );

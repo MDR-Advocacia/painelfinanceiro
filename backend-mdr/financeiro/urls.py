@@ -13,7 +13,9 @@ from .dp_relatorios import (
     dp_dashboard, dp_relatorio_auditoria, dp_relatorio_catalogos, dp_relatorio_competencia,
     dp_relatorio_dashboard, dp_relatorio_projecao, dp_relatorio_quadro, dp_relatorio_simulacao,
 )
-from .dp_simulacao import DpTabelaFiscalViewSet, dp_projecao, dp_simular
+from .dp_simulacao import (
+    DpTabelaFiscalViewSet, dp_opcoes_escopo, dp_projecao, dp_simular,
+)
 from . import sso_views
 
 router = DefaultRouter()
@@ -43,6 +45,7 @@ urlpatterns = [
     # Previsão de gastos: projeção, aprovisionamento e simulação de cenários
     path('dp/projecao/', dp_projecao),
     path('dp/simular/', dp_simular),
+    path('dp/opcoes-escopo/', dp_opcoes_escopo),  # subnúcleos pro menu do ADM
     # Relatórios das demais abas (excel/pdf timbrados)
     path('dp/relatorio-dashboard/', dp_relatorio_dashboard),
     path('dp/relatorio-catalogos/', dp_relatorio_catalogos),

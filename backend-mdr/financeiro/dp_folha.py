@@ -17,6 +17,7 @@ from rest_framework import status, viewsets
 from rest_framework.decorators import action
 from rest_framework.response import Response
 
+from .dp_escopo import filtrar_folha
 from .dp_views import _quem, audit
 from .models import (
     DpColaborador, DpCompetencia, DpFolhaItem, DpLancamento, DpTabelaFiscal,
@@ -250,7 +251,7 @@ class DpCompetenciaViewSet(viewsets.ViewSet):
     def itens(self, request, pk=None):
         """Grid da folha: ?busca ?regime ?cc(nome) ?limit ?offset → {total, totais, items}."""
         comp = DpCompetencia.objects.get(pk=pk)
-        qs = comp.itens.all()
+        qs = filtrar_folha(comp.itens.all(), request.user)
         if request.query_params.get("busca"):
             qs = qs.filter(nome__icontains=request.query_params["busca"])
         if request.query_params.get("regime"):
@@ -288,7 +289,7 @@ class DpCompetenciaViewSet(viewsets.ViewSet):
         """Rateio por Centro de Custo (o fechamento do financeiro)."""
         comp = DpCompetencia.objects.get(pk=pk)
         from django.db.models import Count, Sum
-        linhas = (comp.itens.values("centro_custo_nome")
+        linhas = (filtrar_folha(comp.itens.all(), request.user).values("centro_custo_nome")
                   .annotate(headcount=Count("id"), folha=Sum("total_pagar"),
                             provisoes=Sum("custo_provisoes"), patronal=Sum("inss_patronal"),
                             custo=Sum("custo_total"))
