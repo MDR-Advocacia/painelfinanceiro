@@ -1,9 +1,10 @@
 // Primitivos de página do Painel Financeiro.
 //
-// Existem para que TODA tela tenha o mesmo esqueleto: um cabeçalho que gruda
-// no topo com o contexto (o quê, de quando, filtrado como) e os controles à
-// direita; blocos com rótulo em eyebrow acima do título; e indicadores que se
-// leem pela cor antes de se ler pela palavra.
+// Existem para que TODA tela tenha o mesmo esqueleto: um cabeçalho com o
+// contexto (o quê, de quando, filtrado como) e os controles à direita; blocos
+// com rótulo em eyebrow acima do título; e indicadores que se leem pela cor
+// antes de se ler pela palavra. Quem gruda ao rolar é o cabeçalho da TABELA
+// (ver TabelaRolavel), não o da página.
 //
 // Antes disso, cada tela inventava o próprio cabeçalho — e o painel inteiro
 // parecia um amontoado de páginas de projetos diferentes.
@@ -11,7 +12,7 @@ import type { ReactNode } from "react";
 
 import { Card, CardContent } from "@/components/ui/card";
 
-/** Cabeçalho fixo da página: contexto à esquerda, controles à direita. */
+/** Cabeçalho da página: contexto à esquerda, controles à direita. */
 export function PageHeader({
   eyebrow, titulo, descricao, icone, acoes,
 }: {
@@ -22,7 +23,7 @@ export function PageHeader({
   acoes?: ReactNode;
 }) {
   return (
-    <div className="topbar sticky top-0 z-30 -mx-6 -mt-6 flex flex-wrap items-end justify-between gap-4 px-6 py-4 md:-mx-8 md:-mt-8 md:px-8">
+    <div className="flex flex-wrap items-end justify-between gap-4">
       <div className="flex min-w-0 items-start gap-3">
         {icone && (
           <span className="mt-1 flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-[hsl(var(--dunatech-blue))]/10 text-[hsl(var(--dunatech-blue))]">

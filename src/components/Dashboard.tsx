@@ -16,6 +16,7 @@ import {
 } from "recharts";
 import { DollarSign, TrendingUp, Users, AlertTriangle, Building2, Award } from "lucide-react";
 import { Kpi, PageHeader, SectionTitle, SegButtons, Vazio } from "@/components/Pagina";
+import { TabelaRolavel } from "@/components/TabelaRolavel";
 
 // Paleta DunaTech (família Flow): azul elétrico + navy + tints, semânticos por último
 const CHART_COLORS = ["#1E7BFF", "#0A1940", "#7FB5FF", "#27AE60", "#F39C12", "#E74C3C"];
@@ -200,9 +201,9 @@ export function Dashboard() {
             <CardContent className="pt-6">
               <SectionTitle eyebrow="Detalhamento" titulo="Comparativo de setores"
                             acoes={<span className="text-xs text-muted-foreground">clique numa linha para abrir o setor</span>} />
-              <div className="overflow-x-auto">
+              <TabelaRolavel altura="max-h-[58vh]">
                 <Table>
-                  <TableHeader className="sticky top-0 bg-card/95 backdrop-blur">
+                  <TableHeader className="sticky top-0 z-10 bg-card/95 backdrop-blur [&_th]:border-b">
                     <TableRow>
                       <TableHead className="text-xs">Setor</TableHead>
                       <TableHead className="text-xs">Tipo</TableHead>
@@ -246,7 +247,7 @@ export function Dashboard() {
                     ))}
                   </TableBody>
                 </Table>
-              </div>
+              </TabelaRolavel>
             </CardContent>
           </Card>
         </>

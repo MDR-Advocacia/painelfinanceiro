@@ -6,9 +6,11 @@
 // espelha a rolagem do conteúdo nos dois sentidos.
 import { useCallback, useEffect, useRef, useState } from "react";
 
-export function TabelaRolavel({ children, className = "" }: {
+export function TabelaRolavel({ children, className = "", altura = "max-h-[62vh]" }: {
   children: React.ReactNode;
   className?: string;
+  /** altura máxima da caixa — é ela que faz o cabeçalho da tabela grudar */
+  altura?: string;
 }) {
   const areaRef = useRef<HTMLDivElement>(null);
   const barraRef = useRef<HTMLDivElement>(null);
@@ -52,7 +54,7 @@ export function TabelaRolavel({ children, className = "" }: {
         // o <Table> do shadcn já vem com o próprio wrapper rolável; anulando o
         // overflow dele, quem rola passa a ser ESTE container — que é o que a
         // barra flutuante espelha
-        className="sem-barra-nativa overflow-x-auto [&>div]:overflow-visible"
+        className={`sem-barra-nativa overflow-auto ${altura} [&>div]:overflow-visible`}
       >
         {children}
       </div>

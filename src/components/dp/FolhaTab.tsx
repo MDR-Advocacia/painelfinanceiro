@@ -331,7 +331,10 @@ function CompetenciaDetalhe({ comp, editar, onMudou }: {
           <>
             <TabelaRolavel className="rounded-md border">
               <Table>
-                <TableHeader>
+                {/* o cabeçalho gruda no topo da caixa: com 13 colunas e 177
+                    linhas, rolar sem saber que coluna se está lendo é o pior
+                    jeito de conferir uma folha */}
+                <TableHeader className="sticky top-0 z-10 bg-card/95 backdrop-blur [&_th]:border-b">
                   <TableRow>
                     <TableHead className="text-xs">Matrícula</TableHead>
                     <TableHead className="text-xs">Nome</TableHead>
