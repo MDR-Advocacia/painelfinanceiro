@@ -102,7 +102,6 @@ def estrutura(request):
         alocs = sorted(l.alocacoes.all(), key=lambda a: -a.percentual)
         return {
             "id": str(l.id), "nome": l.nome, "area": l.area, "ativo": l.ativo,
-            "setor_legado": l.setor_legado.nome if l.setor_legado_id else None,
             "receita_bruta": (f or {}).get("bruto", 0) or 0,
             "soma_percentual": round(sum(a.percentual or 0 for a in alocs), 2),
             "alocacoes": [json_alocacao(a) for a in alocs],
@@ -242,8 +241,156 @@ def remover_alocacao(request, pk):
 @permission_classes(_PERM)
 def equipes(request):
     """Catálogo de equipes (pro combobox de alocação)."""
+    alocs = {}
+    for a in Alocacao.objects.select_related("linha__centro", "centro"):
+        alocs.setdefault(str(a.equipe_id), []).append(
+            str(a.linha or a.centro))
     return Response([
         {"id": str(e.id), "nome": e.nome, "slug": e.slug, "grupo": e.grupo,
-         "centro_custo": e.centro_custo.nome if e.centro_custo_id else None}
+         "centro_custo": e.centro_custo.nome if e.centro_custo_id else None,
+         "centro_custo_id": str(e.centro_custo_id) if e.centro_custo_id else None,
+         "alocada_em": alocs.get(str(e.id), [])}
         for e in Equipe.objects.filter(ativo=True)
     ])
+
+
+# ─────────────────────────── CRUD DA ESTRUTURA ───────────────────────────
+# Tudo tabelado e editável, como pedido: criar/renomear/excluir centros,
+# linhas e equipes. Exclusão é conservadora — nada que carregue histórico
+# (receita lançada, alocações) some por acidente.
+
+@api_view(["POST", "PATCH", "DELETE"])
+@permission_classes(_PERM)
+def centro_crud(request, pk=None):
+    if request.method == "POST":
+        nome = (request.data.get("nome") or "").strip()
+        tipo = request.data.get("tipo") or "faturamento"
+        if not nome:
+            return Response({"detail": "Informe o nome."}, status=400)
+        if tipo not in ("faturamento", "infraestrutura"):
+            return Response({"detail": "Tipo inválido."}, status=400)
+        if CentroFaturamento.objects.filter(nome__iexact=nome).exists():
+            return Response({"detail": "Já existe um centro com esse nome."}, status=409)
+        ordem = (CentroFaturamento.objects.filter(tipo=tipo).count()
+                 + (100 if tipo == "infraestrutura" else 0))
+        c = CentroFaturamento.objects.create(nome=nome, tipo=tipo, ordem=ordem)
+        audit(request, "criar", "ef_centro", c.id, depois={"nome": nome, "tipo": tipo})
+        return Response({"id": str(c.id)}, status=status.HTTP_201_CREATED)
+
+    c = CentroFaturamento.objects.filter(pk=pk).first()
+    if not c:
+        return Response(status=404)
+    if request.method == "PATCH":
+        nome = (request.data.get("nome") or "").strip()
+        if not nome:
+            return Response({"detail": "Informe o nome."}, status=400)
+        antes = c.nome
+        c.nome = nome
+        c.save(update_fields=["nome", "updated_at"])
+        audit(request, "editar", "ef_centro", c.id, antes={"nome": antes}, depois={"nome": nome})
+        return Response({"ok": True})
+    # DELETE
+    if c.linhas.exists() or c.alocacoes.exists():
+        return Response({"detail": "Centro tem linhas ou equipes — esvazie antes de excluir."},
+                        status=409)
+    audit(request, "excluir", "ef_centro", c.id, antes={"nome": c.nome})
+    c.delete()
+    return Response(status=204)
+
+
+@api_view(["POST", "PATCH", "DELETE"])
+@permission_classes(_PERM)
+def linha_crud(request, pk=None):
+    if request.method == "POST":
+        centro = CentroFaturamento.objects.filter(pk=request.data.get("centro_id")).first()
+        nome = (request.data.get("nome") or "").strip()
+        area = request.data.get("area") or "passivo"
+        if not centro:
+            return Response({"detail": "Centro não encontrado."}, status=400)
+        if not nome:
+            return Response({"detail": "Informe o nome da linha."}, status=400)
+        if area not in ("passivo", "credito", "especializada"):
+            return Response({"detail": "Área inválida."}, status=400)
+        if centro.linhas.filter(nome__iexact=nome).exists():
+            return Response({"detail": "Já existe essa linha neste centro."}, status=409)
+        l = LinhaFaturamento.objects.create(centro=centro, nome=nome, area=area,
+                                            ordem=centro.linhas.count())
+        audit(request, "criar", "ef_linha", l.id, depois={"linha": str(l), "area": area})
+        return Response({"id": str(l.id)}, status=status.HTTP_201_CREATED)
+
+    l = LinhaFaturamento.objects.select_related("centro").filter(pk=pk).first()
+    if not l:
+        return Response(status=404)
+    if request.method == "PATCH":
+        antes = {"nome": l.nome, "area": l.area}
+        if request.data.get("nome"):
+            l.nome = request.data["nome"].strip()
+        if request.data.get("area") in ("passivo", "credito", "especializada"):
+            l.area = request.data["area"]
+        l.save(update_fields=["nome", "area", "updated_at"])
+        audit(request, "editar", "ef_linha", l.id, antes=antes,
+              depois={"nome": l.nome, "area": l.area})
+        return Response({"ok": True})
+    # DELETE — linha com receita lançada não some (histórico é sagrado)
+    tem_receita = any((f or {}).get("bruto") for f in (l.periodos or {}).values())
+    if tem_receita:
+        return Response({"detail": "Linha tem receita lançada — o histórico não pode ser "
+                                   "excluído. Se ela foi descontinuada, é só tirar as equipes."},
+                        status=409)
+    audit(request, "excluir", "ef_linha", l.id, antes={"linha": str(l)})
+    l.delete()
+    return Response(status=204)
+
+
+@api_view(["POST", "PATCH", "DELETE"])
+@permission_classes(_PERM)
+def equipe_crud(request, pk=None):
+    from .models import DpCentroCusto
+
+    if request.method == "POST":
+        nome = (request.data.get("nome") or "").strip()
+        grupo = request.data.get("grupo") or "passivo"
+        if not nome:
+            return Response({"detail": "Informe o nome da equipe."}, status=400)
+        if grupo not in dict(Equipe.GRUPOS):
+            return Response({"detail": "Grupo inválido."}, status=400)
+        if Equipe.objects.filter(nome__iexact=nome).exists():
+            return Response({"detail": "Já existe uma equipe com esse nome."}, status=409)
+        import re
+        import unicodedata
+        base = unicodedata.normalize("NFKD", nome).encode("ascii", "ignore").decode()
+        slug = re.sub(r"[^a-z0-9]+", "-", base.lower()).strip("-") or "equipe"
+        if Equipe.objects.filter(slug=slug).exists():
+            slug = f"{slug}-{Equipe.objects.count() + 1}"
+        cc = DpCentroCusto.objects.filter(pk=request.data.get("centro_custo_id") or None).first()
+        e = Equipe.objects.create(slug=slug, nome=nome, grupo=grupo, centro_custo=cc)
+        audit(request, "criar", "ef_equipe", e.id,
+              depois={"nome": nome, "grupo": grupo,
+                      "centro_custo": cc.nome if cc else None})
+        return Response({"id": str(e.id), "slug": slug}, status=status.HTTP_201_CREATED)
+
+    e = Equipe.objects.filter(pk=pk).first()
+    if not e:
+        return Response(status=404)
+    if request.method == "PATCH":
+        antes = {"nome": e.nome, "grupo": e.grupo,
+                 "centro_custo": e.centro_custo.nome if e.centro_custo_id else None}
+        if request.data.get("nome"):
+            e.nome = request.data["nome"].strip()
+        if request.data.get("grupo") in dict(Equipe.GRUPOS):
+            e.grupo = request.data["grupo"]
+        if "centro_custo_id" in request.data:
+            e.centro_custo = DpCentroCusto.objects.filter(
+                pk=request.data.get("centro_custo_id") or None).first()
+        e.save()
+        audit(request, "editar", "ef_equipe", e.id, antes=antes,
+              depois={"nome": e.nome, "grupo": e.grupo,
+                      "centro_custo": e.centro_custo.nome if e.centro_custo_id else None})
+        return Response({"ok": True})
+    # DELETE — equipe alocada não some
+    if e.alocacoes.exists():
+        return Response({"detail": "Equipe está alocada — remova das linhas antes de excluir."},
+                        status=409)
+    audit(request, "excluir", "ef_equipe", e.id, antes={"nome": e.nome})
+    e.delete()
+    return Response(status=204)

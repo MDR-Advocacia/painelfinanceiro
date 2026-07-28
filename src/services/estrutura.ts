@@ -8,7 +8,7 @@ export interface EfAlocacao {
 }
 export interface EfLinha {
   id: string; nome: string; area: "passivo" | "credito" | "especializada";
-  ativo: boolean; setor_legado: string | null; receita_bruta: number;
+  ativo: boolean; receita_bruta: number;
   soma_percentual: number; alocacoes: EfAlocacao[];
 }
 export interface EfCentro {
@@ -18,7 +18,8 @@ export interface EfCentro {
 }
 export interface EfEquipe {
   id: string; nome?: string; equipe?: string; slug: string; grupo: string;
-  centro_custo: string | null;
+  centro_custo: string | null; centro_custo_id?: string | null;
+  alocada_em?: string[];
 }
 export interface EfEstrutura {
   periodo: string | null;
@@ -66,4 +67,66 @@ export const estruturaApi = {
     });
     if (!r.ok && r.status !== 204) throw new Error(`Erro ${r.status}`);
   },
+
+  // ── CRUD: tudo tabelado e editável ──
+  criarCentro: (nome: string, tipo: "faturamento" | "infraestrutura") =>
+    fetch(`${API_URL}/estrutura/centros/`, { method: "POST", headers: H(), body: JSON.stringify({ nome, tipo }) })
+      .then((r) => j<{ id: string }>(r)),
+  renomearCentro: (id: string, nome: string) =>
+    fetch(`${API_URL}/estrutura/centros/${id}/`, { method: "PATCH", headers: H(), body: JSON.stringify({ nome }) })
+      .then((r) => j<{ ok: boolean }>(r)),
+  excluirCentro: async (id: string) => {
+    const r = await fetch(`${API_URL}/estrutura/centros/${id}/`, { method: "DELETE", headers: authHeaders() });
+    if (!r.ok && r.status !== 204) {
+      const d = await r.json().catch(() => ({} as any));
+      throw new Error((d as any).detail || `Erro ${r.status}`);
+    }
+  },
+
+  criarLinha: (centro_id: string, nome: string, area: string) =>
+    fetch(`${API_URL}/estrutura/linhas/`, { method: "POST", headers: H(), body: JSON.stringify({ centro_id, nome, area }) })
+      .then((r) => j<{ id: string }>(r)),
+  editarLinha: (id: string, dados: { nome?: string; area?: string }) =>
+    fetch(`${API_URL}/estrutura/linhas/${id}/`, { method: "PATCH", headers: H(), body: JSON.stringify(dados) })
+      .then((r) => j<{ ok: boolean }>(r)),
+  excluirLinha: async (id: string) => {
+    const r = await fetch(`${API_URL}/estrutura/linhas/${id}/`, { method: "DELETE", headers: authHeaders() });
+    if (!r.ok && r.status !== 204) {
+      const d = await r.json().catch(() => ({} as any));
+      throw new Error((d as any).detail || `Erro ${r.status}`);
+    }
+  },
+
+  criarEquipe: (dados: { nome: string; grupo: string; centro_custo_id?: string | null }) =>
+    fetch(`${API_URL}/estrutura/equipes/crud/`, { method: "POST", headers: H(), body: JSON.stringify(dados) })
+      .then((r) => j<{ id: string }>(r)),
+  editarEquipe: (id: string, dados: { nome?: string; grupo?: string; centro_custo_id?: string | null }) =>
+    fetch(`${API_URL}/estrutura/equipes/crud/${id}/`, { method: "PATCH", headers: H(), body: JSON.stringify(dados) })
+      .then((r) => j<{ ok: boolean }>(r)),
+  excluirEquipe: async (id: string) => {
+    const r = await fetch(`${API_URL}/estrutura/equipes/crud/${id}/`, { method: "DELETE", headers: authHeaders() });
+    if (!r.ok && r.status !== 204) {
+      const d = await r.json().catch(() => ({} as any));
+      throw new Error((d as any).detail || `Erro ${r.status}`);
+    }
+  },
 };
+
+// ── Comunicação leve entre Sidebar e a tela (sem mexer no AppContext) ──
+// A sidebar navega e FOCA um centro; a tela avisa quando a estrutura mudou
+// (pra sidebar re-listar os centros).
+export const EF_EVENTOS = {
+  foco: "ef-foco",          // detail: { centroId } — rolar até o centro
+  equipes: "ef-equipes",    // abrir o gerenciador de equipes
+  mudou: "ef-mudou",        // estrutura alterada — re-buscar listas
+};
+
+export function focarCentro(centroId: string) {
+  window.dispatchEvent(new CustomEvent(EF_EVENTOS.foco, { detail: { centroId } }));
+}
+export function abrirGerenciadorEquipes() {
+  window.dispatchEvent(new CustomEvent(EF_EVENTOS.equipes));
+}
+export function avisarEstruturaMudou() {
+  window.dispatchEvent(new CustomEvent(EF_EVENTOS.mudou));
+}

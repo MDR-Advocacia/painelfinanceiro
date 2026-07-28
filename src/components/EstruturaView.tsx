@@ -8,14 +8,17 @@
 // iguais; o % é editável.
 import { useCallback, useEffect, useMemo, useState } from "react";
 import {
-  AlertTriangle, Building2, Coins, Equal, Landmark, Loader2, Network, Plus,
-  Scale, Server, Trash2, Users,
+  AlertTriangle, Coins, Equal, Landmark, Loader2, Network, Pencil, Plus,
+  Server, Trash2, Users,
 } from "lucide-react";
 import { toast } from "sonner";
 
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
+import {
+  Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle,
+} from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import {
   Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
@@ -24,9 +27,10 @@ import { Ajuda } from "@/components/dp/Ajuda";
 import { Kpi, PageHeader, SectionTitle } from "@/components/Pagina";
 import { usePermissions } from "@/hooks/usePermissions";
 import { formatCurrency } from "@/utils/calculations";
+import EquipesDialog from "@/components/EquipesDialog";
 import {
   type EfAlocacao, type EfCentro, type EfEquipe, type EfEstrutura, type EfLinha,
-  estruturaApi,
+  EF_EVENTOS, avisarEstruturaMudou, estruturaApi,
 } from "@/services/estrutura";
 
 const AREA_UI: Record<string, { rotulo: string; cls: string }> = {
@@ -41,6 +45,8 @@ export function EstruturaView() {
   const [dados, setDados] = useState<EfEstrutura | null>(null);
   const [equipes, setEquipes] = useState<EfEquipe[]>([]);
   const [loading, setLoading] = useState(true);
+  const [gerindoEquipes, setGerindoEquipes] = useState(false);
+  const [novoCentro, setNovoCentro] = useState<"faturamento" | "infraestrutura" | null>(null);
 
   const carregar = useCallback(() => {
     estruturaApi.carregar()
@@ -50,6 +56,30 @@ export function EstruturaView() {
     estruturaApi.equipes().then(setEquipes).catch(() => undefined);
   }, []);
   useEffect(() => { carregar(); }, [carregar]);
+
+  // mutação em qualquer lugar (inclusive no gerenciador) → recarrega e avisa a sidebar
+  const mudou = useCallback(() => { carregar(); avisarEstruturaMudou(); }, [carregar]);
+
+  // a sidebar pede foco num centro ou abre o gerenciador de equipes
+  useEffect(() => {
+    const focar = (ev: Event) => {
+      const id = (ev as CustomEvent).detail?.centroId;
+      if (!id) return;
+      setTimeout(() => {
+        const el = document.getElementById(`centro-${id}`);
+        el?.scrollIntoView({ behavior: "smooth", block: "start" });
+        el?.classList.add("ring-2", "ring-[hsl(var(--dunatech-blue))]");
+        setTimeout(() => el?.classList.remove("ring-2", "ring-[hsl(var(--dunatech-blue))]"), 1800);
+      }, 150);
+    };
+    const abrirEq = () => setGerindoEquipes(true);
+    window.addEventListener(EF_EVENTOS.foco, focar);
+    window.addEventListener(EF_EVENTOS.equipes, abrirEq);
+    return () => {
+      window.removeEventListener(EF_EVENTOS.foco, focar);
+      window.removeEventListener(EF_EVENTOS.equipes, abrirEq);
+    };
+  }, []);
 
   const resumo = useMemo(() => {
     if (!dados) return null;
@@ -77,6 +107,9 @@ export function EstruturaView() {
         eyebrow="Proposta de reestruturação"
         titulo="Estrutura de Faturamento"
         icone={<Network className="h-4.5 w-4.5" />}
+        acoes={<Button size="sm" variant="outline" className="gap-1" onClick={() => setGerindoEquipes(true)}>
+          <Users className="h-4 w-4" /> Equipes
+        </Button>}
         descricao={<>
           Receita de <b>{mesR}/{anoR}</b>
           {dados.competencia_custo && <> · custo de pessoal da folha de <b>{dados.competencia_custo}</b>
@@ -97,11 +130,19 @@ export function EstruturaView() {
       {/* ── Centros de faturamento ── */}
       <div className="space-y-4">
         <SectionTitle eyebrow="Quem paga" titulo="Centros de faturamento"
-                      acoes={<Ajuda titulo="Centros e linhas"
-                                    texto="Cada cliente é um centro de faturamento. Dentro dele, cada receita individualizável é uma linha — e as equipes são alocadas na linha com um percentual de participação. A receita desce e o custo de pessoal sobe pelo mesmo percentual." />} />
+                      acoes={<>
+                        {editar && (
+                          <Button size="sm" variant="outline" className="h-7 gap-1 text-xs"
+                                  onClick={() => setNovoCentro("faturamento")}>
+                            <Plus className="h-3.5 w-3.5" /> Novo centro
+                          </Button>
+                        )}
+                        <Ajuda titulo="Centros e linhas"
+                                    texto="Cada cliente é um centro de faturamento. Dentro dele, cada receita individualizável é uma linha — e as equipes são alocadas na linha com um percentual de participação." />
+                      </>} />
         <div className="grid gap-4 xl:grid-cols-2">
           {dados.centros.map((c) => (
-            <CentroCard key={c.id} centro={c} equipes={equipes} editar={editar} onMudou={carregar} />
+            <CentroCard key={c.id} centro={c} equipes={equipes} editar={editar} onMudou={mudou} />
           ))}
         </div>
       </div>
@@ -109,14 +150,30 @@ export function EstruturaView() {
       {/* ── Infraestrutura ── */}
       <div className="space-y-4">
         <SectionTitle eyebrow="Quem sustenta" titulo="Centros de infraestrutura"
-                      acoes={<Ajuda titulo="Infraestrutura"
-                                    texto="Setores que não faturam: o custo deles é rateado entre as carteiras (é o que alimenta o VPD). Também recebem equipes." />} />
+                      acoes={<>
+                        {editar && (
+                          <Button size="sm" variant="outline" className="h-7 gap-1 text-xs"
+                                  onClick={() => setNovoCentro("infraestrutura")}>
+                            <Plus className="h-3.5 w-3.5" /> Novo centro
+                          </Button>
+                        )}
+                        <Ajuda titulo="Infraestrutura"
+                               texto="Setores que não faturam: o custo deles é rateado entre as carteiras (é o que alimenta o VPD). Também recebem equipes." />
+                      </>} />
         <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
           {dados.infraestrutura.map((c) => (
-            <InfraCard key={c.id} centro={c} equipes={equipes} editar={editar} onMudou={carregar} />
+            <InfraCard key={c.id} centro={c} equipes={equipes} editar={editar} onMudou={mudou} />
           ))}
         </div>
       </div>
+
+      {gerindoEquipes && (
+        <EquipesDialog editar={editar} onClose={() => { setGerindoEquipes(false); mudou(); }} />
+      )}
+      {novoCentro && (
+        <NovoCentroDialog tipo={novoCentro} onClose={() => setNovoCentro(null)}
+                          onCriou={() => { setNovoCentro(null); mudou(); }} />
+      )}
 
       {dados.sem_alocacao.length > 0 && (
         <Card className="glass-card border-0 border-l-2 border-l-warning">
@@ -140,15 +197,32 @@ function CentroCard({ centro, equipes, editar, onMudou }: {
   centro: EfCentro; equipes: EfEquipe[]; editar: boolean; onMudou: () => void;
 }) {
   const margem = centro.receita_total - centro.custo_total;
+  const [novaLinha, setNovaLinha] = useState(false);
   return (
-    <Card className="glass-card border-0">
+    <Card id={`centro-${centro.id}`} className="glass-card scroll-mt-6 border-0 transition-shadow">
       <CardContent className="space-y-3 pt-5">
         <div className="flex flex-wrap items-baseline justify-between gap-2">
-          <h3 className="flex items-center gap-2 font-heading text-base font-bold">
+          <h3 className="group flex items-center gap-2 font-heading text-base font-bold">
             <span className="flex h-8 w-8 items-center justify-center rounded-lg bg-[hsl(var(--dunatech-blue))]/10">
               <Landmark className="h-4 w-4 text-[hsl(var(--dunatech-blue))]" />
             </span>
             {centro.nome}
+            {editar && (
+              <span className="flex gap-0.5 opacity-0 transition-opacity group-hover:opacity-100">
+                <BotaoRenomear atual={centro.nome}
+                               onSalvar={(nome) => estruturaApi.renomearCentro(centro.id, nome)
+                                 .then(() => { toast.success("Centro renomeado."); onMudou(); })
+                                 .catch((e) => toast.error(e.message))} />
+                <button title="Excluir centro (só vazio)"
+                        onClick={() => window.confirm(`Excluir o centro ${centro.nome}?`)
+                          && estruturaApi.excluirCentro(centro.id)
+                            .then(() => { toast.success("Centro excluído."); onMudou(); })
+                            .catch((e) => toast.error(e.message))}
+                        className="rounded p-1 text-muted-foreground/50 hover:bg-destructive/10 hover:text-destructive">
+                  <Trash2 className="h-3.5 w-3.5" />
+                </button>
+              </span>
+            )}
           </h3>
           <div className="text-right">
             <div className="font-mono-numbers text-sm font-bold">{formatCurrency(centro.receita_total)}</div>
@@ -165,9 +239,110 @@ function CentroCard({ centro, equipes, editar, onMudou }: {
           {centro.linhas.map((l) => (
             <LinhaBloco key={l.id} linha={l} equipes={equipes} editar={editar} onMudou={onMudou} />
           ))}
+          {editar && (novaLinha ? (
+            <NovaLinhaInline centroId={centro.id}
+                             onFechar={() => setNovaLinha(false)}
+                             onCriou={() => { setNovaLinha(false); onMudou(); }} />
+          ) : (
+            <button onClick={() => setNovaLinha(true)}
+                    className="flex w-full items-center justify-center gap-1 rounded-lg border border-dashed border-muted-foreground/30 py-1.5 text-xs text-muted-foreground transition-colors hover:border-[hsl(var(--dunatech-blue))] hover:text-[hsl(var(--dunatech-blue))]">
+              <Plus className="h-3.5 w-3.5" /> nova linha de faturamento
+            </button>
+          ))}
         </div>
       </CardContent>
     </Card>
+  );
+}
+
+/** Lápis que abre edição de nome em linha (Enter salva, Esc cancela). */
+function BotaoRenomear({ atual, onSalvar }: { atual: string; onSalvar: (nome: string) => void }) {
+  const [editando, setEditando] = useState(false);
+  const [valor, setValor] = useState(atual);
+  if (editando) {
+    return (
+      <Input autoFocus value={valor} onChange={(e) => setValor(e.target.value)}
+             onKeyDown={(e) => {
+               if (e.key === "Enter" && valor.trim()) { onSalvar(valor.trim()); setEditando(false); }
+               if (e.key === "Escape") setEditando(false);
+             }}
+             onBlur={() => setEditando(false)}
+             className="h-6 w-44 text-sm font-normal" />
+    );
+  }
+  return (
+    <button title="Renomear" onClick={() => { setValor(atual); setEditando(true); }}
+            className="rounded p-1 text-muted-foreground/50 hover:bg-muted hover:text-foreground">
+      <Pencil className="h-3.5 w-3.5" />
+    </button>
+  );
+}
+
+/** Formulário compacto de nova linha, dentro do card do centro. */
+function NovaLinhaInline({ centroId, onFechar, onCriou }: {
+  centroId: string; onFechar: () => void; onCriou: () => void;
+}) {
+  const [nome, setNome] = useState("");
+  const [area, setArea] = useState("passivo");
+  return (
+    <div className="flex flex-wrap items-center gap-2 rounded-lg border border-dashed border-[hsl(var(--dunatech-blue))]/40 bg-[hsl(var(--dunatech-blue))]/5 p-2">
+      <Input autoFocus placeholder="Nome da linha…" value={nome}
+             onChange={(e) => setNome(e.target.value)} className="h-7 w-48 text-xs" />
+      <Select value={area} onValueChange={setArea}>
+        <SelectTrigger className="h-7 w-[180px] text-xs"><SelectValue /></SelectTrigger>
+        <SelectContent>
+          <SelectItem value="passivo">Contencioso Passivo</SelectItem>
+          <SelectItem value="credito">Recuperação de Crédito</SelectItem>
+          <SelectItem value="especializada">Especializada</SelectItem>
+        </SelectContent>
+      </Select>
+      <Button size="sm" className="glass-button h-7 border-0 text-xs"
+              onClick={() => {
+                if (!nome.trim()) { toast.error("Informe o nome da linha."); return; }
+                estruturaApi.criarLinha(centroId, nome.trim(), area)
+                  .then(() => { toast.success("Linha criada."); onCriou(); })
+                  .catch((e) => toast.error(e.message));
+              }}>
+        Criar
+      </Button>
+      <button onClick={onFechar} className="text-xs text-muted-foreground hover:text-foreground">cancelar</button>
+    </div>
+  );
+}
+
+/** Diálogo de novo centro (faturamento ou infraestrutura). */
+function NovoCentroDialog({ tipo, onClose, onCriou }: {
+  tipo: "faturamento" | "infraestrutura"; onClose: () => void; onCriou: () => void;
+}) {
+  const [nome, setNome] = useState("");
+  const criar = () => {
+    if (!nome.trim()) { toast.error("Informe o nome."); return; }
+    estruturaApi.criarCentro(nome.trim(), tipo)
+      .then(() => { toast.success("Centro criado."); onCriou(); })
+      .catch((e) => toast.error(e.message));
+  };
+  return (
+    <Dialog open onOpenChange={(o) => !o && onClose()}>
+      <DialogContent className="max-w-sm">
+        <DialogHeader>
+          <DialogTitle className="text-base">
+            {tipo === "faturamento" ? "Novo centro de faturamento" : "Novo centro de infraestrutura"}
+          </DialogTitle>
+          <DialogDescription>
+            {tipo === "faturamento"
+              ? "Um cliente novo — as linhas de faturamento e as equipes entram depois, dentro dele."
+              : "Um agrupador de setores que não faturam (o custo vai pro rateio)."}
+          </DialogDescription>
+        </DialogHeader>
+        <Input autoFocus placeholder={tipo === "faturamento" ? "Ex.: Caixa Econômica" : "Ex.: Jurídico Interno"}
+               value={nome} onChange={(e) => setNome(e.target.value)}
+               onKeyDown={(e) => e.key === "Enter" && criar()} />
+        <div className="flex justify-end gap-2">
+          <Button variant="outline" onClick={onClose}>Cancelar</Button>
+          <Button className="glass-button border-0" onClick={criar}>Criar</Button>
+        </div>
+      </DialogContent>
+    </Dialog>
   );
 }
 
@@ -180,13 +355,24 @@ function LinhaBloco({ linha, equipes, editar, onMudou }: {
   const jaAlocadas = new Set(linha.alocacoes.map((a) => a.equipe_id));
 
   return (
-    <div className={`rounded-lg border p-2.5 ${fora ? "border-warning/60 bg-warning/5" : "bg-card/50"}`}>
+    <div className={`group/linha rounded-lg border p-2.5 ${fora ? "border-warning/60 bg-warning/5" : "bg-card/50"}`}>
       <div className="flex flex-wrap items-center gap-2">
         <Badge variant="outline" className={`text-[0.6rem] ${area.cls}`}>{area.rotulo}</Badge>
         <span className="text-sm font-semibold">{linha.nome}</span>
-        {linha.setor_legado && (
-          <span className="text-[0.62rem] text-muted-foreground" title="Setor do painel antigo que originou esta linha">
-            ← {linha.setor_legado}
+        {editar && (
+          <span className="flex gap-0.5 opacity-0 transition-opacity group-hover/linha:opacity-100">
+            <BotaoRenomear atual={linha.nome}
+                           onSalvar={(nome) => estruturaApi.editarLinha(linha.id, { nome })
+                             .then(() => { toast.success("Linha renomeada."); onMudou(); })
+                             .catch((e) => toast.error(e.message))} />
+            <button title="Excluir linha (só sem receita lançada)"
+                    onClick={() => window.confirm(`Excluir a linha ${linha.nome}?`)
+                      && estruturaApi.excluirLinha(linha.id)
+                        .then(() => { toast.success("Linha excluída."); onMudou(); })
+                        .catch((e) => toast.error(e.message))}
+                    className="rounded p-1 text-muted-foreground/50 hover:bg-destructive/10 hover:text-destructive">
+              <Trash2 className="h-3 w-3" />
+            </button>
           </span>
         )}
         <span className="ml-auto font-mono-numbers text-sm font-bold">

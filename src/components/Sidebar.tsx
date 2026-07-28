@@ -8,7 +8,7 @@
 //     chapado. É o padrão dos SaaS de referência (Linear, Vercel, Stripe).
 //  3. RODAPÉ com identidade de quem está logado (avatar, nome, cargo) — a
 //     pessoa sempre sabe com que permissão está enxergando o painel.
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useApp } from "@/contexts/AppContext";
 import { useAuth } from "@/hooks/useAuth";
 import { invalidatePermissionsCache, usePermissions } from "@/hooks/usePermissions";
@@ -16,7 +16,9 @@ import { useNavigate } from "react-router-dom";
 import {
   Plus,
   LayoutDashboard,
+  Landmark,
   Network,
+  Server,
   Trash2,
   TrendingUp,
   BarChart3,
@@ -34,6 +36,9 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { ThemeToggle } from "@/components/ThemeToggle";
 import { PainelLogo } from "@/components/BrandMark";
+import {
+  type EfEstrutura, EF_EVENTOS, abrirGerenciadorEquipes, estruturaApi, focarCentro,
+} from "@/services/estrutura";
 import { getSetorResumo, getStatusColor, getStatusLabel } from "@/utils/calculations";
 import { validateName } from "@/utils/security";
 import { toast } from "sonner";
@@ -89,6 +94,24 @@ export function Sidebar() {
   const [newSedeName, setNewSedeName] = useState("");
   const [collapsed, setCollapsed] = useState<Record<string, boolean>>({});
   const toggle = (k: string) => setCollapsed((c) => ({ ...c, [k]: !c[k] }));
+
+  // ── Estrutura de Faturamento no menu: centros, infra e equipes ──
+  const podeEstrutura = pode("estrutura");
+  const [estrutura, setEstrutura] = useState<EfEstrutura | null>(null);
+  useEffect(() => {
+    if (!podeEstrutura) return;
+    const carregar = () => estruturaApi.carregar().then(setEstrutura).catch(() => undefined);
+    carregar();
+    // a tela avisa quando algo muda (criar centro, alocar equipe…)
+    window.addEventListener(EF_EVENTOS.mudou, carregar);
+    return () => window.removeEventListener(EF_EVENTOS.mudou, carregar);
+  }, [podeEstrutura]);
+
+  const irParaCentro = (centroId: string) => {
+    setActiveSetor(null);
+    setView("estrutura" as any);
+    focarCentro(centroId);
+  };
 
   const handleAdd = () => {
     const error = validateName(newName);
@@ -201,100 +224,63 @@ export function Sidebar() {
           </div>
         )}
 
-        {/* SETORES */}
-        {podeSetores && (
+        {/* CENTROS DE FATURAMENTO (nova sistemática) */}
+        {podeEstrutura && estrutura && (
           <div className="space-y-0.5">
-            <SectionHeader title="Setores" contagem={setores.length}
-                           collapsed={!!collapsed["setores"]} onToggle={() => toggle("setores")} />
-            {!collapsed["setores"] && (
-              <>
-                {setores.map((setor) => {
-                  const resumo = getSetorResumo(setor, periodoAtivo, currentVpdValor);
-                  const TipoIcon = setor.tipo === "operacional" ? Factory : Landmark;
-                  const hasData = resumo.faturamentoBruto > 0;
-                  const sedeName = sedes.find((s) => s.id === setor.sedeId)?.nome;
-                  return (
-                    <div
-                      key={setor.id}
-                      role="button"
-                      tabIndex={0}
-                      data-active={setor.id === activeSetorId && view === "setor"}
-                      className="nav-link group cursor-pointer items-start py-1.5"
-                      onClick={() => setActiveSetor(setor.id)}
-                      onKeyDown={(e) => e.key === "Enter" && setActiveSetor(setor.id)}
-                    >
-                      <span className="nav-ico mt-0.5"><TipoIcon className="h-full w-full" strokeWidth={1.8} /></span>
-                      <span className="min-w-0 flex-1">
-                        <span className="block truncate">{setor.nome}</span>
-                        <span className="block truncate text-[0.65rem] text-sidebar-foreground/45">
-                          {setor.tipo === "operacional" ? "Operacional" : "Administrativo"}
-                          {sedeName && <> · {sedeName}</>}
-                          {hasData && (
-                            <> · <span className={getStatusColor(resumo.status)}>{getStatusLabel(resumo.status)}</span></>
-                          )}
-                        </span>
-                      </span>
-                      <button
-                        onClick={(e) => { e.stopPropagation(); removeSetor(setor.id); }}
-                        aria-label={`Excluir ${setor.nome}`}
-                        className="mt-0.5 shrink-0 rounded p-1 text-sidebar-foreground/35 opacity-0 transition-all hover:bg-destructive/25 hover:text-red-300 group-hover:opacity-100"
-                      >
-                        <Trash2 className="h-3 w-3" />
-                      </button>
-                    </div>
-                  );
-                })}
-                {setores.length === 0 && (
-                  <p className="px-3 py-3 text-center text-xs text-sidebar-foreground/45">
-                    Nenhum setor ainda.
-                  </p>
-                )}
-                <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
-                  <DialogTrigger asChild>
-                    <button className="flex w-full items-center gap-2 rounded-lg px-3 py-1.5 text-xs text-sidebar-foreground/45 transition-colors hover:bg-white/[0.04] hover:text-white">
-                      <Plus className="h-3.5 w-3.5" /> Novo setor
-                    </button>
-                  </DialogTrigger>
-                  <DialogContent>
-                    <DialogHeader><DialogTitle>Criar novo setor</DialogTitle></DialogHeader>
-                    <div className="mt-2 space-y-4">
-                      <Input
-                        placeholder="Ex: Direito Corporativo"
-                        value={newName}
-                        onChange={(e) => setNewName(e.target.value)}
-                        onKeyDown={(e) => e.key === "Enter" && handleAdd()}
-                        autoFocus
-                      />
-                      <div>
-                        <p className="mb-2 text-xs font-medium text-muted-foreground">Tipo do setor</p>
-                        <div className="grid grid-cols-2 gap-2">
-                          <button
-                            onClick={() => setNewTipo("operacional")}
-                            className={`flex items-center gap-2 rounded-lg border p-3 text-sm transition-colors ${
-                              newTipo === "operacional"
-                                ? "border-primary bg-primary/5 font-medium text-primary"
-                                : "border-border text-muted-foreground hover:border-primary/50"
-                            }`}
-                          >
-                            <Factory className="h-4 w-4" /> Operacional
-                          </button>
-                          <button
-                            onClick={() => setNewTipo("administrativo")}
-                            className={`flex items-center gap-2 rounded-lg border p-3 text-sm transition-colors ${
-                              newTipo === "administrativo"
-                                ? "border-primary bg-primary/5 font-medium text-primary"
-                                : "border-border text-muted-foreground hover:border-primary/50"
-                            }`}
-                          >
-                            <Landmark className="h-4 w-4" /> Administrativo
-                          </button>
-                        </div>
-                      </div>
-                      <Button onClick={handleAdd} className="glass-button w-full border-0">Criar setor</Button>
-                    </div>
-                  </DialogContent>
-                </Dialog>
-              </>
+            <SectionHeader title="Centros de Faturamento" contagem={estrutura.centros.length}
+                           collapsed={!!collapsed["ef-centros"]} onToggle={() => toggle("ef-centros")} />
+            {!collapsed["ef-centros"] && estrutura.centros.map((c) => (
+              <button key={c.id} onClick={() => irParaCentro(c.id)}
+                      data-active={false} className="nav-link items-start py-1.5">
+                <span className="nav-ico mt-0.5"><Landmark className="h-full w-full" strokeWidth={1.8} /></span>
+                <span className="min-w-0 flex-1 text-left">
+                  <span className="block truncate">{c.nome}</span>
+                  <span className="block truncate text-[0.65rem] text-sidebar-foreground/45">
+                    {c.linhas.length} linha{c.linhas.length === 1 ? "" : "s"}
+                    {c.receita_total > 0 && <> · R$ {(c.receita_total / 1000).toLocaleString("pt-BR", { maximumFractionDigits: 0 })} mil</>}
+                  </span>
+                </span>
+              </button>
+            ))}
+          </div>
+        )}
+
+        {/* CENTROS DE INFRAESTRUTURA */}
+        {podeEstrutura && estrutura && (
+          <div className="space-y-0.5">
+            <SectionHeader title="Infraestrutura" contagem={estrutura.infraestrutura.length}
+                           collapsed={!!collapsed["ef-infra"]} onToggle={() => toggle("ef-infra")} />
+            {!collapsed["ef-infra"] && estrutura.infraestrutura.map((c) => (
+              <button key={c.id} onClick={() => irParaCentro(c.id)}
+                      data-active={false} className="nav-link">
+                <span className="nav-ico"><Server className="h-full w-full" strokeWidth={1.8} /></span>
+                <span className="flex-1 truncate text-left">{c.nome}</span>
+              </button>
+            ))}
+          </div>
+        )}
+
+        {/* EQUIPES */}
+        {podeEstrutura && estrutura && (
+          <div className="space-y-0.5">
+            <SectionHeader title="Equipes"
+                           contagem={(estrutura.centros.flatMap((c) => c.linhas.flatMap((l) => l.alocacoes))
+                             .concat(estrutura.infraestrutura.flatMap((c) => c.alocacoes))
+                             .map((a) => a.equipe_id)
+                             .filter((v, i, arr) => arr.indexOf(v) === i).length)
+                             + estrutura.sem_alocacao.length}
+                           collapsed={!!collapsed["ef-equipes"]} onToggle={() => toggle("ef-equipes")} />
+            {!collapsed["ef-equipes"] && (
+              <button onClick={() => { setActiveSetor(null); setView("estrutura" as any); abrirGerenciadorEquipes(); }}
+                      className="nav-link">
+                <span className="nav-ico"><Users className="h-full w-full" strokeWidth={1.8} /></span>
+                <span className="flex-1 truncate text-left">Gerenciar equipes</span>
+              </button>
+            )}
+            {!collapsed["ef-equipes"] && estrutura.sem_alocacao.length > 0 && (
+              <p className="px-3 pt-0.5 text-[0.62rem] leading-snug text-warning/80">
+                {estrutura.sem_alocacao.length} equipe{estrutura.sem_alocacao.length === 1 ? "" : "s"} sem alocação
+              </p>
             )}
           </div>
         )}

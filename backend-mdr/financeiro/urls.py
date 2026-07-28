@@ -20,8 +20,8 @@ from .dp_simulacao import (
 )
 from . import sso_views
 from .estrutura_views import (
-    alocacao_percentual, alocar_equipe, equipes as ef_equipes, estrutura,
-    linha_igualar, remover_alocacao,
+    alocacao_percentual, alocar_equipe, centro_crud, equipe_crud,
+    equipes as ef_equipes, estrutura, linha_crud, linha_igualar, remover_alocacao,
 )
 
 router = DefaultRouter()
@@ -48,6 +48,12 @@ urlpatterns = [
     path('estrutura/alocacoes/<uuid:pk>/', alocacao_percentual),
     path('estrutura/alocacoes/<uuid:pk>/remover/', remover_alocacao),
     path('estrutura/linhas/<uuid:pk>/igualar/', linha_igualar),
+    path('estrutura/centros/', centro_crud),
+    path('estrutura/centros/<uuid:pk>/', centro_crud),
+    path('estrutura/linhas/', linha_crud),
+    path('estrutura/linhas/<uuid:pk>/', linha_crud),
+    path('estrutura/equipes/crud/', equipe_crud),
+    path('estrutura/equipes/crud/<uuid:pk>/', equipe_crud),
     path('', include(router.urls)),
     path('login/', CustomAuthToken.as_view()), # <-- Rota de Login Nova
     path('sso/', sso_views.sso_session),  # login via Microsoft Entra ID

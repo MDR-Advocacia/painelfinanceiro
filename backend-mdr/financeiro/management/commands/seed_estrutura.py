@@ -53,11 +53,10 @@ LINHAS = [
      "Encerramento e Cumprimento de Sentença - BB Réu", ["bb-execucao"]),
     ("Banco do Brasil", "Acordos", "passivo",
      "Acordos - BB Réu", ["bb-acordos"]),
-    ("Banco do Brasil", "Estratégico", "passivo", None, ["bb-estrategico"]),
     # ressuscitada como linha de faturamento; a CONTROLADORIA atende
     ("Banco do Brasil", "Cadastro Técnico", "passivo",
      "Cadastro Técnico - BB Réu", ["bb-cadastro"]),
-    ("Banco do Brasil", "Autor — Processual", "credito",
+    ("Banco do Brasil", "BB - Recuperação de Crédito", "credito",
      "BB Autor", ["bb-autor-processual", "autor-recursal", "estrategico-autor", "ajuizamento"]),
     ("Ativos S.A.", "Ativos Réu", "passivo",
      "Ativos S.A. - Réu", ["ativos-reu"]),
@@ -79,11 +78,21 @@ INFRA = [
 ]
 
 
+# renomeações e remoções pra quem rodou versões anteriores do seed
+RENOMEAR = {("Banco do Brasil", "Autor — Processual"): "BB - Recuperação de Crédito"}
+REMOVER = [("Banco do Brasil", "Estratégico")]  # não fatura: é só equipe
+
+
 class Command(BaseCommand):
     help = "Semeia centros/linhas de faturamento e alocações (idempotente)."
 
     @transaction.atomic
     def handle(self, *args, **kwargs):
+        for (centro_nome, antigo), novo in RENOMEAR.items():
+            LinhaFaturamento.objects.filter(centro__nome=centro_nome, nome=antigo).update(nome=novo)
+        for centro_nome, nome in REMOVER:
+            LinhaFaturamento.objects.filter(centro__nome=centro_nome, nome=nome).delete()
+
         ccs = {c.nome: c for c in DpCentroCusto.objects.all()}
         setores = {s.nome: s for s in Setor.objects.all()}
 
