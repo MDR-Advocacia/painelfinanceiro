@@ -71,6 +71,16 @@
 
     /* Sombra em DUAS camadas: brilho azul difuso + contato navy suave */
     --shadow-glass: 0 8px 28px hsl(var(--glass-primary) / 0.14), 0 2px 6px hsl(220 60% 30% / 0.08);
+
+    /* ── PROFUNDIDADE (v2) ──
+       Escala de elevação + o "fio de luz" no topo de cada superfície: é o
+       detalhe que separa uma caixa chapada de uma peça de vidro. */
+    --inner-light: inset 0 1px 0 hsl(0 0% 100% / 0.9);
+    --elev-1: 0 1px 2px hsl(220 50% 30% / 0.06), 0 1px 1px hsl(220 50% 30% / 0.04);
+    --elev-2: 0 10px 26px -12px hsl(220 60% 30% / 0.28), 0 2px 6px hsl(220 50% 30% / 0.07);
+    --elev-3: 0 26px 60px -24px hsl(220 60% 28% / 0.42), 0 6px 14px hsl(220 50% 30% / 0.1);
+    --ring-accent: 0 0 0 1px hsl(var(--glass-primary) / 0.35), 0 12px 30px -14px hsl(var(--glass-primary) / 0.6);
+    --tracking-eyebrow: 0.16em;
     --shadow-button: 0 2px 10px hsl(var(--glass-primary) / 0.2);
     --transition-smooth: all 0.25s ease;
 
@@ -104,10 +114,10 @@
     --glass-primary: 217 100% 62%;
     --glass-secondary: 215 95% 72%;
     --glass-accent: 220 74% 14%;
-    --glass-surface: 220 40% 12%;
-    --glass-border: 220 30% 24%;
+    --glass-surface: 220 32% 17%;
+    --glass-border: 220 24% 31%;
 
-    --card: 220 40% 11%;
+    --card: 220 32% 16%;
     --card-foreground: 210 40% 98%;
 
     --popover: 220 40% 10%;
@@ -116,10 +126,10 @@
     --primary: 217 100% 62%;
     --primary-foreground: 0 0% 100%;
 
-    --secondary: 217.2 32.6% 17.5%;
+    --secondary: 220 28% 22%;
     --secondary-foreground: 210 40% 98%;
 
-    --muted: 217.2 32.6% 17.5%;
+    --muted: 220 28% 22%;
     --muted-foreground: 215 20.2% 65.1%;
 
     --accent: 217.2 32.6% 17.5%;
@@ -131,14 +141,22 @@
     --success: 145 55% 45%;
     --warning: 37 90% 55%;
 
-    --border: 220 30% 22%;
-    --input: 220 30% 22%;
+    --border: 220 24% 28%;
+    --input: 220 24% 28%;
     --ring: 217 100% 62%;
 
     --gradient-surface: linear-gradient(135deg, hsl(220 74% 8%) 0%, hsl(220 55% 12%) 100%);
-    --gradient-glass: linear-gradient(135deg, hsl(var(--glass-surface) / 0.9) 0%, hsl(var(--glass-surface) / 0.6) 100%);
+    /* praticamente opaco: no escuro, superfície translúcida deixa o halo do
+       fundo vazar por dentro do card e sujar gráfico e tabela */
+    --gradient-glass: linear-gradient(135deg, hsl(var(--glass-surface) / 0.99) 0%, hsl(220 32% 15% / 0.99) 100%);
     --shadow-glass: 0 8px 28px hsl(0 0% 0% / 0.45), 0 1px 3px hsl(0 0% 0% / 0.35);
     --shadow-button: 0 2px 10px hsl(var(--glass-primary) / 0.35);
+
+    /* profundidade no escuro: luz mais tênue, sombra mais funda */
+    --inner-light: inset 0 1px 0 hsl(0 0% 100% / 0.05);
+    --elev-1: 0 1px 2px hsl(220 80% 3% / 0.5);
+    --elev-2: 0 10px 28px -12px hsl(220 80% 2% / 0.8), 0 2px 6px hsl(220 80% 2% / 0.4);
+    --elev-3: 0 28px 64px -24px hsl(220 80% 2% / 0.9), 0 6px 16px hsl(220 80% 2% / 0.45);
 
     --sidebar-background: 220 45% 9%;
     --sidebar-foreground: 220 15% 85%;
@@ -177,7 +195,122 @@
     background: var(--gradient-glass);
     backdrop-filter: blur(20px);
     border: 1px solid hsl(var(--glass-border) / 0.7);
-    box-shadow: var(--shadow-glass);
+    box-shadow: var(--elev-2), var(--inner-light);
+  }
+  /* card clicável: sobe 2px e ganha anel azul */
+  .card-hover {
+    transition: transform 0.2s cubic-bezier(0.4, 0, 0.2, 1), box-shadow 0.2s ease, border-color 0.2s ease;
+  }
+  .card-hover:hover {
+    transform: translateY(-2px);
+    border-color: hsl(var(--glass-primary) / 0.45);
+    box-shadow: var(--elev-3), var(--inner-light);
+  }
+
+  /* Rótulo de seção — a mesma gramática em sidebar, cabeçalho e blocos */
+  .eyebrow {
+    font-size: 0.6875rem;
+    font-weight: 600;
+    letter-spacing: var(--tracking-eyebrow);
+    text-transform: uppercase;
+    color: hsl(var(--muted-foreground) / 0.85);
+  }
+
+  /* ── AURORA: profundidade no fundo do conteúdo ──
+     Dois halos de marca, quase imperceptíveis, que impedem o fundo chapado. */
+  .aurora {
+    position: fixed;
+    inset: 0;
+    z-index: 0;
+    pointer-events: none;
+    background:
+      radial-gradient(46% 40% at 82% -6%, hsl(var(--glass-primary) / 0.13) 0%, transparent 62%),
+      radial-gradient(40% 36% at 4% 4%, hsl(var(--glass-accent) / 0.08) 0%, transparent 60%),
+      radial-gradient(42% 38% at 96% 92%, hsl(var(--glass-secondary) / 0.1) 0%, transparent 62%);
+  }
+  .dark .aurora {
+    background:
+      radial-gradient(46% 40% at 82% -10%, hsl(var(--glass-primary) / 0.12) 0%, transparent 60%),
+      radial-gradient(36% 36% at 5% 4%, hsl(220 74% 34% / 0.14) 0%, transparent 58%),
+      radial-gradient(42% 38% at 95% 92%, hsl(190 95% 55% / 0.06) 0%, transparent 60%);
+  }
+
+  /* ── NAVEGAÇÃO (sidebar navy) ────────────────────────────────────── */
+  .nav-link {
+    position: relative;
+    display: flex;
+    width: 100%;
+    align-items: center;
+    gap: 0.7rem;
+    border-radius: 0.6rem;
+    padding: 0.5rem 0.7rem;
+    font-size: 0.875rem;
+    font-weight: 500;
+    color: hsl(var(--sidebar-foreground) / 0.72);
+    transition: background 0.18s ease, color 0.18s ease;
+  }
+  .nav-link:hover {
+    background: hsl(0 0% 100% / 0.055);
+    color: #fff;
+  }
+  .nav-link[data-active="true"] {
+    color: #fff;
+    background-image: linear-gradient(100deg, hsl(var(--glass-primary) / 0.34) 0%, hsl(190 95% 60% / 0.14) 100%);
+    box-shadow: inset 0 1px 0 hsl(0 0% 100% / 0.1);
+  }
+  /* fio de luz ciano marcando o item ativo */
+  .nav-link[data-active="true"]::before {
+    content: "";
+    position: absolute;
+    left: -0.55rem;
+    top: 50%;
+    height: 1.1rem;
+    width: 3px;
+    transform: translateY(-50%);
+    border-radius: 0 3px 3px 0;
+    background: hsl(190 95% 60%);
+    box-shadow: 0 0 12px hsl(190 95% 60% / 0.85);
+  }
+  .nav-link[data-active="true"] .nav-ico {
+    color: hsl(190 95% 68%);
+  }
+  .nav-ico {
+    display: grid;
+    place-items: center;
+    height: 1.05rem;
+    width: 1.05rem;
+    flex-shrink: 0;
+  }
+
+  /* ── BARRA SUPERIOR ──────────────────────────────────────────────── */
+  .topbar {
+    background: hsl(var(--background) / 0.72);
+    backdrop-filter: blur(14px) saturate(150%);
+    -webkit-backdrop-filter: blur(14px) saturate(150%);
+    border-bottom: 1px solid hsl(var(--border) / 0.7);
+  }
+
+  /* Barras de rolagem discretas (o padrão do SO destoa da interface) */
+  * {
+    scrollbar-width: thin;
+    scrollbar-color: hsl(var(--glass-border)) transparent;
+  }
+  ::-webkit-scrollbar {
+    width: 10px;
+    height: 10px;
+  }
+  ::-webkit-scrollbar-track,
+  ::-webkit-scrollbar-corner {
+    background: transparent;
+  }
+  ::-webkit-scrollbar-thumb {
+    background-color: hsl(var(--glass-border));
+    border: 3px solid transparent;
+    background-clip: padding-box;
+    border-radius: 999px;
+  }
+  ::-webkit-scrollbar-thumb:hover {
+    background-color: hsl(var(--glass-primary) / 0.5);
   }
 
   .glass-button {

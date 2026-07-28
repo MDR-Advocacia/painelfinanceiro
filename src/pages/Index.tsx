@@ -77,7 +77,7 @@ const MainContent = () => {
   const nenhum = !ORDEM_FALLBACK.some((m) => pode(m)) && !pode("sedes") && !pode("setores");
 
   return (
-    <main className="min-h-screen flex-1 overflow-y-auto p-6 md:p-8">
+    <main className="relative z-10 min-h-screen flex-1 overflow-y-auto p-6 md:p-8">
       {nenhum ? (
         <SemAcesso semNenhum />
       ) : bloqueado ? (
@@ -100,6 +100,8 @@ const MainContent = () => {
 
 const Index = () => (
   <div className="relative flex min-h-screen bg-background">
+    {/* halos de marca no fundo — profundidade sem ruído */}
+    <div aria-hidden className="aurora" />
     <Sidebar />
     <MainContent />
     <SaveIndicator />

@@ -85,11 +85,15 @@ export function Dashboard() {
 
   return (
     <div className="animate-fade-in space-y-6">
-      <div className="flex items-start justify-between gap-4 flex-wrap">
+      {/* cabeçalho fixo: o período e os filtros acompanham a rolagem — em
+          tela longa, perder o contexto do que se está olhando é o pior erro */}
+      <div className="topbar sticky top-0 z-30 -mx-6 -mt-6 flex flex-wrap items-end justify-between gap-4 px-6 py-4 md:-mx-8 md:-mt-8 md:px-8">
         <div>
-          <h2 className="font-heading text-2xl font-bold text-foreground">Dashboard Consolidado</h2>
-          <p className="text-sm text-muted-foreground mt-1">
-            {periodLabel} — Visão {VIEW_MODE_LABELS[viewMode].toLowerCase()}
+          <p className="eyebrow">Visão consolidada</p>
+          <h2 className="mt-1 font-heading text-2xl font-bold text-foreground">Dashboard</h2>
+          <p className="mt-0.5 text-sm text-muted-foreground">
+            {periodLabel} · visão {VIEW_MODE_LABELS[viewMode].toLowerCase()}
+            {filtroSede !== "todas" && <> · {sedes.find((s) => s.id === filtroSede)?.nome}</>}
           </p>
         </div>
         <div className="flex items-center gap-3 flex-wrap">
@@ -167,7 +171,8 @@ export function Dashboard() {
             <div className="grid lg:grid-cols-2 gap-4">
               <Card className="glass-card border-0">
                 <CardContent className="pt-6">
-                  <h4 className="font-heading text-sm font-semibold mb-4">Faturamento vs Custos por Setor</h4>
+                  <p className="eyebrow">Comparação</p>
+                  <h4 className="mb-4 mt-1 font-heading text-base font-semibold">Faturamento vs custos por setor</h4>
                   <ResponsiveContainer width="100%" height={250}>
                     <BarChart data={barData}>
                       <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))" />
@@ -185,7 +190,8 @@ export function Dashboard() {
 
               <Card className="glass-card border-0">
                 <CardContent className="pt-6">
-                  <h4 className="font-heading text-sm font-semibold mb-4">Distribuição de Faturamento</h4>
+                  <p className="eyebrow">Participação</p>
+                  <h4 className="mb-4 mt-1 font-heading text-base font-semibold">Distribuição do faturamento</h4>
                   <ResponsiveContainer width="100%" height={250}>
                     <PieChart>
                       <Pie data={pieData} dataKey="value" nameKey="name" cx="50%" cy="50%" innerRadius={50} outerRadius={90} paddingAngle={3}>
@@ -204,10 +210,11 @@ export function Dashboard() {
 
           <Card className="glass-card border-0">
             <CardContent className="pt-6">
-              <h4 className="font-heading text-sm font-semibold mb-4">Comparativo de Setores</h4>
+              <p className="eyebrow">Detalhamento</p>
+              <h4 className="mb-4 mt-1 font-heading text-base font-semibold">Comparativo de setores</h4>
               <div className="overflow-x-auto">
                 <Table>
-                  <TableHeader>
+                  <TableHeader className="sticky top-0 bg-card/95 backdrop-blur">
                     <TableRow>
                       <TableHead className="text-xs">Setor</TableHead>
                       <TableHead className="text-xs">Tipo</TableHead>
@@ -221,8 +228,15 @@ export function Dashboard() {
                   </TableHeader>
                   <TableBody>
                     {resumos.map(({ setor, resumo }) => (
-                      <TableRow key={setor.id} className="cursor-pointer hover:bg-muted/50" onClick={() => setActiveSetor(setor.id)}>
-                        <TableCell className="font-medium text-sm">{setor.nome}</TableCell>
+                      <TableRow
+                        key={setor.id}
+                        title="Abrir o setor"
+                        className="group cursor-pointer border-l-2 border-transparent transition-colors hover:border-l-[hsl(var(--dunatech-blue))] hover:bg-[hsl(var(--dunatech-blue))]/5"
+                        onClick={() => setActiveSetor(setor.id)}
+                      >
+                        <TableCell className="text-sm font-medium group-hover:text-[hsl(var(--dunatech-blue))]">
+                          {setor.nome}
+                        </TableCell>
                         <TableCell>
                           <Badge variant="outline" className="text-[10px]">
                             {setor.tipo === 'operacional' ? 'Oper.' : 'Admin.'}
@@ -253,20 +267,39 @@ export function Dashboard() {
   );
 }
 
+/**
+ * Indicador do topo. O rótulo vira eyebrow (some do caminho da leitura) e o
+ * NÚMERO manda na hierarquia; o ícone ganha o tom do próprio indicador, então
+ * dá pra varrer a linha inteira pela cor sem ler uma palavra.
+ */
 function KPICard({ icon: Icon, label, value, sub, color }: {
   icon: React.ElementType; label: string; value: string; sub?: string; color?: string;
 }) {
+  const tom = color?.includes("success")
+    ? { fg: "text-success", bg: "bg-success/10" }
+    : color?.includes("destructive")
+      ? { fg: "text-destructive", bg: "bg-destructive/10" }
+      : color?.includes("warning")
+        ? { fg: "text-warning", bg: "bg-warning/10" }
+        : { fg: "text-[hsl(var(--dunatech-blue))]", bg: "bg-[hsl(var(--dunatech-blue))]/10" };
+
   return (
-    <Card className="glass-card border-0 transition-transform hover:-translate-y-0.5">
-      <CardContent className="pt-5 pb-4">
-        <div className="flex items-center gap-2 mb-2">
-          <span className="flex h-7 w-7 items-center justify-center rounded-lg bg-[hsl(var(--dunatech-blue))]/10">
-            <Icon className="w-4 h-4 text-[hsl(var(--dunatech-blue))]" />
+    <Card className="glass-card card-hover border-0">
+      <CardContent className="px-4 pb-4 pt-4">
+        <div className="mb-3 flex items-center gap-2">
+          <span className={`flex h-7 w-7 items-center justify-center rounded-lg ${tom.bg}`}>
+            <Icon className={`h-3.5 w-3.5 ${tom.fg}`} strokeWidth={2} />
           </span>
-          <span className="text-xs text-muted-foreground">{label}</span>
+          <span className="eyebrow truncate text-[0.65rem]">{label}</span>
         </div>
-        <p className={`font-mono text-lg font-bold ${color || 'text-foreground'}`}>{value}</p>
-        {sub && <p className="text-xs font-mono text-muted-foreground mt-0.5">{sub}</p>}
+        <p className={`font-mono-numbers text-[1.35rem] font-bold leading-none tracking-tight ${color || "text-foreground"}`}>
+          {value}
+        </p>
+        {sub && (
+          <p className="mt-2 inline-flex rounded-full bg-muted/70 px-1.5 py-0.5 font-mono-numbers text-[0.68rem] text-muted-foreground">
+            {sub}
+          </p>
+        )}
       </CardContent>
     </Card>
   );

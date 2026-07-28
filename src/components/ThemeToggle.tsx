@@ -25,11 +25,13 @@ export function ThemeToggle() {
   return (
     <button
       onClick={toggle}
-      className="flex w-full items-center gap-3 rounded-lg px-3 py-2 text-xs text-sidebar-foreground/70 transition-colors hover:bg-sidebar-accent/60 hover:text-white"
+      className="nav-link text-xs"
       title={dark ? "Voltar ao modo claro" : "Ativar modo noturno"}
     >
-      {dark ? <Sun className="h-4 w-4" /> : <Moon className="h-4 w-4" />}
-      {dark ? "Modo claro" : "Modo noturno"}
+      <span className="nav-ico">
+        {dark ? <Sun className="h-full w-full" strokeWidth={1.8} /> : <Moon className="h-full w-full" strokeWidth={1.8} />}
+      </span>
+      <span className="flex-1 text-left">{dark ? "Modo claro" : "Modo noturno"}</span>
     </button>
   );
 }
