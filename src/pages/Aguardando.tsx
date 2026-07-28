@@ -41,7 +41,7 @@ export default function Aguardando() {
   };
 
   return (
-    <div className="min-h-screen flex items-center justify-center bg-[hsl(207,59%,15%)] px-4">
+    <div className="min-h-screen flex items-center justify-center px-4" style={{ background: "linear-gradient(135deg, hsl(220 74% 10%) 0%, hsl(220 74% 16%) 55%, hsl(217 80% 26%) 100%)" }}>
       <Card className="w-full max-w-md border-0 shadow-2xl">
         <CardContent className="pt-8 pb-8 px-8 flex flex-col items-center text-center">
           <img src={logoMdr} alt="MDR Logo" className="h-14 mb-6" />

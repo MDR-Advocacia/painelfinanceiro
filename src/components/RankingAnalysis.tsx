@@ -83,7 +83,7 @@ export function RankingAnalysis() {
                     <XAxis type="number" tick={{ fontSize: 11 }} unit="%" />
                     <YAxis type="category" dataKey="name" tick={{ fontSize: 11 }} width={120} />
                     <RTooltip formatter={(v: number) => `${v}%`} />
-                    <Bar dataKey="Margem (%)" fill="#1F4E78" radius={[0, 4, 4, 0]} />
+                    <Bar dataKey="Margem (%)" fill="#1E7BFF" radius={[0, 4, 4, 0]} />
                   </BarChart>
                 </ResponsiveContainer>
               </CardContent>

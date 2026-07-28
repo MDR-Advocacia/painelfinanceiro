@@ -44,15 +44,20 @@ export default function Login() {
   };
 
   return (
-    <div className="min-h-screen flex items-center justify-center bg-[hsl(207,59%,15%)] px-4">
-      <Card className="w-full max-w-md border-0 shadow-2xl">
+    <div
+      className="min-h-screen flex items-center justify-center px-4"
+      style={{ background: "linear-gradient(135deg, hsl(220 74% 10%) 0%, hsl(220 74% 16%) 55%, hsl(217 80% 26%) 100%)" }}
+    >
+      <Card className="w-full max-w-md border-0 shadow-2xl backdrop-blur-xl">
         <CardContent className="pt-8 pb-8 px-8">
           <div className="flex flex-col items-center mb-8">
             <img src={logoMdr} alt="MDR Logo" className="h-16 mb-4" />
-            <h1 className="font-heading text-lg font-bold text-foreground">
-              Painel Financeiro Jurídico
+            <h1 className="painel-wordmark font-heading text-xl font-bold">
+              Painel Financeiro
             </h1>
-            <p className="text-xs text-muted-foreground mt-1">MDR Advogados</p>
+            <p className="text-[10px] tracking-[0.2em] text-muted-foreground mt-1 uppercase">
+              MDR Advocacia · powered by Duna.Tech
+            </p>
           </div>
 
           {mode === "login" ? (
@@ -78,7 +83,7 @@ export default function Login() {
                   required
                 />
               </div>
-              <Button type="submit" className="w-full" disabled={loading}>
+              <Button type="submit" className="w-full glass-button border-0" disabled={loading}>
                 {loading ? "Entrando..." : "Entrar"}
               </Button>
               <button

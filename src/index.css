@@ -4,28 +4,48 @@
 @tailwind components;
 @tailwind utilities;
 
+/* ───────────────────────────────────────────────────────────────
+   Painel Financeiro — linguagem visual DunaTech (portada do Flow)
+   Paleta: navy #0A1940 ("DUNA") + azul elétrico #1E7BFF ("TECH")
+   Liquid Glass: superfícies translúcidas, gradientes suaves,
+   sombras azuladas. Mesmos tokens do DunaFlow pra manter a
+   família de produtos coesa.
+   ─────────────────────────────────────────────────────────────── */
+
 @layer base {
   :root {
-    --background: 0 0% 100%;
-    --foreground: 207 59% 15%;
+    --background: 220 15% 97%;
+    --foreground: 222.2 84% 4.9%;
 
-    --card: 0 0% 100%;
-    --card-foreground: 207 59% 15%;
+    /* DUNATECH brand */
+    --dunatech-navy: 220 74% 14%;       /* #0A1940 — "DUNA" */
+    --dunatech-blue: 217 100% 56%;      /* #1E7BFF — "TECH" */
+    --dunatech-blue-soft: 215 95% 72%;  /* tint pra hovers/fundos */
 
-    --popover: 0 0% 100%;
-    --popover-foreground: 207 59% 15%;
+    /* Liquid Glass */
+    --glass-primary: 217 100% 56%;
+    --glass-secondary: 215 95% 72%;
+    --glass-accent: 220 74% 14%;
+    --glass-surface: 220 20% 98%;
+    --glass-border: 220 20% 85%;
 
-    --primary: 207 59% 30%;
+    --card: var(--glass-surface);
+    --card-foreground: 222.2 84% 4.9%;
+
+    --popover: var(--glass-surface);
+    --popover-foreground: 222.2 84% 4.9%;
+
+    --primary: var(--glass-primary);
     --primary-foreground: 0 0% 100%;
 
-    --secondary: 220 33% 97%;
-    --secondary-foreground: 207 59% 20%;
+    --secondary: 220 25% 95%;
+    --secondary-foreground: 222.2 47.4% 11.2%;
 
-    --muted: 220 20% 95%;
-    --muted-foreground: 215 16% 47%;
+    --muted: 220 20% 94%;
+    --muted-foreground: 215.4 16.3% 46.9%;
 
-    --accent: 220 33% 97%;
-    --accent-foreground: 207 59% 20%;
+    --accent: var(--glass-accent);
+    --accent-foreground: 0 0% 100%;
 
     --destructive: 6 78% 57%;
     --destructive-foreground: 0 0% 100%;
@@ -36,26 +56,38 @@
     --warning: 37 90% 51%;
     --warning-foreground: 0 0% 100%;
 
-    --border: 220 20% 90%;
-    --input: 220 20% 90%;
-    --ring: 207 59% 30%;
+    --border: var(--glass-border);
+    --input: var(--glass-border);
+    --ring: var(--glass-primary);
 
     --radius: 0.75rem;
 
-    --sidebar-background: 207 59% 15%;
-    --sidebar-foreground: 210 20% 90%;
-    --sidebar-primary: 207 59% 50%;
-    --sidebar-primary-foreground: 0 0% 100%;
-    --sidebar-accent: 207 40% 22%;
-    --sidebar-accent-foreground: 210 20% 95%;
-    --sidebar-border: 207 30% 25%;
-    --sidebar-ring: 207 59% 50%;
+    /* Gradientes e sombras (Liquid Glass) */
+    --gradient-primary: linear-gradient(135deg, hsl(var(--glass-primary)) 0%, hsl(var(--glass-secondary)) 100%);
+    --gradient-accent: linear-gradient(135deg, hsl(var(--glass-accent)) 0%, hsl(var(--glass-secondary)) 100%);
+    --gradient-surface: linear-gradient(135deg, hsl(var(--glass-surface)) 0%, hsl(220 25% 96%) 100%);
+    --gradient-glass: linear-gradient(135deg, hsl(var(--glass-surface) / 0.8) 0%, hsl(var(--glass-surface) / 0.4) 100%);
 
-    --chart-1: 207 59% 30%;
-    --chart-2: 145 63% 42%;
-    --chart-3: 37 90% 51%;
-    --chart-4: 6 78% 57%;
-    --chart-5: 270 50% 50%;
+    --shadow-glass: 0 8px 32px hsl(var(--glass-primary) / 0.1);
+    --shadow-button: 0 2px 10px hsl(var(--glass-primary) / 0.2);
+    --transition-smooth: all 0.25s ease;
+
+    /* Sidebar clara (Flow) */
+    --sidebar-background: 0 0% 98%;
+    --sidebar-foreground: 240 5.3% 26.1%;
+    --sidebar-primary: 240 5.9% 10%;
+    --sidebar-primary-foreground: 0 0% 98%;
+    --sidebar-accent: 240 4.8% 95.9%;
+    --sidebar-accent-foreground: 240 5.9% 10%;
+    --sidebar-border: 220 13% 91%;
+    --sidebar-ring: 217.2 91.2% 59.8%;
+
+    /* Charts: família dunatech + semânticos */
+    --chart-1: 217 100% 56%;   /* dunatech-blue */
+    --chart-2: 220 74% 24%;    /* navy claro */
+    --chart-3: 215 95% 72%;    /* blue-soft */
+    --chart-4: 145 63% 42%;    /* success */
+    --chart-5: 37 90% 51%;     /* warning */
   }
 }
 
@@ -66,6 +98,8 @@
 
   body {
     @apply bg-background text-foreground font-sans antialiased;
+    background: var(--gradient-surface);
+    min-height: 100vh;
   }
 
   h1, h2, h3, h4, h5, h6 {
@@ -76,5 +110,34 @@
   .font-mono-numbers {
     font-family: 'IBM Plex Mono', monospace;
     font-variant-numeric: tabular-nums;
+  }
+
+  /* Liquid Glass Components (Flow) */
+  .glass-card {
+    background: var(--gradient-glass);
+    backdrop-filter: blur(20px);
+    border: 1px solid hsl(var(--glass-border) / 0.3);
+    box-shadow: var(--shadow-glass);
+  }
+
+  .glass-button {
+    background: var(--gradient-primary);
+    backdrop-filter: blur(10px);
+    border: 1px solid hsl(var(--glass-primary) / 0.3);
+    box-shadow: var(--shadow-button);
+    transition: var(--transition-smooth);
+  }
+
+  .glass-button:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 4px 20px hsl(var(--glass-primary) / 0.3);
+  }
+
+  /* Wordmark do painel — gradiente navy→azul no texto (família Flow) */
+  .painel-wordmark {
+    background: linear-gradient(90deg, hsl(var(--dunatech-navy)) 0%, hsl(var(--dunatech-blue)) 100%);
+    -webkit-background-clip: text;
+    background-clip: text;
+    -webkit-text-fill-color: transparent;
   }
 }

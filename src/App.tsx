@@ -46,7 +46,7 @@ function LoginRoute() {
   const { user, loading, pending } = useAuth();
   if (loading) {
     return (
-      <div className="min-h-screen flex items-center justify-center bg-[hsl(207,59%,15%)]">
+      <div className="min-h-screen flex items-center justify-center" style={{ background: "linear-gradient(135deg, hsl(220 74% 10%) 0%, hsl(220 74% 16%) 55%, hsl(217 80% 26%) 100%)" }}>
         <p className="text-white/60">Carregando...</p>
       </div>
     );

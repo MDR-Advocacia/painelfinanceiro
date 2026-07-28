@@ -83,7 +83,7 @@ export function Projections() {
                   <YAxis tick={{ fontSize: 11 }} tickFormatter={v => `${(v / 1000).toFixed(0)}k`} />
                   <RTooltip formatter={(v: number) => formatCurrency(v)} />
                   <Legend />
-                  <Line type="monotone" dataKey="Faturamento" stroke="#1F4E78" strokeWidth={2} dot={false} />
+                  <Line type="monotone" dataKey="Faturamento" stroke="#1E7BFF" strokeWidth={2} dot={false} />
                   <Line type="monotone" dataKey="Custos" stroke="#E74C3C" strokeWidth={2} dot={false} />
                   <Line type="monotone" dataKey="Impostos" stroke="#F39C12" strokeWidth={2} dot={false} />
                   <Line type="monotone" dataKey="Margem Acum." stroke="#27AE60" strokeWidth={2.5} dot={false} strokeDasharray="6 3" />

@@ -16,7 +16,8 @@ import {
 } from "recharts";
 import { DollarSign, TrendingUp, Users, AlertTriangle, Building2, Award } from "lucide-react"; // <-- Adicionado o ícone Award
 
-const CHART_COLORS = ["#1F4E78", "#27AE60", "#F39C12", "#E74C3C", "#8B5CF6", "#06B6D4"];
+// Paleta DunaTech (família Flow): azul elétrico + navy + tints, semânticos por último
+const CHART_COLORS = ["#1E7BFF", "#0A1940", "#7FB5FF", "#27AE60", "#F39C12", "#E74C3C"];
 
 const VIEW_MODE_LABELS: Record<ViewMode, string> = {
   mensal: 'Mensal',
@@ -140,7 +141,7 @@ export function Dashboard() {
       </div>
 
       {setores.length === 0 ? (
-        <Card>
+        <Card className="glass-card border-0">
           <CardContent className="py-16 text-center">
             <Building2 className="w-12 h-12 text-muted-foreground/30 mx-auto mb-4" />
             <h3 className="font-heading text-lg font-semibold text-muted-foreground">Nenhum setor cadastrado</h3>
@@ -164,7 +165,7 @@ export function Dashboard() {
 
           {barData.some(d => d.Faturamento > 0) && (
             <div className="grid lg:grid-cols-2 gap-4">
-              <Card>
+              <Card className="glass-card border-0">
                 <CardContent className="pt-6">
                   <h4 className="font-heading text-sm font-semibold mb-4">Faturamento vs Custos por Setor</h4>
                   <ResponsiveContainer width="100%" height={250}>
@@ -173,7 +174,7 @@ export function Dashboard() {
                       <XAxis dataKey="name" tick={{ fontSize: 11 }} />
                       <YAxis tick={{ fontSize: 11 }} tickFormatter={v => `${(v / 1000).toFixed(0)}k`} />
                       <RTooltip formatter={(v: number) => formatCurrency(v)} />
-                      <Bar dataKey="Faturamento" fill="#1F4E78" radius={[4, 4, 0, 0]} />
+                      <Bar dataKey="Faturamento" fill="#1E7BFF" radius={[4, 4, 0, 0]} />
                       <Bar dataKey="Custos" fill="#E74C3C" radius={[4, 4, 0, 0]} />
                       <Bar dataKey="Impostos" fill="#F39C12" radius={[4, 4, 0, 0]} />
                       <Legend />
@@ -182,7 +183,7 @@ export function Dashboard() {
                 </CardContent>
               </Card>
 
-              <Card>
+              <Card className="glass-card border-0">
                 <CardContent className="pt-6">
                   <h4 className="font-heading text-sm font-semibold mb-4">Distribuição de Faturamento</h4>
                   <ResponsiveContainer width="100%" height={250}>
@@ -201,7 +202,7 @@ export function Dashboard() {
             </div>
           )}
 
-          <Card>
+          <Card className="glass-card border-0">
             <CardContent className="pt-6">
               <h4 className="font-heading text-sm font-semibold mb-4">Comparativo de Setores</h4>
               <div className="overflow-x-auto">
@@ -256,10 +257,12 @@ function KPICard({ icon: Icon, label, value, sub, color }: {
   icon: React.ElementType; label: string; value: string; sub?: string; color?: string;
 }) {
   return (
-    <Card>
+    <Card className="glass-card border-0 transition-transform hover:-translate-y-0.5">
       <CardContent className="pt-5 pb-4">
         <div className="flex items-center gap-2 mb-2">
-          <Icon className="w-4 h-4 text-primary" />
+          <span className="flex h-7 w-7 items-center justify-center rounded-lg bg-[hsl(var(--dunatech-blue))]/10">
+            <Icon className="w-4 h-4 text-[hsl(var(--dunatech-blue))]" />
+          </span>
           <span className="text-xs text-muted-foreground">{label}</span>
         </div>
         <p className={`font-mono text-lg font-bold ${color || 'text-foreground'}`}>{value}</p>
