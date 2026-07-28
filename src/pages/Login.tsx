@@ -14,9 +14,11 @@ export default function Login() {
   const { signIn, signInWithMicrosoft } = useAuth();
 
   // Login oficial = SÓ Entra ID (Microsoft). O form de senha fica ESCONDIDO e
-  // só aparece com /login?senha — porta de emergência (SSO fora do ar) e uso
-  // no ambiente local, onde não há SSO. Não linkar essa opção na UI.
-  const senhaHabilitada = new URLSearchParams(window.location.search).has("senha");
+  // só aparece com /login?senha — porta de emergência (SSO fora do ar).
+  // LOCALHOST: o SSO é impossível (cookie do oauth2-proxy é .dunatecnologia.com
+  // e o rd cai no painel REAL) → esconde o Microsoft e mostra a senha direto.
+  const isLocal = ["localhost", "127.0.0.1"].includes(window.location.hostname);
+  const senhaHabilitada = isLocal || new URLSearchParams(window.location.search).has("senha");
 
   const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -49,21 +51,25 @@ export default function Login() {
           </div>
 
           <div className="space-y-4">
-            <Button type="button" className="w-full glass-button border-0 h-11" onClick={signInWithMicrosoft}>
-              <svg width="16" height="16" viewBox="0 0 21 21" className="mr-2" aria-hidden="true">
-                <rect x="1" y="1" width="9" height="9" fill="#F25022"/><rect x="11" y="1" width="9" height="9" fill="#7FBA00"/>
-                <rect x="1" y="11" width="9" height="9" fill="#00A4EF"/><rect x="11" y="11" width="9" height="9" fill="#FFB900"/>
-              </svg>
-              Entrar com Microsoft
-            </Button>
-            <p className="text-center text-[11px] text-muted-foreground">
-              Use a sua conta corporativa <b>@mdradvocacia.com</b>.
-            </p>
+            {!isLocal && (
+              <>
+                <Button type="button" className="w-full glass-button border-0 h-11" onClick={signInWithMicrosoft}>
+                  <svg width="16" height="16" viewBox="0 0 21 21" className="mr-2" aria-hidden="true">
+                    <rect x="1" y="1" width="9" height="9" fill="#F25022"/><rect x="11" y="1" width="9" height="9" fill="#7FBA00"/>
+                    <rect x="1" y="11" width="9" height="9" fill="#00A4EF"/><rect x="11" y="11" width="9" height="9" fill="#FFB900"/>
+                  </svg>
+                  Entrar com Microsoft
+                </Button>
+                <p className="text-center text-[11px] text-muted-foreground">
+                  Use a sua conta corporativa <b>@mdradvocacia.com</b>.
+                </p>
+              </>
+            )}
 
             {senhaHabilitada && (
-              <form onSubmit={handleLogin} className="space-y-4 border-t pt-4">
+              <form onSubmit={handleLogin} className={`space-y-4 ${isLocal ? "" : "border-t pt-4"}`}>
                 <p className="text-center text-[10px] uppercase tracking-wider text-muted-foreground">
-                  Acesso de emergência (senha)
+                  {isLocal ? "Ambiente local — login por senha" : "Acesso de emergência (senha)"}
                 </p>
                 <div>
                   <label className="text-xs font-medium text-muted-foreground">Usuário ou E-mail</label>
