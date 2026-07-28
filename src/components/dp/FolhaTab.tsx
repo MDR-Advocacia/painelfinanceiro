@@ -28,9 +28,10 @@ import {
   DropdownMenuSeparator, DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { Ajuda, TituloAjuda } from "@/components/dp/Ajuda";
+import { CcPicker } from "@/components/dp/Pickers";
 import ResumoCentroCusto from "@/components/dp/ResumoCentroCusto";
 import {
-  type DpCcNo, type DpCompetencia, type DpFolhaItem, type DpFolhaTotais, type DpRateio,
+  type DpCompetencia, type DpFolhaItem, type DpFolhaTotais, type DpRateio,
   REGIME_LABELS, dpApi, fmtBRL, folhaApi, relatoriosApi,
 } from "@/services/dp";
 
@@ -148,7 +149,6 @@ function CompetenciaDetalhe({ comp, editar, onMudou }: {
   const [busca, setBusca] = useState("");
   const [regime, setRegime] = useState(TODOS);
   const [ccFiltro, setCcFiltro] = useState(TODOS);
-  const [ccs, setCcs] = useState<DpCcNo[]>([]);
   const [ajustando, setAjustando] = useState<DpFolhaItem | null>(null);
   const [pagina, setPagina] = useState(0);
   const [total, setTotal] = useState(0);
@@ -180,7 +180,6 @@ function CompetenciaDetalhe({ comp, editar, onMudou }: {
     folhaApi.rateio(comp.id).then(setRateio).catch(() => undefined);
   }, [comp.id, busca, regime, ccFiltro, pagina]);
 
-  useEffect(() => { dpApi.ccArvore().then(setCcs).catch(() => undefined); }, []);
   useEffect(() => { carregarItens(); }, [carregarItens]);
 
   const acao = async (fn: () => Promise<unknown>, ok: string) => {
@@ -291,22 +290,9 @@ function CompetenciaDetalhe({ comp, editar, onMudou }: {
               {Object.entries(REGIME_LABELS).map(([k, l]) => <SelectItem key={k} value={k}>{l}</SelectItem>)}
             </SelectContent>
           </Select>
-          <Select value={ccFiltro} onValueChange={(v) => { setCcFiltro(v); setPagina(0); }}>
-            <SelectTrigger className="h-9 w-[220px] text-xs">
-              <SelectValue placeholder="Centro de custo" />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value={TODOS}>Todos os centros de custo</SelectItem>
-              {ccs.flatMap((raiz) => [
-                <SelectItem key={raiz.id} value={raiz.id}>
-                  {raiz.nome_curto}{raiz.filhos.length ? " (com subnúcleos)" : ""}
-                </SelectItem>,
-                ...raiz.filhos.map((f) => (
-                  <SelectItem key={f.id} value={f.id}>{"\u00A0\u00A0\u00A0"}└ {f.nome_curto}</SelectItem>
-                )),
-              ])}
-            </SelectContent>
-          </Select>
+          <CcPicker valor={ccFiltro} rotuloTodos="Todos os centros de custo" comSubnucleos
+                    className="w-[230px] text-xs"
+                    onChange={(v) => { setCcFiltro(v); setPagina(0); }} />
           <div className="ml-auto flex flex-wrap gap-1.5">
             <Button size="sm" variant="outline" className="gap-1"
                     title="Folha analítica completa em Excel timbrado"
@@ -381,8 +367,8 @@ function CompetenciaDetalhe({ comp, editar, onMudou }: {
                   {items.map((it) => (
                     <TableRow key={it.id}
                               className={editar && aberta ? "cursor-pointer hover:bg-muted/50" : ""}
-                              onClick={() => editar && aberta && setLancando(it)}
-                              title={editar && aberta ? "Clique pra lançar faltas/prêmios" : ""}>
+                              onClick={() => editar && aberta && setLancando({ ...it, _aba: "faltas" } as DpFolhaItem)}
+                              title={editar && aberta ? "Clique pra lançar faltas do mês" : ""}>
                       <TableCell className="font-mono text-xs">{it.matricula}</TableCell>
                       <TableCell className="max-w-[220px] truncate text-sm">
                         <span className="flex items-center gap-1.5">
@@ -418,7 +404,10 @@ function CompetenciaDetalhe({ comp, editar, onMudou }: {
                       <TableCell className="text-right font-mono text-xs font-semibold">{fmtBRL(it.total_pagar)}</TableCell>
                       <TableCell className="hidden text-right font-mono text-xs sm:table-cell">{fmtBRL(it.custo_total)}</TableCell>
                       {editar && aberta && (
-                        <TableCell className="text-center">
+                        // stopPropagation: o menu vive dentro da linha clicável e,
+                        // sem isso, o clique borbulha e reabre sempre "faltas"
+                        <TableCell className="text-center"
+                                   onClick={(e) => e.stopPropagation()}>
                           <DropdownMenu>
                             <DropdownMenuTrigger asChild>
                               <button

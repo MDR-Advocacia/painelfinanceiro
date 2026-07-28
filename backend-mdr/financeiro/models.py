@@ -232,6 +232,47 @@ class DpCargo(models.Model):
         return self.nome
 
 
+class DpLideranca(models.Model):
+    """Catálogo de LIDERANÇAS: supervisores e coordenadores.
+
+    Antes eram texto livre na ficha do colaborador (cada import escrevia um
+    jeito). Virou tabela pra padronizar o nome, permitir renomear em um lugar
+    só (a mudança propaga pra todo mundo) e ligar a liderança ao seu centro de
+    custo. A MESMA pessoa pode ser supervisora e coordenadora — por isso são
+    dois papéis marcáveis, não dois cadastros.
+    """
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    nome = models.CharField(max_length=120, unique=True)
+    e_supervisor = models.BooleanField(default=True)
+    e_coordenador = models.BooleanField(default=False)
+    centro_custo = models.ForeignKey(DpCentroCusto, on_delete=models.SET_NULL,
+                                     null=True, blank=True, related_name="liderancas")
+    # vínculo opcional com a ficha da pessoa no quadro (nem toda liderança é
+    # colaboradora cadastrada — sócios, por exemplo)
+    colaborador = models.ForeignKey('DpColaborador', on_delete=models.SET_NULL,
+                                    null=True, blank=True, related_name="lideranca")
+    email = models.CharField(max_length=150, blank=True, default="")
+    ativo = models.BooleanField(default=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        db_table = 'dp_liderancas'
+        ordering = ['nome']
+
+    def __str__(self):
+        return self.nome
+
+    @property
+    def papeis(self) -> str:
+        p = []
+        if self.e_supervisor:
+            p.append("Supervisor")
+        if self.e_coordenador:
+            p.append("Coordenador")
+        return " · ".join(p) or "—"
+
+
 class DpColaborador(models.Model):
     """Ficha do colaborador (TB_Colaboradores). Uma linha por MATRÍCULA — a mesma
     pessoa pode ter 2 matrículas na história (ex.: estagiário 10xx que virou CLT
@@ -247,8 +288,10 @@ class DpColaborador(models.Model):
     area = models.CharField(max_length=20, blank=True, default="")
     centro_custo = models.ForeignKey(DpCentroCusto, on_delete=models.PROTECT,
                                      related_name="colaboradores")
-    supervisor = models.CharField(max_length=120, blank=True, default="")
-    coordenador = models.CharField(max_length=120, blank=True, default="")
+    supervisor = models.ForeignKey(DpLideranca, on_delete=models.SET_NULL, null=True,
+                                   blank=True, related_name="supervisionados")
+    coordenador = models.ForeignKey(DpLideranca, on_delete=models.SET_NULL, null=True,
+                                    blank=True, related_name="coordenados")
     equipe = models.CharField(max_length=120, blank=True, default="")
     cargo = models.ForeignKey(DpCargo, on_delete=models.SET_NULL, null=True, blank=True,
                               related_name="colaboradores")
@@ -496,6 +539,11 @@ class DpAuditLog(models.Model):
     acao = models.CharField(max_length=40)          # criar/editar/desligar/importar/excluir
     entidade = models.CharField(max_length=60)      # dp_colaborador, dp_cargo, ...
     entidade_id = models.CharField(max_length=60, blank=True, default="")
+    # pessoa afetada pelo registro (quando faz sentido): permite pesquisar o
+    # histórico completo de um colaborador — cadastro, folha, ajuste, rescisão
+    colaborador = models.ForeignKey(DpColaborador, on_delete=models.SET_NULL, null=True,
+                                    blank=True, related_name="auditoria")
+    colaborador_nome = models.CharField(max_length=200, blank=True, default="")
     antes = models.JSONField(null=True, blank=True)
     depois = models.JSONField(null=True, blank=True)
     created_at = models.DateTimeField(auto_now_add=True)

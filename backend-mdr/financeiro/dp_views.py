@@ -11,10 +11,13 @@ from rest_framework.response import Response
 
 from .models import (
     DP_MATRICULA_BASE, DpAuditLog, DpCargo, DpCentroCusto, DpColaborador, DpEvento,
+    DpLideranca,
 )
 from .dp_audit import humanizar
 from .dp_escopo import filtrar_colaboradores
-from .serializers import DpCargoSerializer, DpCentroCustoSerializer, DpColaboradorSerializer
+from .serializers import (
+    DpCargoSerializer, DpCentroCustoSerializer, DpColaboradorSerializer, DpLiderancaSerializer,
+)
 from .views import modulo_permission
 
 _PERM = [modulo_permission(read_any=["pessoal"], write="pessoal")]
@@ -25,10 +28,18 @@ def _quem(request) -> str:
     return (u.email or u.username or str(u.pk)) if u and u.is_authenticated else "?"
 
 
-def audit(request, acao: str, entidade: str, entidade_id, antes=None, depois=None):
+def audit(request, acao: str, entidade: str, entidade_id, antes=None, depois=None,
+          colaborador=None):
+    """Registra na trilha. `colaborador` liga o registro à PESSOA afetada — é o
+    que permite pesquisar o histórico completo de alguém (cadastro, folha,
+    ajuste pontual, rescisão). Quando a entidade já é a ficha, deduz sozinho."""
+    if colaborador is None and entidade == "dp_colaborador" and entidade_id:
+        colaborador = DpColaborador.objects.filter(pk=entidade_id).first()
     DpAuditLog.objects.create(
         usuario=_quem(request), acao=acao, entidade=entidade,
         entidade_id=str(entidade_id or ""), antes=antes, depois=depois,
+        colaborador=colaborador,
+        colaborador_nome=(colaborador.nome if colaborador else ""),
     )
 
 
@@ -37,7 +48,9 @@ def _snap(obj: DpColaborador) -> dict:
         "matricula": obj.matricula, "nome": obj.nome, "cpf": obj.cpf,
         "unidade": obj.unidade, "area": obj.area,
         "centro_custo": obj.centro_custo.nome if obj.centro_custo_id else None,
-        "supervisor": obj.supervisor, "coordenador": obj.coordenador, "equipe": obj.equipe,
+        "supervisor": obj.supervisor.nome if obj.supervisor_id else None,
+        "coordenador": obj.coordenador.nome if obj.coordenador_id else None,
+        "equipe": obj.equipe,
         "cargo": obj.cargo.nome if obj.cargo_id else None,
         "regime": obj.regime, "status": obj.status,
         "data_admissao": str(obj.data_admissao or ""), "data_demissao": str(obj.data_demissao or ""),
@@ -118,7 +131,8 @@ class DpCargoViewSet(viewsets.ModelViewSet):
 class DpColaboradorViewSet(viewsets.ModelViewSet):
     """Quadro de pessoal. list aceita: ?busca= (nome/matrícula/cpf), ?regime=,
     ?status=, ?cc= (uuid), ?unidade=, ?limit/?offset — devolve {total, items}."""
-    queryset = DpColaborador.objects.select_related("centro_custo", "cargo").all()
+    queryset = DpColaborador.objects.select_related(
+        "centro_custo", "cargo", "supervisor", "coordenador").all()
     serializer_class = DpColaboradorSerializer
     permission_classes = _PERM
 
@@ -135,7 +149,13 @@ class DpColaboradorViewSet(viewsets.ModelViewSet):
         if request.query_params.get("status"):
             qs = qs.filter(status=request.query_params["status"])
         if request.query_params.get("cc"):
-            qs = qs.filter(centro_custo_id=request.query_params["cc"])
+            cc = DpCentroCusto.objects.filter(pk=request.query_params["cc"]).first()
+            # escolher o núcleo traz os subnúcleos junto (mesma regra da folha)
+            qs = qs.filter(centro_custo_id__in=cc.descendentes_ids()) if cc else qs.none()
+        if request.query_params.get("supervisor"):
+            qs = qs.filter(supervisor_id=request.query_params["supervisor"])
+        if request.query_params.get("coordenador"):
+            qs = qs.filter(coordenador_id=request.query_params["coordenador"])
         if request.query_params.get("unidade"):
             qs = qs.filter(unidade=request.query_params["unidade"])
         total = qs.count()
@@ -231,13 +251,80 @@ class DpColaboradorViewSet(viewsets.ModelViewSet):
         })
 
 
+class DpLiderancaViewSet(viewsets.ModelViewSet):
+    """Catálogo de supervisores e coordenadores. ?papel=supervisor|coordenador
+    filtra por função; ?ativo=1 esconde as inativas."""
+    queryset = DpLideranca.objects.select_related("centro_custo").all()
+    serializer_class = DpLiderancaSerializer
+    permission_classes = _PERM
+
+    def get_queryset(self):
+        qs = super().get_queryset()
+        papel = self.request.query_params.get("papel")
+        if papel == "supervisor":
+            qs = qs.filter(e_supervisor=True)
+        elif papel == "coordenador":
+            qs = qs.filter(e_coordenador=True)
+        if self.request.query_params.get("ativo") in ("1", "true"):
+            qs = qs.filter(ativo=True)
+        return qs
+
+    def _snapshot(self, obj):
+        return {"nome": obj.nome, "e_supervisor": obj.e_supervisor,
+                "e_coordenador": obj.e_coordenador, "ativo": obj.ativo,
+                "centro_custo": obj.centro_custo.nome if obj.centro_custo_id else None,
+                "email": obj.email}
+
+    def perform_create(self, serializer):
+        obj = serializer.save()
+        audit(self.request, "criar", "dp_lideranca", obj.id, depois=self._snapshot(obj))
+
+    def perform_update(self, serializer):
+        antes = self._snapshot(serializer.instance)
+        obj = serializer.save()
+        audit(self.request, "editar", "dp_lideranca", obj.id, antes=antes,
+              depois=self._snapshot(obj))
+
+    def perform_destroy(self, instance):
+        # liderança com gente vinculada não some — inativa (histórico é sagrado)
+        if instance.supervisionados.exists() or instance.coordenados.exists():
+            instance.ativo = False
+            instance.save(update_fields=["ativo"])
+            audit(self.request, "editar", "dp_lideranca", instance.id,
+                  antes={"nome": instance.nome, "ativo": True},
+                  depois={"nome": instance.nome, "ativo": False})
+            return
+        audit(self.request, "excluir", "dp_lideranca", instance.id,
+              antes=self._snapshot(instance))
+        instance.delete()
+
+    @action(detail=False, methods=["get"])
+    def equipe(self, request):
+        """Quantas pessoas cada liderança tem hoje (aba de catálogo)."""
+        sup = dict(DpColaborador.objects.filter(status="ativo", supervisor__isnull=False)
+                   .values_list("supervisor_id").annotate(n=Count("id")))
+        coord = dict(DpColaborador.objects.filter(status="ativo", coordenador__isnull=False)
+                     .values_list("coordenador_id").annotate(n=Count("id")))
+        return Response({str(k): {"supervisionados": sup.get(k, 0), "coordenados": coord.get(k, 0)}
+                         for k in set(sup) | set(coord)})
+
+
 @api_view(["GET"])
 @permission_classes(_PERM)
 def dp_audit_list(request):
-    """Trilha de auditoria do DP (paginada): ?limit/?offset/?entidade=."""
+    """Trilha de auditoria do DP (paginada): ?limit/?offset/?entidade=
+    /?usuario= (quem executou) /?colaborador= (uuid da pessoa afetada)
+    /?busca= (texto livre no nome da pessoa ou no usuário)."""
     qs = DpAuditLog.objects.all()
     if request.query_params.get("entidade"):
         qs = qs.filter(entidade=request.query_params["entidade"])
+    if request.query_params.get("usuario"):
+        qs = qs.filter(usuario__iexact=request.query_params["usuario"])
+    if request.query_params.get("colaborador"):
+        qs = qs.filter(colaborador_id=request.query_params["colaborador"])
+    busca = (request.query_params.get("busca") or "").strip()
+    if busca:
+        qs = qs.filter(Q(colaborador_nome__icontains=busca) | Q(usuario__icontains=busca))
     total = qs.count()
     try:
         limit = min(int(request.query_params.get("limit", 50)), 500)
@@ -247,6 +334,26 @@ def dp_audit_list(request):
     # devolve TRADUZIDO (linguagem humana) — a UI nao mostra JSON
     return Response({"total": total,
                      "items": [humanizar(a) for a in qs[offset:offset + limit]]})
+
+
+@api_view(["GET"])
+@permission_classes(_PERM)
+def dp_audit_filtros(request):
+    """Alimenta os filtros da auditoria: quem já mexeu no módulo e quais pessoas
+    têm histórico registrado."""
+    usuarios = sorted({u for u in DpAuditLog.objects.values_list("usuario", flat=True).distinct() if u})
+    pessoas = (DpAuditLog.objects.filter(colaborador__isnull=False)
+               .values("colaborador_id", "colaborador_nome").distinct())
+    vistos, lista = set(), []
+    for p in pessoas:
+        cid = str(p["colaborador_id"])
+        if cid in vistos:
+            continue
+        vistos.add(cid)
+        lista.append({"id": cid, "nome": p["colaborador_nome"]})
+    lista.sort(key=lambda x: x["nome"])
+    entidades = sorted({e for e in DpAuditLog.objects.values_list("entidade", flat=True).distinct() if e})
+    return Response({"usuarios": usuarios, "colaboradores": lista, "entidades": entidades})
 
 
 # ─────────────────────────── IMPORTADOR DA PLANILHA ───────────────────────────
@@ -277,6 +384,23 @@ def _num(v):
         return float(v)
     except (TypeError, ValueError):
         return 0.0
+
+
+def _lideranca(nome: str, papel: str):
+    """Acha (ou cria) a liderança no catálogo pelo nome vindo da planilha."""
+    nome = (nome or "").strip()
+    if not nome:
+        return None
+    lid = DpLideranca.objects.filter(nome__iexact=nome).first()
+    if lid is None:
+        lid = DpLideranca.objects.create(nome=nome, e_supervisor=(papel == "sup"),
+                                         e_coordenador=(papel == "coord"))
+    else:
+        campo = "e_supervisor" if papel == "sup" else "e_coordenador"
+        if not getattr(lid, campo):
+            setattr(lid, campo, True)
+            lid.save(update_fields=[campo])
+    return lid
 
 
 @api_view(["POST"])
@@ -352,9 +476,12 @@ def dp_importar(request):
                 campos = {
                     "nome": nome, "sexo": _norm(row[3]), "cpf": _norm(row[4]),
                     "unidade": _norm(row[5]), "area": _norm(row[6]),
-                    "centro_custo": cc, "supervisor": _norm(row[9]),
-                    # a planilha traz "Fulano - SUP" / "Fulano - COOR" na mesma coluna
-                    "coordenador": (_norm(row[9]) if "COOR" in _norm(row[9]).upper() else ""),
+                    "centro_custo": cc,
+                    # a planilha traz "Fulano - SUP" / "Fulano - COOR" na mesma
+                    # coluna — cada nome vira/acha uma linha no catálogo
+                    "supervisor": _lideranca(_norm(row[9]), "sup"),
+                    "coordenador": (_lideranca(_norm(row[9]), "coord")
+                                    if "COOR" in _norm(row[9]).upper() else None),
                     "equipe": _norm(row[10]),
                     "cargo": cargo, "regime": regime,
                     "status": "ativo" if _norm(row[12]).lower() == "ativo" else "inativo",

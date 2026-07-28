@@ -14,6 +14,8 @@ CAMPOS = {
     "area": ("Área", "texto"),
     "centro_custo": ("Centro de custo", "texto"),
     "supervisor": ("Supervisor", "texto"),
+    "e_supervisor": ("É supervisor", "sim_nao"),
+    "e_coordenador": ("É coordenador", "sim_nao"),
     "coordenador": ("Coordenador", "texto"),
     "tipo_desligamento": ("Tipo de desligamento", "texto"),
     "liquido_rescisao": ("Líquido da rescisão", "moeda"),
@@ -81,6 +83,7 @@ ACOES = {
     "reabrir_competencia": ("reabriu a competência", "reabrir"),
     "desfazer_revisao": ("desfez o envio para revisão", "reabrir"),
     "ajuste_pontual": ("fez um ajuste pontual em", "ajuste"),
+    "excluir": ("excluiu", "sair"),
 }
 
 ENTIDADES = {
@@ -93,6 +96,7 @@ ENTIDADES = {
     "dp_importacao": "importação",
     "dp_simulacao": "simulação",
     "dp_folha_item": "linha da folha",
+    "dp_lideranca": "liderança",
 }
 
 
@@ -238,6 +242,9 @@ def humanizar(log) -> dict:
         mudancas = _mudancas(
             {k: v for k, v in antes.items() if k != "colaborador"},
             {k: v for k, v in depois.items() if k not in ("colaborador", "competencia")})
+    elif log.acao == "excluir":
+        titulo = f"Excluiu {entidade}" + (f": {alvo}" if alvo else "") + " do catálogo"
+        mudancas = []
     elif log.acao == "desfazer_revisao":
         titulo = "Desfez o envio para revisão (folha voltou para Aberta)"
         mudancas = []
@@ -259,6 +266,8 @@ def humanizar(log) -> dict:
         "entidade": entidade,
         "alvo": alvo,
         "titulo": titulo,
+        "colaborador_id": str(log.colaborador_id) if log.colaborador_id else None,
+        "colaborador_nome": log.colaborador_nome or "",
         "mudancas": mudancas,
         "resumo": (f"{len(mudancas)} campo(s) alterado(s)" if mudancas else ""),
     }

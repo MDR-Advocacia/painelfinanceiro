@@ -701,7 +701,8 @@ def dp_relatorio_quadro(request):
     for c in qs:
         rows.append([c.matricula, c.nome, c.cpf, c.get_regime_display(), c.status,
                      c.unidade, c.area, c.centro_custo.nome if c.centro_custo_id else "",
-                     c.supervisor, c.equipe, c.cargo.nome if c.cargo_id else "",
+                     c.supervisor.nome if c.supervisor_id else "", c.equipe,
+                     c.cargo.nome if c.cargo_id else "",
                      str(c.data_admissao or ""), str(c.data_demissao or ""),
                      c.salario_bruto, c.saldo_livre, c.vt, c.va])
     wb, ws = _wb_timbrado("Quadro de Pessoal",

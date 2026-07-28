@@ -4,7 +4,8 @@
 import { useCallback, useEffect, useState } from "react";
 import {
   Contact, Download, FileSpreadsheet, LayoutDashboard, Loader2, Plus, RefreshCw,
-  FileText, ScrollText, Search, Sliders, TrendingUp, UserMinus, Users, Wallet,
+  FileText, ScrollText, Search, Sliders, TrendingUp, UserMinus, UserSearch, Users,
+  Wallet, X,
 } from "lucide-react";
 import { toast } from "sonner";
 
@@ -30,9 +31,11 @@ import { Ajuda, TituloAjuda } from "@/components/dp/Ajuda";
 import ParametrosTab from "@/components/dp/ParametrosTab";
 import SimulacoesTab from "@/components/dp/SimulacoesTab";
 import FolhaTab from "@/components/dp/FolhaTab";
+import { CcPicker, ColaboradorPicker, LiderancaPicker, invalidarArvoreCc } from "@/components/dp/Pickers";
 import { usePermissions } from "@/hooks/usePermissions";
 import {
-  type DpCargo, type DpCentroCusto, type DpColaborador, type DpEvento, type DpResumo,
+  type DpAuditFiltros, type DpCargo, type DpCentroCusto, type DpColaborador,
+  type DpEvento, type DpLideranca, type DpResumo,
   REGIME_LABELS, dpApi, exportApi, fmtBRL, fmtData,
 } from "@/services/dp";
 
@@ -159,6 +162,7 @@ function QuadroTab({ ccs, cargos, editar, onMudou, filtroExterno, rotuloFiltro, 
   const [status, setStatus] = useState("ativo");
   const [cc, setCc] = useState(TODOS);
   const [unidade, setUnidade] = useState("");
+  const [supervisor, setSupervisor] = useState<string | null>(null);
 
   // drill-down do painel: aplica o filtro que veio de lá
   useEffect(() => {
@@ -181,12 +185,13 @@ function QuadroTab({ ccs, cargos, editar, onMudou, filtroExterno, rotuloFiltro, 
     setLoading(true);
     dpApi.listar({
       busca, regime: regime === TODOS ? "" : regime, status: status === TODOS ? "" : status,
-      cc: cc === TODOS ? "" : cc, unidade, limit: PAGE, offset: pagina * PAGE,
+      cc: cc === TODOS ? "" : cc, unidade, supervisor: supervisor ?? "",
+      limit: PAGE, offset: pagina * PAGE,
     })
       .then((r) => { setItems(r.items); setTotal(r.total); })
       .catch((e) => toast.error(e.message))
       .finally(() => setLoading(false));
-  }, [busca, regime, status, cc, unidade, pagina]);
+  }, [busca, regime, status, cc, unidade, supervisor, pagina]);
   useEffect(() => { carregar(); }, [carregar]);
 
   const totalPaginas = Math.max(1, Math.ceil(total / PAGE));
@@ -234,13 +239,12 @@ function QuadroTab({ ccs, cargos, editar, onMudou, filtroExterno, rotuloFiltro, 
               <SelectItem value={TODOS}>Todos</SelectItem>
             </SelectContent>
           </Select>
-          <Select value={cc} onValueChange={(v) => { setCc(v); setPagina(0); }}>
-            <SelectTrigger className="h-9 w-[210px] text-xs"><SelectValue placeholder="Centro de custo" /></SelectTrigger>
-            <SelectContent>
-              <SelectItem value={TODOS}>Todos os CCs</SelectItem>
-              {ccs.map((c) => <SelectItem key={c.id} value={c.id}>{c.nome}</SelectItem>)}
-            </SelectContent>
-          </Select>
+          <CcPicker valor={cc} rotuloTodos="Todos os centros de custo" comSubnucleos
+                    className="w-[230px] text-xs"
+                    onChange={(v) => { setCc(v); setPagina(0); }} />
+          <LiderancaPicker papel="supervisor" valor={supervisor} permiteCriar={false}
+                           rotuloVazio="Todos os supervisores" className="w-[200px] text-xs"
+                           onChange={(id) => { setSupervisor(id); setPagina(0); }} />
           <button onClick={carregar} className="ml-1 text-muted-foreground hover:text-foreground" title="Atualizar">
             <RefreshCw className={`h-4 w-4 ${loading ? "animate-spin" : ""}`} />
           </button>
@@ -362,8 +366,8 @@ function FichaDialog({ colaborador, ccs, cargos, editar, onClose, onMudou }: {
     try {
       await dpApi.atualizar(c.id, {
         nome: c.nome, cpf: c.cpf, sexo: c.sexo, unidade: c.unidade, area: c.area,
-        centro_custo_id: c.centro_custo_id, supervisor: c.supervisor,
-        coordenador: c.coordenador, equipe: c.equipe,
+        centro_custo_id: c.centro_custo_id, supervisor_id: c.supervisor_id,
+        coordenador_id: c.coordenador_id, equipe: c.equipe,
         cargo_id: c.cargo_id, salario_bruto: Number(c.salario_bruto) || 0,
         saldo_livre: Number(c.saldo_livre) || 0, vt: Number(c.vt) || 0,
         va: Number(c.va) || 0, opta_vt: c.opta_vt, pix: c.pix,
@@ -396,11 +400,13 @@ function FichaDialog({ colaborador, ccs, cargos, editar, onClose, onMudou }: {
           <CampoTexto rotulo="CPF" valor={c.cpf} onChange={(v) => set("cpf", v)} ro={ro} />
           <CampoTexto rotulo="Unidade" valor={c.unidade} onChange={(v) => set("unidade", v)} ro={ro} />
           <div>
-            <Label className="text-xs text-muted-foreground">Centro de Custo</Label>
-            <Select value={c.centro_custo_id} onValueChange={(v) => set("centro_custo_id", v)} disabled={ro}>
-              <SelectTrigger className="h-9 text-sm"><SelectValue /></SelectTrigger>
-              <SelectContent>{ccs.map((x) => <SelectItem key={x.id} value={x.id}>{x.nome}</SelectItem>)}</SelectContent>
-            </Select>
+            <Label className="flex items-center gap-1 text-xs text-muted-foreground">
+              Centro de Custo
+              <Ajuda titulo="Centro de custo"
+                     texto="Segue a mesma árvore do módulo: o núcleo (Réu, Autor, ADM…) agrupa os subnúcleos. A pessoa fica sempre no subnúcleo em que trabalha — o custo sobe para o núcleo sozinho." />
+            </Label>
+            <CcPicker valor={c.centro_custo_id} ro={ro} className="w-full"
+                      onChange={(v) => set("centro_custo_id", v)} />
           </div>
           <div>
             <Label className="text-xs text-muted-foreground">Cargo</Label>
@@ -412,8 +418,26 @@ function FichaDialog({ colaborador, ccs, cargos, editar, onClose, onMudou }: {
               </SelectContent>
             </Select>
           </div>
-          <CampoTexto rotulo="Supervisor" valor={c.supervisor} onChange={(v) => set("supervisor", v)} ro={ro} />
-          <CampoTexto rotulo="Coordenador" valor={c.coordenador} onChange={(v) => set("coordenador", v)} ro={ro} />
+          <div>
+            <Label className="flex items-center gap-1 text-xs text-muted-foreground">
+              Supervisor
+              <Ajuda titulo="Supervisor"
+                     texto="Vem do catálogo de lideranças (aba Parâmetros). Digite para buscar; se o nome ainda não existir, dá para cadastrar na hora." />
+            </Label>
+            <LiderancaPicker papel="supervisor" valor={c.supervisor_id} valorNome={c.supervisor_nome}
+                             ro={ro}
+                             onChange={(id, nome) => setC((s) => ({ ...s, supervisor_id: id, supervisor_nome: nome }))} />
+          </div>
+          <div>
+            <Label className="flex items-center gap-1 text-xs text-muted-foreground">
+              Coordenador
+              <Ajuda titulo="Coordenador"
+                     texto="Também vem do catálogo de lideranças. A mesma pessoa pode ser supervisora de uma equipe e coordenadora de outra." />
+            </Label>
+            <LiderancaPicker papel="coordenador" valor={c.coordenador_id} valorNome={c.coordenador_nome}
+                             ro={ro}
+                             onChange={(id, nome) => setC((s) => ({ ...s, coordenador_id: id, coordenador_nome: nome }))} />
+          </div>
           <CampoTexto rotulo="Equipe" valor={c.equipe} onChange={(v) => set("equipe", v)} ro={ro} />
           <div>
             <Label className="text-xs text-muted-foreground">Sexo</Label>
@@ -534,8 +558,8 @@ function NovoDialog({ ccs, cargos, onClose, onCriou }: {
   const [cargoId, setCargoId] = useState("");
   const [sexo, setSexo] = useState("");
   const [area, setArea] = useState("JUR");
-  const [supervisor, setSupervisor] = useState("");
-  const [coordenador, setCoordenador] = useState("");
+  const [supervisor, setSupervisor] = useState<string | null>(null);
+  const [coordenador, setCoordenador] = useState<string | null>(null);
   const [equipe, setEquipe] = useState("");
   const [contaBb, setContaBb] = useState("");
   const [pix, setPix] = useState("");
@@ -564,7 +588,7 @@ function NovoDialog({ ccs, cargos, onClose, onCriou }: {
       await dpApi.criar({
         nome: nome.trim().toUpperCase(), cpf, sexo, unidade, area, regime,
         centro_custo_id: ccId, cargo_id: cargoId || null,
-        supervisor, coordenador, equipe,
+        supervisor_id: supervisor, coordenador_id: coordenador, equipe,
         conta_bb: contaBb, pix, conta_caixa: contaCaixa,
         data_admissao: dataAdm, salario_bruto: salario, vt, va, status: "ativo",
       } as Partial<DpColaborador>);
@@ -611,10 +635,8 @@ function NovoDialog({ ccs, cargos, onClose, onCriou }: {
           </div>
           <div>
             <Label className="text-xs text-muted-foreground">Centro de Custo *</Label>
-            <Select value={ccId} onValueChange={setCcId}>
-              <SelectTrigger className="h-9 text-sm"><SelectValue placeholder="Selecione…" /></SelectTrigger>
-              <SelectContent>{ccs.map((x) => <SelectItem key={x.id} value={x.id}>{x.nome}</SelectItem>)}</SelectContent>
-            </Select>
+            <CcPicker valor={ccId || null} onChange={setCcId} className="w-full"
+                      placeholder="Selecione o subnúcleo…" />
           </div>
           <div>
             <Label className="text-xs text-muted-foreground">Cargo</Label>
@@ -657,11 +679,11 @@ function NovoDialog({ ccs, cargos, onClose, onCriou }: {
           </div>
           <div>
             <Label className="text-xs text-muted-foreground">Supervisor</Label>
-            <Input value={supervisor} onChange={(e) => setSupervisor(e.target.value)} className="h-9 text-sm" />
+            <LiderancaPicker papel="supervisor" valor={supervisor} onChange={(id) => setSupervisor(id)} />
           </div>
           <div>
             <Label className="text-xs text-muted-foreground">Coordenador</Label>
-            <Input value={coordenador} onChange={(e) => setCoordenador(e.target.value)} className="h-9 text-sm" />
+            <LiderancaPicker papel="coordenador" valor={coordenador} onChange={(id) => setCoordenador(id)} />
           </div>
           <div>
             <Label className="text-xs text-muted-foreground">Equipe</Label>
@@ -772,14 +794,27 @@ function AuditoriaTab() {
   const [total, setTotal] = useState(0);
   const [items, setItems] = useState<import("@/services/dp").DpAuditItem[]>([]);
   const [loading, setLoading] = useState(false);
+  // filtros: quem executou e sobre quem
+  const [usuario, setUsuario] = useState("");
+  const [colaborador, setColaborador] = useState<string | null>(null);
+  const [opcoes, setOpcoes] = useState<DpAuditFiltros>({ usuarios: [], colaboradores: [], entidades: [] });
+
+  useEffect(() => { dpApi.auditoriaFiltros().then(setOpcoes).catch(() => undefined); }, []);
+  useEffect(() => { setPagina(0); }, [usuario, colaborador]);
 
   useEffect(() => {
     setLoading(true);
-    dpApi.auditoria(PAGE, pagina * PAGE)
+    dpApi.auditoria(PAGE, pagina * PAGE, {
+      usuario: usuario === TODOS ? "" : usuario,
+      colaborador: colaborador ?? "",
+    })
       .then((r) => { setItems(r.items); setTotal(r.total); })
       .catch(() => undefined)
       .finally(() => setLoading(false));
-  }, [pagina]);
+  }, [pagina, usuario, colaborador]);
+
+  const nomeColab = opcoes.colaboradores.find((c) => c.id === colaborador)?.nome;
+  const limpar = () => { setUsuario(""); setColaborador(null); };
 
   const totalPaginas = Math.max(1, Math.ceil(total / PAGE));
   return (
@@ -798,6 +833,39 @@ function AuditoriaTab() {
         <CardDescription>Cada linha conta o que aconteceu, em português.</CardDescription>
       </CardHeader>
       <CardContent className="space-y-3">
+        {/* Filtros: por quem executou e por quem foi afetado */}
+        <div className="flex flex-wrap items-center gap-2 rounded-lg border bg-muted/20 p-2">
+          <span className="flex items-center gap-1 text-xs font-medium text-muted-foreground">
+            <UserSearch className="h-3.5 w-3.5" /> Pesquisar por
+          </span>
+          <Select value={usuario || TODOS} onValueChange={(v) => setUsuario(v === TODOS ? "" : v)}>
+            <SelectTrigger className="h-9 w-[230px] text-xs">
+              <SelectValue placeholder="Quem executou" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value={TODOS}>Qualquer usuário</SelectItem>
+              {opcoes.usuarios.map((u) => <SelectItem key={u} value={u}>{u}</SelectItem>)}
+            </SelectContent>
+          </Select>
+          <ColaboradorPicker opcoes={opcoes.colaboradores} valor={colaborador}
+                             onChange={setColaborador} className="w-[240px] text-xs"
+                             placeholder="Qualquer colaborador" />
+          <Ajuda titulo="Como pesquisar"
+                 texto="O primeiro filtro mostra tudo o que uma pessoa da equipe FEZ no módulo. O segundo mostra tudo o que ACONTECEU com um colaborador — cadastro, alterações de salário, lançamentos na folha, ajustes pontuais e desligamento." />
+          {(usuario || colaborador) && (
+            <button onClick={limpar}
+                    className="flex items-center gap-1 text-xs text-[hsl(var(--dunatech-blue))] hover:underline">
+              <X className="h-3 w-3" /> limpar
+            </button>
+          )}
+          {(usuario || colaborador) && (
+            <span className="ml-auto text-xs text-muted-foreground">
+              {total} registro(s)
+              {nomeColab ? ` sobre ${nomeColab}` : ""}
+              {usuario ? ` por ${usuario}` : ""}
+            </span>
+          )}
+        </div>
         {loading ? (
           <p className="py-6 text-center text-sm text-muted-foreground">
             <Loader2 className="mr-1 inline h-4 w-4 animate-spin" /> Carregando…
@@ -819,9 +887,21 @@ function AuditoriaTab() {
                         {a.quando_br}
                       </span>
                     </div>
-                    <div className="mt-1 text-[11px] text-muted-foreground">
-                      por <span className="font-medium text-foreground">{a.usuario}</span>
-                      {a.resumo ? ` · ${a.resumo}` : ""}
+                    <div className="mt-1 flex flex-wrap items-center gap-x-1.5 text-[11px] text-muted-foreground">
+                      <span>
+                        por <button className="font-medium text-foreground hover:underline"
+                                    onClick={() => setUsuario(a.usuario)} title="Ver tudo que este usuário fez">
+                          {a.usuario}
+                        </button>
+                        {a.resumo ? ` · ${a.resumo}` : ""}
+                      </span>
+                      {a.colaborador_id && (
+                        <button onClick={() => setColaborador(a.colaborador_id)}
+                                title="Ver o histórico completo desta pessoa"
+                                className="rounded-full bg-[hsl(var(--dunatech-blue))]/10 px-1.5 py-0.5 text-[10px] font-medium text-[hsl(var(--dunatech-blue))] hover:bg-[hsl(var(--dunatech-blue))]/20">
+                          {a.colaborador_nome}
+                        </button>
+                      )}
                     </div>
                     {a.mudancas.length > 0 && (
                       <ul className="mt-2 space-y-1 border-t pt-2 text-xs">

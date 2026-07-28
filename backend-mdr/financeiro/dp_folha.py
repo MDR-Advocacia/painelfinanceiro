@@ -297,7 +297,7 @@ class DpCompetenciaViewSet(viewsets.ViewSet):
         fiscal = tabela_fiscal_para(comp.ano, comp.mes)
         d = calcular_item(colab, lanc, comp, fiscal)
         DpFolhaItem.objects.update_or_create(competencia=comp, colaborador=colab, defaults=d)
-        audit(request, "lancar", "dp_lancamento", lanc.id,
+        audit(request, "lancar", "dp_lancamento", lanc.id, colaborador=colab,
               depois={"colaborador": colab.nome, "faltas_dias": lanc.faltas_dias,
                       "faltas_horas": lanc.faltas_horas, "premiacoes": lanc.premiacoes,
                       "acerto": lanc.acerto_contabil})
@@ -503,7 +503,7 @@ class DpCompetenciaViewSet(viewsets.ViewSet):
 
         depois = {"salario_bruto": d["salario_bruto"], "vt": d["vt"], "va": d["va"],
                   "saldo_livre": d["saldo_livre"]}
-        audit(request, "ajuste_pontual", "dp_folha_item", lanc.id,
+        audit(request, "ajuste_pontual", "dp_folha_item", lanc.id, colaborador=colab,
               antes={**antes, "colaborador": colab.nome},
               depois={**depois, "colaborador": colab.nome, "competencia": f"{comp.mes:02d}/{comp.ano}",
                       "motivo": motivo})

@@ -265,7 +265,7 @@ class DpRescisaoViewSet(viewsets.ViewSet):
             d = calcular_item(colab, lanc, comp, _tab(comp.ano, comp.mes))
             DpFolhaItem.objects.update_or_create(competencia=comp, colaborador=colab, defaults=d)
             recalculada = True
-        audit(request, "desligar", "dp_colaborador", colab.id,
+        audit(request, "desligar", "dp_colaborador", colab.id, colaborador=colab,
               antes={"status": "ativo", "nome": colab.nome},
               depois={"status": "inativo", "nome": colab.nome,
                       "data_demissao": str(data), "tipo_desligamento": TIPOS.get(tipo, tipo),

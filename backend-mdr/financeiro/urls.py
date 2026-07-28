@@ -5,8 +5,8 @@ from .views import (
     CargoViewSet, CustomAuthToken, UserAdminViewSet, me_permissions,
 )
 from .dp_views import (
-    DpCargoViewSet, DpCentroCustoViewSet, DpColaboradorViewSet,
-    dp_audit_list, dp_importar,
+    DpCargoViewSet, DpCentroCustoViewSet, DpColaboradorViewSet, DpLiderancaViewSet,
+    dp_audit_filtros, dp_audit_list, dp_importar,
 )
 from .dp_folha import DpCompetenciaViewSet
 from .dp_rescisao import DpRescisaoViewSet
@@ -30,6 +30,7 @@ router.register(r'users', UserAdminViewSet, basename='users')  # gestão de aces
 router.register(r'dp/colaboradores', DpColaboradorViewSet, basename='dp-colaboradores')
 router.register(r'dp/cargos', DpCargoViewSet, basename='dp-cargos')
 router.register(r'dp/centros-custo', DpCentroCustoViewSet, basename='dp-ccs')
+router.register(r'dp/liderancas', DpLiderancaViewSet, basename='dp-liderancas')
 router.register(r'dp/competencias', DpCompetenciaViewSet, basename='dp-competencias')
 router.register(r'dp/tabelas-fiscais', DpTabelaFiscalViewSet, basename='dp-fiscais')
 router.register(r'dp/rescisoes', DpRescisaoViewSet, basename='dp-rescisoes')
@@ -41,6 +42,7 @@ urlpatterns = [
     path('me/permissions/', me_permissions),  # permissões efetivas do logado
     path('dp/importar/', dp_importar),    # importador da planilha do DP
     path('dp/auditoria/', dp_audit_list), # trilha de auditoria do DP
+    path('dp/auditoria-filtros/', dp_audit_filtros),  # usuários/pessoas pra pesquisar
     path('dp/dashboard/', dp_dashboard),  # KPIs + séries do DP
     path('dp/competencias/<uuid:pk>/relatorio/', dp_relatorio_competencia),  # folha/rateio (excel/pdf)
     path('dp/relatorio-quadro/', dp_relatorio_quadro),  # quadro de pessoal (excel/pdf)

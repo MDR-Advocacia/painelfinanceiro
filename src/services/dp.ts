@@ -18,13 +18,20 @@ export interface DpColaborador {
   id: string; matricula: number; nome: string; sexo: string; cpf: string;
   unidade: string; area: string;
   centro_custo_id: string; centro_custo_nome: string;
-  supervisor: string; coordenador: string; equipe: string;
+  supervisor_id: string | null; supervisor_nome: string | null;
+  coordenador_id: string | null; coordenador_nome: string | null;
+  equipe: string;
   cargo_id: string | null; cargo_nome: string | null;
   regime: "estagiario" | "clt" | "associado" | "pj"; regime_label: string;
   status: "ativo" | "inativo";
   data_entrada: string | null; data_admissao: string | null; data_demissao: string | null;
   salario_bruto: number; saldo_livre: number; vt: number; opta_vt: boolean; va: number;
   conta_bb: string; pix: string; conta_caixa: string;
+}
+export interface DpLideranca {
+  id: string; nome: string; e_supervisor: boolean; e_coordenador: boolean;
+  papeis: string; centro_custo_id: string | null; centro_custo_nome: string | null;
+  email: string; ativo: boolean;
 }
 export interface DpEvento {
   tipo: string; data_efeito: string; payload: Record<string, unknown>;
@@ -38,6 +45,12 @@ export interface DpAuditItem {
   id: number; usuario: string; quando: string; quando_br: string;
   acao: string; verbo: string; tom: string; entidade: string; alvo: string;
   titulo: string; mudancas: DpAuditMudanca[]; resumo: string;
+  colaborador_id: string | null; colaborador_nome: string;
+}
+export interface DpAuditFiltros {
+  usuarios: string[];
+  colaboradores: { id: string; nome: string }[];
+  entidades: string[];
 }
 
 async function j<T>(res: Response): Promise<T> {
@@ -52,7 +65,8 @@ const H = () => ({ "Content-Type": "application/json", ...authHeaders() });
 export const dpApi = {
   resumo: () => fetch(`${API_URL}/dp/colaboradores/resumo/`, { headers: authHeaders() }).then((r) => j<DpResumo>(r)),
 
-  listar: (p: { busca?: string; regime?: string; status?: string; cc?: string; unidade?: string; limit?: number; offset?: number }) => {
+  listar: (p: { busca?: string; regime?: string; status?: string; cc?: string; unidade?: string;
+                supervisor?: string; coordenador?: string; limit?: number; offset?: number }) => {
     const qs = new URLSearchParams();
     Object.entries(p).forEach(([k, v]) => { if (v !== undefined && v !== "") qs.set(k, String(v)); });
     return fetch(`${API_URL}/dp/colaboradores/?${qs}`, { headers: authHeaders() })
@@ -90,9 +104,42 @@ export const dpApi = {
       .then((r) => j<{ ccs: number; cargos: number; colaboradores_novos: number; colaboradores_atualizados: number; desligados_marcados: number; avisos: string[] }>(r));
   },
 
-  auditoria: (limit = 50, offset = 0) =>
-    fetch(`${API_URL}/dp/auditoria/?limit=${limit}&offset=${offset}`, { headers: authHeaders() })
-      .then((r) => j<{ total: number; items: DpAuditItem[] }>(r)),
+  auditoria: (limit = 50, offset = 0,
+              f: { usuario?: string; colaborador?: string; entidade?: string; busca?: string } = {}) => {
+    const qs = new URLSearchParams({ limit: String(limit), offset: String(offset) });
+    Object.entries(f).forEach(([k, v]) => { if (v) qs.set(k, v); });
+    return fetch(`${API_URL}/dp/auditoria/?${qs}`, { headers: authHeaders() })
+      .then((r) => j<{ total: number; items: DpAuditItem[] }>(r));
+  },
+
+  auditoriaFiltros: () =>
+    fetch(`${API_URL}/dp/auditoria-filtros/`, { headers: authHeaders() })
+      .then((r) => j<DpAuditFiltros>(r)),
+
+  // ── catálogo de lideranças (supervisores e coordenadores) ──
+  liderancas: (papel?: "supervisor" | "coordenador", soAtivas = false) => {
+    const qs = new URLSearchParams();
+    if (papel) qs.set("papel", papel);
+    if (soAtivas) qs.set("ativo", "1");
+    return fetch(`${API_URL}/dp/liderancas/?${qs}`, { headers: authHeaders() })
+      .then((r) => j<DpLideranca[]>(r));
+  },
+
+  liderancaEquipe: () =>
+    fetch(`${API_URL}/dp/liderancas/equipe/`, { headers: authHeaders() })
+      .then((r) => j<Record<string, { supervisionados: number; coordenados: number }>>(r)),
+
+  criarLideranca: (dados: Partial<DpLideranca>) =>
+    fetch(`${API_URL}/dp/liderancas/`, { method: "POST", headers: H(), body: JSON.stringify(dados) })
+      .then((r) => j<DpLideranca>(r)),
+
+  atualizarLideranca: (id: string, dados: Partial<DpLideranca>) =>
+    fetch(`${API_URL}/dp/liderancas/${id}/`, { method: "PATCH", headers: H(), body: JSON.stringify(dados) })
+      .then((r) => j<DpLideranca>(r)),
+
+  removerLideranca: (id: string) =>
+    fetch(`${API_URL}/dp/liderancas/${id}/`, { method: "DELETE", headers: authHeaders() })
+      .then((r) => { if (!r.ok && r.status !== 204) throw new Error(`Erro ${r.status}`); }),
 };
 
 // ── F2: competências / folha ──

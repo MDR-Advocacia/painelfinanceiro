@@ -2,9 +2,12 @@
 //  • Tabelas fiscais POR VIGÊNCIA: faixas de INSS, %VT, %FGTS, multa, patronal
 //    e a base de provisão (bruto−INSS da planilha ou bruto contábil).
 //  • Plano de cargos (TB_Cargos) e Centros de Custo (CONFIG) — edição inline.
+//  • Catálogo de LIDERANÇAS (supervisores/coordenadores) usado na ficha.
 // Sem permissão de edição, tudo vira somente-leitura.
 import { useEffect, useState } from "react";
-import { Download, FileText, Loader2, Plus, Save, Sliders, Trash2 } from "lucide-react";
+import {
+  Check, Download, FileText, Loader2, Plus, Save, Sliders, Trash2, UserCog,
+} from "lucide-react";
 import { toast } from "sonner";
 
 import { Button } from "@/components/ui/button";
@@ -19,8 +22,10 @@ import {
 } from "@/components/ui/table";
 import { Ajuda, TituloAjuda } from "@/components/dp/Ajuda";
 import ArvoreCentrosCusto from "@/components/dp/ArvoreCentrosCusto";
+import { CcPicker } from "@/components/dp/Pickers";
+import { Checkbox } from "@/components/ui/checkbox";
 import {
-  type DpCargo, type DpCcNo, type DpCentroCusto, type DpTabelaFiscal,
+  type DpCargo, type DpCcNo, type DpCentroCusto, type DpLideranca, type DpTabelaFiscal,
   dpApi, exportApi, fmtBRL, fmtData, previsaoApi,
 } from "@/services/dp";
 
@@ -34,6 +39,7 @@ export default function ParametrosTab({ ccs, cargos, editar, onMudou }: {
         <CargosBloco cargos={cargos} editar={editar} onMudou={onMudou} />
         <CcsBloco ccs={ccs} editar={editar} onMudou={onMudou} />
       </div>
+      <LiderancasBloco editar={editar} />
     </div>
   );
 }
@@ -365,6 +371,199 @@ function CcsBloco({ ccs, editar, onMudou }: {
             </Button>
           </div>
         )}
+      </CardContent>
+    </Card>
+  );
+}
+
+
+/* ─────────────────── LIDERANÇAS (supervisores/coordenadores) ─────────────────── */
+
+function LiderancasBloco({ editar }: { editar: boolean }) {
+  const [lista, setLista] = useState<DpLideranca[]>([]);
+  const [equipes, setEquipes] = useState<Record<string, { supervisionados: number; coordenados: number }>>({});
+  const [carregando, setCarregando] = useState(false);
+  const [novo, setNovo] = useState({ nome: "", e_supervisor: true, e_coordenador: false, cc: "" });
+  const [busca, setBusca] = useState("");
+
+  const carregar = () => {
+    setCarregando(true);
+    Promise.all([dpApi.liderancas(), dpApi.liderancaEquipe()])
+      .then(([l, e]) => { setLista(l); setEquipes(e); })
+      .catch(() => undefined)
+      .finally(() => setCarregando(false));
+  };
+  useEffect(carregar, []);
+
+  const criar = async () => {
+    if (!novo.nome.trim()) { toast.error("Informe o nome da liderança."); return; }
+    if (!novo.e_supervisor && !novo.e_coordenador) { toast.error("Marque pelo menos um papel."); return; }
+    try {
+      await dpApi.criarLideranca({
+        nome: novo.nome.trim(), e_supervisor: novo.e_supervisor,
+        e_coordenador: novo.e_coordenador,
+        centro_custo_id: novo.cc && novo.cc !== "__todos__" ? novo.cc : null,
+      });
+      toast.success("Liderança cadastrada.");
+      setNovo({ nome: "", e_supervisor: true, e_coordenador: false, cc: "" });
+      carregar();
+    } catch (e: any) { toast.error(e.message); }
+  };
+
+  const salvar = async (l: DpLideranca, campos: Partial<DpLideranca>) => {
+    try {
+      await dpApi.atualizarLideranca(l.id, campos);
+      setLista((s) => s.map((x) => (x.id === l.id ? { ...x, ...campos } as DpLideranca : x)));
+      toast.success("Liderança atualizada.");
+    } catch (e: any) { toast.error(e.message); }
+  };
+
+  const remover = async (l: DpLideranca) => {
+    const eq = equipes[l.id];
+    const vinculados = (eq?.supervisionados ?? 0) + (eq?.coordenados ?? 0);
+    const msg = vinculados
+      ? `${l.nome} tem ${vinculados} pessoa(s) vinculada(s) — será INATIVADA (o histórico fica). Confirma?`
+      : `Excluir ${l.nome} do catálogo?`;
+    if (!window.confirm(msg)) return;
+    try {
+      await dpApi.removerLideranca(l.id);
+      toast.success(vinculados ? "Liderança inativada." : "Liderança excluída.");
+      carregar();
+    } catch (e: any) { toast.error(e.message); }
+  };
+
+  const filtrada = lista.filter((l) => l.nome.toLowerCase().includes(busca.toLowerCase()));
+
+  return (
+    <Card className="glass-card border-0">
+      <CardHeader className="pb-2">
+        <CardTitle className="text-base">
+          <TituloAjuda titulo="Supervisores e Coordenadores"
+                       ajuda="Catálogo das lideranças do escritório. A ficha do colaborador escolhe daqui, então o nome fica padronizado e renomear em um lugar propaga para todo mundo. A mesma pessoa pode acumular os dois papéis." />
+        </CardTitle>
+        <CardDescription>
+          Quem aparece nas fichas como supervisor ou coordenador — com o tamanho da equipe de cada um.
+        </CardDescription>
+      </CardHeader>
+      <CardContent className="space-y-3">
+        <div className="flex flex-wrap items-center gap-2">
+          <Input placeholder="Buscar liderança…" value={busca}
+                 onChange={(e) => setBusca(e.target.value)} className="h-8 w-56 text-xs" />
+          {carregando && <Loader2 className="h-4 w-4 animate-spin text-muted-foreground" />}
+          <span className="ml-auto text-xs text-muted-foreground">
+            {lista.filter((l) => l.e_supervisor).length} supervisor(es) · {lista.filter((l) => l.e_coordenador).length} coordenador(es)
+          </span>
+        </div>
+
+        <div className="max-h-[380px] overflow-y-auto rounded-lg border">
+          <Table>
+            <TableHeader className="sticky top-0 bg-card">
+              <TableRow>
+                <TableHead className="text-xs">Nome</TableHead>
+                <TableHead className="w-24 text-center text-xs">Supervisor</TableHead>
+                <TableHead className="w-24 text-center text-xs">Coordenador</TableHead>
+                <TableHead className="hidden text-xs md:table-cell">Centro de custo</TableHead>
+                <TableHead className="w-28 text-center text-xs">Equipe</TableHead>
+                {editar && <TableHead className="w-12" />}
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              {filtrada.map((l) => {
+                const eq = equipes[l.id] ?? { supervisionados: 0, coordenados: 0 };
+                return (
+                  <TableRow key={l.id} className={l.ativo ? "" : "opacity-50"}>
+                    <TableCell className="text-sm">
+                      {editar ? (
+                        <Input defaultValue={l.nome} className="h-8 text-sm"
+                               onBlur={(e) => e.target.value.trim() && e.target.value !== l.nome
+                                 && salvar(l, { nome: e.target.value.trim() })} />
+                      ) : l.nome}
+                      {!l.ativo && <span className="ml-2 text-[10px] uppercase text-muted-foreground">inativa</span>}
+                    </TableCell>
+                    <TableCell className="text-center">
+                      <Checkbox checked={l.e_supervisor} disabled={!editar}
+                                onCheckedChange={(v) => salvar(l, { e_supervisor: !!v })} />
+                    </TableCell>
+                    <TableCell className="text-center">
+                      <Checkbox checked={l.e_coordenador} disabled={!editar}
+                                onCheckedChange={(v) => salvar(l, { e_coordenador: !!v })} />
+                    </TableCell>
+                    <TableCell className="hidden md:table-cell">
+                      {editar ? (
+                        <CcPicker valor={l.centro_custo_id} className="h-8 w-full text-xs"
+                                  placeholder="— sem centro —"
+                                  onChange={(v) => salvar(l, { centro_custo_id: v } as Partial<DpLideranca>)} />
+                      ) : (
+                        <span className="text-xs text-muted-foreground">{l.centro_custo_nome ?? "—"}</span>
+                      )}
+                    </TableCell>
+                    <TableCell className="text-center text-xs">
+                      {eq.supervisionados > 0 && (
+                        <span className="rounded bg-sky-100 px-1.5 py-0.5 font-mono text-sky-700"
+                              title="Pessoas supervisionadas">{eq.supervisionados}</span>
+                      )}
+                      {eq.coordenados > 0 && (
+                        <span className="ml-1 rounded bg-violet-100 px-1.5 py-0.5 font-mono text-violet-700"
+                              title="Pessoas coordenadas">{eq.coordenados}</span>
+                      )}
+                      {eq.supervisionados + eq.coordenados === 0 && (
+                        <span className="text-muted-foreground">—</span>
+                      )}
+                    </TableCell>
+                    {editar && (
+                      <TableCell className="text-center">
+                        <button onClick={() => remover(l)} title="Remover do catálogo"
+                                className="text-muted-foreground/60 hover:text-rose-600">
+                          <Trash2 className="h-3.5 w-3.5" />
+                        </button>
+                      </TableCell>
+                    )}
+                  </TableRow>
+                );
+              })}
+              {filtrada.length === 0 && (
+                <TableRow><TableCell colSpan={6} className="py-6 text-center text-xs text-muted-foreground">
+                  Nenhuma liderança encontrada.
+                </TableCell></TableRow>
+              )}
+            </TableBody>
+          </Table>
+        </div>
+
+        {editar && (
+          <div className="flex flex-wrap items-end gap-2 rounded-lg border bg-muted/20 p-2">
+            <div>
+              <Label className="text-[11px] text-muted-foreground">Nova liderança</Label>
+              <Input placeholder="Nome (ex.: Fernanda - SUP)" value={novo.nome}
+                     onChange={(e) => setNovo({ ...novo, nome: e.target.value })}
+                     className="h-8 w-56 text-xs" />
+            </div>
+            <div>
+              <Label className="text-[11px] text-muted-foreground">Centro de custo</Label>
+              <CcPicker valor={novo.cc || null} className="h-8 w-[200px] text-xs"
+                        placeholder="— opcional —"
+                        onChange={(v) => setNovo({ ...novo, cc: v })} />
+            </div>
+            <label className="flex items-center gap-1.5 pb-1.5 text-xs">
+              <Checkbox checked={novo.e_supervisor}
+                        onCheckedChange={(v) => setNovo({ ...novo, e_supervisor: !!v })} />
+              Supervisor
+            </label>
+            <label className="flex items-center gap-1.5 pb-1.5 text-xs">
+              <Checkbox checked={novo.e_coordenador}
+                        onCheckedChange={(v) => setNovo({ ...novo, e_coordenador: !!v })} />
+              Coordenador
+            </label>
+            <Button size="sm" variant="outline" className="h-8 gap-1 text-xs" onClick={criar}>
+              <Plus className="h-3.5 w-3.5" /> Cadastrar
+            </Button>
+          </div>
+        )}
+        <p className="flex items-start gap-1.5 text-[11px] text-muted-foreground">
+          <UserCog className="mt-0.5 h-3.5 w-3.5 shrink-0" />
+          Liderança com gente vinculada não é apagada — vira <b className="mx-1">inativa</b> e some das
+          listas novas, mas continua nas fichas e no histórico.
+        </p>
       </CardContent>
     </Card>
   );

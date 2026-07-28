@@ -1,7 +1,7 @@
 from rest_framework import serializers
 from .models import (
     Cargo, Sede, Setor, VpdConfig, BaseReferencia,
-    DpCargo, DpCentroCusto, DpColaborador, DpTabelaFiscal,
+    DpCargo, DpCentroCusto, DpColaborador, DpLideranca, DpTabelaFiscal,
 )
 
 
@@ -51,6 +51,19 @@ class DpCargoSerializer(serializers.ModelSerializer):
         fields = ['id', 'area', 'nome', 'salario_base', 'dias_mes', 'carga_horaria_mes', 'ativo']
 
 
+class DpLiderancaSerializer(serializers.ModelSerializer):
+    centro_custo_nome = serializers.CharField(source='centro_custo.nome', read_only=True, default=None)
+    centro_custo_id = serializers.PrimaryKeyRelatedField(
+        source='centro_custo', queryset=DpCentroCusto.objects.all(), allow_null=True, required=False)
+    papeis = serializers.CharField(read_only=True)
+
+    class Meta:
+        model = DpLideranca
+        fields = ['id', 'nome', 'e_supervisor', 'e_coordenador', 'papeis',
+                  'centro_custo_id', 'centro_custo_nome', 'email', 'ativo',
+                  'created_at', 'updated_at']
+
+
 class DpColaboradorSerializer(serializers.ModelSerializer):
     centro_custo_nome = serializers.CharField(source='centro_custo.nome', read_only=True)
     centro_custo_id = serializers.PrimaryKeyRelatedField(
@@ -59,12 +72,19 @@ class DpColaboradorSerializer(serializers.ModelSerializer):
     cargo_id = serializers.PrimaryKeyRelatedField(
         source='cargo', queryset=DpCargo.objects.all(), allow_null=True, required=False)
     regime_label = serializers.CharField(source='get_regime_display', read_only=True)
+    supervisor_nome = serializers.CharField(source='supervisor.nome', read_only=True, default=None)
+    supervisor_id = serializers.PrimaryKeyRelatedField(
+        source='supervisor', queryset=DpLideranca.objects.all(), allow_null=True, required=False)
+    coordenador_nome = serializers.CharField(source='coordenador.nome', read_only=True, default=None)
+    coordenador_id = serializers.PrimaryKeyRelatedField(
+        source='coordenador', queryset=DpLideranca.objects.all(), allow_null=True, required=False)
 
     class Meta:
         model = DpColaborador
         fields = [
             'id', 'matricula', 'nome', 'sexo', 'cpf', 'unidade', 'area',
-            'centro_custo_id', 'centro_custo_nome', 'supervisor', 'coordenador', 'equipe',
+            'centro_custo_id', 'centro_custo_nome', 'equipe',
+            'supervisor_id', 'supervisor_nome', 'coordenador_id', 'coordenador_nome',
             'cargo_id', 'cargo_nome', 'regime', 'regime_label', 'status',
             'data_entrada', 'data_admissao', 'data_demissao',
             'salario_bruto', 'saldo_livre', 'vt', 'opta_vt', 'va',
