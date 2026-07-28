@@ -266,6 +266,137 @@ class DpEvento(models.Model):
         ordering = ['-data_efeito', '-created_at']
 
 
+class DpTabelaFiscal(models.Model):
+    """Parâmetros fiscais VERSIONADOS por vigência (nunca sobrescrever o passado
+    — cada competência usa a tabela vigente no seu mês).
+
+    `inss_faixas`: [{"ate": 1621.0, "aliquota": 0.075, "deducao": 0.0}, ...]
+    (progressiva por parcela a deduzir; a última faixa é o teto — acima dele o
+    desconto trava no máximo da última faixa).
+    `provisao_base`: "bruto_menos_inss" espelha a planilha do DP;
+    "bruto" é o padrão contábil (decisão pendente com o DP — configurável).
+    """
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    vigencia_inicio = models.DateField(unique=True)  # ex.: 2026-01-01
+    inss_faixas = models.JSONField(default=list)
+    vt_percent = models.FloatField(default=0.06)
+    fgts_percent = models.FloatField(default=0.08)
+    multa_fgts_percent = models.FloatField(default=0.40)   # provisão sobre o FGTS
+    inss_patronal_percent = models.FloatField(default=0.21)
+    provisao_base = models.CharField(max_length=20, default="bruto_menos_inss",
+                                     choices=[("bruto_menos_inss", "Bruto − INSS (planilha)"),
+                                              ("bruto", "Bruto (padrão contábil)")])
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        db_table = 'dp_tabelas_fiscais'
+        ordering = ['-vigencia_inicio']
+
+    def __str__(self):
+        return f"Tabela fiscal desde {self.vigencia_inicio}"
+
+
+class DpCompetencia(models.Model):
+    """O mês de folha. Esteira: aberta → em_revisao → fechada.
+    Fechar exige aprovador DIFERENTE de quem enviou pra revisão (4-olhos) e
+    congela os itens (snapshot). Reabrir exige justificativa (auditada)."""
+    STATUS = [("aberta", "Aberta"), ("em_revisao", "Em revisão"), ("fechada", "Fechada")]
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    ano = models.IntegerField()
+    mes = models.IntegerField()  # 1..12
+    dias_mes = models.IntegerField(default=30)
+    dias_uteis = models.IntegerField(default=22)
+    status = models.CharField(max_length=15, choices=STATUS, default="aberta")
+    aberta_por = models.CharField(max_length=150, blank=True, default="")
+    enviada_revisao_por = models.CharField(max_length=150, blank=True, default="")
+    fechada_por = models.CharField(max_length=150, blank=True, default="")
+    fechada_em = models.DateTimeField(null=True, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        db_table = 'dp_competencias'
+        unique_together = [('ano', 'mes')]
+        ordering = ['-ano', '-mes']
+
+    def __str__(self):
+        return f"{self.mes:02d}/{self.ano} ({self.status})"
+
+
+class DpLancamento(models.Model):
+    """Ocorrências do colaborador na competência: faltas, premiações, acertos."""
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    competencia = models.ForeignKey(DpCompetencia, on_delete=models.CASCADE,
+                                    related_name="lancamentos")
+    colaborador = models.ForeignKey(DpColaborador, on_delete=models.CASCADE,
+                                    related_name="lancamentos")
+    faltas_dias = models.FloatField(default=0)
+    faltas_horas = models.FloatField(default=0)
+    premiacoes = models.FloatField(default=0)
+    acerto_contabil = models.FloatField(default=0)
+    obs = models.TextField(blank=True, default="")
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        db_table = 'dp_lancamentos'
+        unique_together = [('competencia', 'colaborador')]
+
+
+class DpFolhaItem(models.Model):
+    """Linha calculada da folha (as 35 colunas da planilha). Recalculável com a
+    competência aberta; CONGELADA no fechamento. `memoria` = como cada número
+    foi obtido (transparência de cálculo, clicável na UI)."""
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    competencia = models.ForeignKey(DpCompetencia, on_delete=models.CASCADE,
+                                    related_name="itens")
+    colaborador = models.ForeignKey(DpColaborador, on_delete=models.PROTECT,
+                                    related_name="folha_itens")
+    # snapshot cadastral do momento do cálculo (não muda se a ficha mudar depois)
+    matricula = models.IntegerField()
+    nome = models.CharField(max_length=200)
+    regime = models.CharField(max_length=20)
+    centro_custo_nome = models.CharField(max_length=120)
+    # entradas
+    salario_bruto = models.FloatField(default=0)
+    vt = models.FloatField(default=0)
+    va = models.FloatField(default=0)
+    saldo_livre = models.FloatField(default=0)
+    faltas_dias = models.FloatField(default=0)
+    faltas_horas = models.FloatField(default=0)
+    premiacoes = models.FloatField(default=0)
+    acerto_contabil = models.FloatField(default=0)
+    # calculados
+    desc_faltas = models.FloatField(default=0)
+    salario_com_faltas = models.FloatField(default=0)
+    vt_com_faltas = models.FloatField(default=0)
+    va_com_faltas = models.FloatField(default=0)
+    desc_inss = models.FloatField(default=0)
+    desc_vt = models.FloatField(default=0)
+    salario_com_descontos = models.FloatField(default=0)
+    total_pagar = models.FloatField(default=0)
+    # provisões
+    decimo_mensal = models.FloatField(default=0)
+    ferias_mensal = models.FloatField(default=0)
+    terco_ferias_mensal = models.FloatField(default=0)
+    fgts_mensal = models.FloatField(default=0)
+    multa_fgts_mensal = models.FloatField(default=0)
+    recesso_mensal = models.FloatField(default=0)
+    inss_patronal = models.FloatField(default=0)
+    custo_provisoes = models.FloatField(default=0)
+    custo_total = models.FloatField(default=0)  # total_pagar + provisões + patronal
+    memoria = models.JSONField(default=dict, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        db_table = 'dp_folha_itens'
+        unique_together = [('competencia', 'colaborador')]
+        ordering = ['nome']
+
+
 class DpAuditLog(models.Model):
     """Trilha de auditoria IMUTÁVEL do módulo DP: toda escrita loga quem, quando,
     o quê e o antes→depois. Nunca é editada nem apagada pela aplicação."""

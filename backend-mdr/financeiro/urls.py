@@ -8,6 +8,7 @@ from .dp_views import (
     DpCargoViewSet, DpCentroCustoViewSet, DpColaboradorViewSet,
     dp_audit_list, dp_importar,
 )
+from .dp_folha import DpCompetenciaViewSet
 from . import sso_views
 
 router = DefaultRouter()
@@ -21,6 +22,7 @@ router.register(r'users', UserAdminViewSet, basename='users')  # gestão de aces
 router.register(r'dp/colaboradores', DpColaboradorViewSet, basename='dp-colaboradores')
 router.register(r'dp/cargos', DpCargoViewSet, basename='dp-cargos')
 router.register(r'dp/centros-custo', DpCentroCustoViewSet, basename='dp-ccs')
+router.register(r'dp/competencias', DpCompetenciaViewSet, basename='dp-competencias')
 
 urlpatterns = [
     path('', include(router.urls)),

@@ -4,7 +4,7 @@
 import { useCallback, useEffect, useState } from "react";
 import {
   Contact, Download, FileSpreadsheet, Loader2, Plus, RefreshCw, ScrollText,
-  Search, UserMinus, Users,
+  Search, UserMinus, Users, Wallet,
 } from "lucide-react";
 import { toast } from "sonner";
 
@@ -24,6 +24,7 @@ import {
   Table, TableBody, TableCell, TableHead, TableHeader, TableRow,
 } from "@/components/ui/table";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import FolhaTab from "@/components/dp/FolhaTab";
 import { usePermissions } from "@/hooks/usePermissions";
 import {
   type DpCargo, type DpCentroCusto, type DpColaborador, type DpEvento, type DpResumo,
@@ -84,6 +85,7 @@ export default function Pessoal() {
       <Tabs defaultValue="quadro">
         <TabsList>
           <TabsTrigger value="quadro" className="gap-2"><Users className="h-4 w-4" /> Quadro</TabsTrigger>
+          <TabsTrigger value="folha" className="gap-2"><Wallet className="h-4 w-4" /> Folha</TabsTrigger>
           <TabsTrigger value="catalogos" className="gap-2"><Contact className="h-4 w-4" /> Cargos & CCs</TabsTrigger>
           {editar && (
             <TabsTrigger value="importar" className="gap-2"><FileSpreadsheet className="h-4 w-4" /> Importar</TabsTrigger>
@@ -93,6 +95,9 @@ export default function Pessoal() {
 
         <TabsContent value="quadro" className="mt-4">
           <QuadroTab ccs={ccs} cargos={cargos} editar={editar} onMudou={carregarBase} />
+        </TabsContent>
+        <TabsContent value="folha" className="mt-4">
+          <FolhaTab editar={editar} />
         </TabsContent>
         <TabsContent value="catalogos" className="mt-4">
           <CatalogosTab ccs={ccs} cargos={cargos} />

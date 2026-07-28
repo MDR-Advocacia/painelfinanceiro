@@ -86,6 +86,59 @@ export const dpApi = {
       .then((r) => j<{ total: number; items: DpAuditItem[] }>(r)),
 };
 
+// ── F2: competências / folha ──
+export interface DpCompetencia {
+  id: string; ano: number; mes: number; mes_nome: string;
+  dias_mes: number; dias_uteis: number;
+  status: "aberta" | "em_revisao" | "fechada";
+  aberta_por: string; enviada_revisao_por: string; fechada_por: string;
+  fechada_em: string | null; total_itens: number;
+}
+export interface DpFolhaItem {
+  id: string; colaborador_id: string; matricula: number; nome: string; regime: string;
+  centro_custo_nome: string; salario_bruto: number;
+  faltas_dias: number; faltas_horas: number; desc_faltas: number;
+  desc_inss: number; desc_vt: number; vt_com_faltas: number; va_com_faltas: number;
+  saldo_livre: number; premiacoes: number; acerto_contabil: number;
+  total_pagar: number; custo_provisoes: number; inss_patronal: number; custo_total: number;
+  memoria: Record<string, unknown>;
+}
+export interface DpFolhaTotais {
+  total_pagar: number; provisoes: number; inss_patronal: number; custo_total: number;
+}
+export interface DpRateioLinha {
+  centro_custo_nome: string; headcount: number; folha: number;
+  provisoes: number; patronal: number; custo: number;
+}
+
+export const folhaApi = {
+  competencias: () =>
+    fetch(`${API_URL}/dp/competencias/`, { headers: authHeaders() }).then((r) => j<DpCompetencia[]>(r)),
+  abrir: (ano: number, mes: number, dias_mes: number, dias_uteis: number) =>
+    fetch(`${API_URL}/dp/competencias/`, { method: "POST", headers: H(), body: JSON.stringify({ ano, mes, dias_mes, dias_uteis }) })
+      .then((r) => j<DpCompetencia>(r)),
+  recalcular: (id: string) =>
+    fetch(`${API_URL}/dp/competencias/${id}/recalcular/`, { method: "POST", headers: H() }).then((r) => j<{ itens: number }>(r)),
+  itens: (id: string, p: { busca?: string; regime?: string; cc?: string; limit?: number; offset?: number }) => {
+    const qs = new URLSearchParams();
+    Object.entries(p).forEach(([k, v]) => { if (v !== undefined && v !== "") qs.set(k, String(v)); });
+    return fetch(`${API_URL}/dp/competencias/${id}/itens/?${qs}`, { headers: authHeaders() })
+      .then((r) => j<{ total: number; items: DpFolhaItem[]; totais: DpFolhaTotais }>(r));
+  },
+  rateio: (id: string) =>
+    fetch(`${API_URL}/dp/competencias/${id}/rateio/`, { headers: authHeaders() }).then((r) => j<DpRateioLinha[]>(r)),
+  lancar: (id: string, dados: { colaborador_id: string; faltas_dias: number; faltas_horas: number; premiacoes: number; acerto_contabil: number; obs?: string }) =>
+    fetch(`${API_URL}/dp/competencias/${id}/lancar/`, { method: "POST", headers: H(), body: JSON.stringify(dados) })
+      .then((r) => j<DpFolhaItem>(r)),
+  enviarRevisao: (id: string) =>
+    fetch(`${API_URL}/dp/competencias/${id}/enviar_revisao/`, { method: "POST", headers: H() }).then((r) => j<DpCompetencia>(r)),
+  aprovar: (id: string) =>
+    fetch(`${API_URL}/dp/competencias/${id}/aprovar/`, { method: "POST", headers: H() }).then((r) => j<DpCompetencia>(r)),
+  reabrir: (id: string, justificativa: string) =>
+    fetch(`${API_URL}/dp/competencias/${id}/reabrir/`, { method: "POST", headers: H(), body: JSON.stringify({ justificativa }) })
+      .then((r) => j<DpCompetencia>(r)),
+};
+
 export const REGIME_LABELS: Record<string, string> = {
   estagiario: "Estagiário (TCE)", clt: "CLT", associado: "Associado", pj: "PJ",
 };
