@@ -9,6 +9,7 @@ from .dp_views import (
     dp_audit_list, dp_importar,
 )
 from .dp_folha import DpCompetenciaViewSet
+from .dp_relatorios import dp_dashboard, dp_relatorio_competencia, dp_relatorio_quadro
 from . import sso_views
 
 router = DefaultRouter()
@@ -31,4 +32,7 @@ urlpatterns = [
     path('me/permissions/', me_permissions),  # permissões efetivas do logado
     path('dp/importar/', dp_importar),    # importador da planilha do DP
     path('dp/auditoria/', dp_audit_list), # trilha de auditoria do DP
+    path('dp/dashboard/', dp_dashboard),  # KPIs + séries do DP
+    path('dp/competencias/<uuid:pk>/relatorio/', dp_relatorio_competencia),  # folha/rateio (excel/pdf)
+    path('dp/relatorio-quadro/', dp_relatorio_quadro),  # quadro de pessoal (excel)
 ]

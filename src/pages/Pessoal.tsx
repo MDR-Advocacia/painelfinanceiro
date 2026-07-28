@@ -3,8 +3,8 @@
 // trilha de auditoria. RBAC: "ver" navega; "editar" altera (botões somem sem permissão).
 import { useCallback, useEffect, useState } from "react";
 import {
-  Contact, Download, FileSpreadsheet, Loader2, Plus, RefreshCw, ScrollText,
-  Search, UserMinus, Users, Wallet,
+  Contact, Download, FileSpreadsheet, LayoutDashboard, Loader2, Plus, RefreshCw,
+  ScrollText, Search, UserMinus, Users, Wallet,
 } from "lucide-react";
 import { toast } from "sonner";
 
@@ -24,6 +24,7 @@ import {
   Table, TableBody, TableCell, TableHead, TableHeader, TableRow,
 } from "@/components/ui/table";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import DashboardDpTab from "@/components/dp/DashboardDpTab";
 import FolhaTab from "@/components/dp/FolhaTab";
 import { usePermissions } from "@/hooks/usePermissions";
 import {
@@ -82,8 +83,9 @@ export default function Pessoal() {
         )}
       </div>
 
-      <Tabs defaultValue="quadro">
+      <Tabs defaultValue="dash">
         <TabsList>
+          <TabsTrigger value="dash" className="gap-2"><LayoutDashboard className="h-4 w-4" /> Dashboard</TabsTrigger>
           <TabsTrigger value="quadro" className="gap-2"><Users className="h-4 w-4" /> Quadro</TabsTrigger>
           <TabsTrigger value="folha" className="gap-2"><Wallet className="h-4 w-4" /> Folha</TabsTrigger>
           <TabsTrigger value="catalogos" className="gap-2"><Contact className="h-4 w-4" /> Cargos & CCs</TabsTrigger>
@@ -93,6 +95,9 @@ export default function Pessoal() {
           <TabsTrigger value="auditoria" className="gap-2"><ScrollText className="h-4 w-4" /> Auditoria</TabsTrigger>
         </TabsList>
 
+        <TabsContent value="dash" className="mt-4">
+          <DashboardDpTab />
+        </TabsContent>
         <TabsContent value="quadro" className="mt-4">
           <QuadroTab ccs={ccs} cargos={cargos} editar={editar} onMudou={carregarBase} />
         </TabsContent>
@@ -192,8 +197,17 @@ function QuadroTab({ ccs, cargos, editar, onMudou }: {
           <button onClick={carregar} className="ml-1 text-muted-foreground hover:text-foreground" title="Atualizar">
             <RefreshCw className={`h-4 w-4 ${loading ? "animate-spin" : ""}`} />
           </button>
+          <Button
+            size="sm" variant="outline" className="ml-auto gap-1"
+            onClick={() => {
+              import("@/services/dp").then(({ relatoriosApi }) =>
+                relatoriosApi.quadroExcel(status === TODOS ? "" : status).catch((e) => toast.error(e.message)));
+            }}
+          >
+            <Download className="h-4 w-4" /> Excel
+          </Button>
           {editar && (
-            <Button size="sm" className="glass-button ml-auto gap-1 border-0" onClick={() => setNovoAberto(true)}>
+            <Button size="sm" className="glass-button gap-1 border-0" onClick={() => setNovoAberto(true)}>
               <Plus className="h-4 w-4" /> Admitir colaborador
             </Button>
           )}

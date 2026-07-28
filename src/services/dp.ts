@@ -139,6 +139,43 @@ export const folhaApi = {
       .then((r) => j<DpCompetencia>(r)),
 };
 
+// ── F4: dashboard + relatórios timbrados ──
+export interface DpDashboard {
+  headcount: number; por_regime: Record<string, number>;
+  admissoes_mes: number; desligamentos_mes: number; turnover_mes: number;
+  custo_competencia: { mes: string; status: string; headcount: number; folha: number; provisoes: number; patronal: number; custo_total: number } | null;
+  serie_mov: { mes: string; admissoes: number; desligamentos: number }[];
+  serie_custo: { mes: string; status: string; headcount: number; folha: number; provisoes: number; patronal: number; custo_total: number }[];
+}
+
+async function baixar(url: string, nomePadrao: string) {
+  const res = await fetch(url, { headers: authHeaders() });
+  if (!res.ok) throw new Error(`Erro ${res.status} ao gerar o relatório`);
+  const blob = await res.blob();
+  const cd = res.headers.get("Content-Disposition") || "";
+  const m = /filename="?([^";]+)"?/.exec(cd);
+  const a = document.createElement("a");
+  a.href = URL.createObjectURL(blob);
+  a.download = m?.[1] || nomePadrao;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  URL.revokeObjectURL(a.href);
+}
+
+export const relatoriosApi = {
+  dashboard: () =>
+    fetch(`${API_URL}/dp/dashboard/`, { headers: authHeaders() }).then((r) => j<DpDashboard>(r)),
+  folhaExcel: (compId: string) =>
+    baixar(`${API_URL}/dp/competencias/${compId}/relatorio/?tipo=folha&formato=excel`, "folha.xlsx"),
+  rateioExcel: (compId: string) =>
+    baixar(`${API_URL}/dp/competencias/${compId}/relatorio/?tipo=rateio&formato=excel`, "rateio.xlsx"),
+  rateioPdf: (compId: string) =>
+    baixar(`${API_URL}/dp/competencias/${compId}/relatorio/?tipo=rateio&formato=pdf`, "rateio.pdf"),
+  quadroExcel: (status = "") =>
+    baixar(`${API_URL}/dp/relatorio-quadro/${status ? `?status=${status}` : ""}`, "quadro_pessoal.xlsx"),
+};
+
 export const REGIME_LABELS: Record<string, string> = {
   estagiario: "Estagiário (TCE)", clt: "CLT", associado: "Associado", pj: "PJ",
 };

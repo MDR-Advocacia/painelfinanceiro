@@ -3,8 +3,8 @@
 // Fechada é intocável (reabrir só com justificativa, tudo auditado).
 import { useCallback, useEffect, useState } from "react";
 import {
-  CalendarPlus, CheckCircle2, Loader2, Lock, PieChart, RefreshCw, Search,
-  SendHorizonal, Unlock,
+  CalendarPlus, CheckCircle2, Download, FileText, Loader2, Lock, PieChart,
+  RefreshCw, Search, SendHorizonal, Unlock,
 } from "lucide-react";
 import { toast } from "sonner";
 
@@ -24,7 +24,7 @@ import {
 } from "@/components/ui/table";
 import {
   type DpCompetencia, type DpFolhaItem, type DpFolhaTotais, type DpRateioLinha,
-  REGIME_LABELS, fmtBRL, folhaApi,
+  REGIME_LABELS, fmtBRL, folhaApi, relatoriosApi,
 } from "@/services/dp";
 
 const PAGE = 50;
@@ -242,10 +242,27 @@ function CompetenciaDetalhe({ comp, editar, onMudou }: {
               {Object.entries(REGIME_LABELS).map(([k, l]) => <SelectItem key={k} value={k}>{l}</SelectItem>)}
             </SelectContent>
           </Select>
-          <Button size="sm" variant={verRateio ? "default" : "outline"} className="ml-auto gap-1"
-                  onClick={() => setVerRateio((v) => !v)}>
-            <PieChart className="h-3.5 w-3.5" /> Rateio por CC
-          </Button>
+          <div className="ml-auto flex flex-wrap gap-1.5">
+            <Button size="sm" variant="outline" className="gap-1"
+                    title="Folha analítica completa em Excel timbrado"
+                    onClick={() => relatoriosApi.folhaExcel(comp.id).catch((e) => toast.error(e.message))}>
+              <Download className="h-3.5 w-3.5" /> Folha
+            </Button>
+            <Button size="sm" variant="outline" className="gap-1"
+                    title="Rateio por CC em Excel timbrado"
+                    onClick={() => relatoriosApi.rateioExcel(comp.id).catch((e) => toast.error(e.message))}>
+              <Download className="h-3.5 w-3.5" /> Rateio
+            </Button>
+            <Button size="sm" variant="outline" className="gap-1"
+                    title="Rateio por CC em PDF timbrado (pro fechamento)"
+                    onClick={() => relatoriosApi.rateioPdf(comp.id).catch((e) => toast.error(e.message))}>
+              <FileText className="h-3.5 w-3.5" /> PDF
+            </Button>
+            <Button size="sm" variant={verRateio ? "default" : "outline"} className="gap-1"
+                    onClick={() => setVerRateio((v) => !v)}>
+              <PieChart className="h-3.5 w-3.5" /> Rateio por CC
+            </Button>
+          </div>
         </div>
 
         {verRateio ? (
