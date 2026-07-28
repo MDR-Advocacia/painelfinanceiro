@@ -4,27 +4,70 @@ from .serializers import CargoSerializer, SedeSerializer, SetorSerializer, VpdCo
 from .sso_views import LEGACY_DATA_USER_ID
 from rest_framework.authtoken.views import ObtainAuthToken
 from rest_framework.authtoken.models import Token
-from rest_framework.permissions import IsAdminUser, IsAuthenticated
+from rest_framework.permissions import SAFE_METHODS, BasePermission, IsAdminUser, IsAuthenticated
 from rest_framework.response import Response
 from rest_framework import status
 from rest_framework.decorators import action, api_view, permission_classes
 from django.contrib.auth.models import User
 
+
+def _modulos_do_usuario(user) -> dict:
+    """Módulos efetivos do usuário (via cargo). Staff não passa por aqui — bypassa."""
+    perfil = getattr(user, 'perfil', None)
+    if perfil and perfil.cargo:
+        return perfil.cargo.modulos_efetivos()
+    return {}
+
+
+def modulo_permission(read_any: list, write: str):
+    """Fábrica de permission DRF do RBAC por cargo (enforcement no BACKEND).
+
+    - Leitura (GET/HEAD/OPTIONS): liberada se o cargo tiver QUALQUER módulo de
+      `read_any` — necessário porque Dashboard/Projeções/Rentabilidade consomem
+      /setores//sedes//vpd_configs pra calcular agregados.
+    - Escrita (POST/PATCH/DELETE): exige o módulo específico `write`.
+    - Admin (is_staff) bypassa. Sem cargo = nega tudo (default-deny).
+    """
+    class _ModuloPermission(BasePermission):
+        message = "Seu cargo não tem acesso a este módulo."
+
+        def has_permission(self, request, view):
+            u = request.user
+            if not (u and u.is_authenticated):
+                return False
+            if u.is_staff:
+                return True
+            mods = _modulos_do_usuario(u)
+            if request.method in SAFE_METHODS:
+                return any(mods.get(k) for k in read_any)
+            return bool(mods.get(write))
+
+    return _ModuloPermission
+
+# Módulos que dependem dos dados agregados (dashboard e cia. leem tudo pra calcular)
+_LEITORES_AGREGADOS = ["dashboard", "projecoes", "ranking", "config-estrategica", "sedes", "setores"]
+
+
 class SedeViewSet(viewsets.ModelViewSet):
     queryset = Sede.objects.all()
     serializer_class = SedeSerializer
+    permission_classes = [modulo_permission(read_any=_LEITORES_AGREGADOS, write="sedes")]
 
 class SetorViewSet(viewsets.ModelViewSet):
     queryset = Setor.objects.all()
     serializer_class = SetorSerializer
+    permission_classes = [modulo_permission(read_any=_LEITORES_AGREGADOS, write="setores")]
 
 class VpdConfigViewSet(viewsets.ModelViewSet):
     queryset = VpdConfig.objects.all()
     serializer_class = VpdConfigSerializer
+    permission_classes = [modulo_permission(read_any=_LEITORES_AGREGADOS, write="config-estrategica")]
 
 class BaseReferenciaViewSet(viewsets.ModelViewSet):
+    # Honorários BB é autocontido: leitura E escrita exigem o módulo.
     queryset = BaseReferencia.objects.all()
     serializer_class = BaseReferenciaSerializer
+    permission_classes = [modulo_permission(read_any=["honorarios"], write="honorarios")]
 
     @action(detail=False, methods=['post'])
     def bulk_upsert(self, request):
