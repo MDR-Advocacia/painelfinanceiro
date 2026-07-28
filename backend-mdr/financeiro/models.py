@@ -13,6 +13,7 @@ MODULOS = [
     ("sedes", "Sedes (estrutura/custos)"),
     ("setores", "Setores (pessoal/faturamento)"),
     ("pessoal", "Controle de Pessoal (DP)"),
+    ("estrutura", "Estrutura de Faturamento"),
 ]
 MODULO_KEYS = [k for k, _ in MODULOS]
 
@@ -602,3 +603,6 @@ class DpAuditLog(models.Model):
     class Meta:
         db_table = 'dp_audit_log'
         ordering = ['-created_at']
+
+# Estrutura de faturamento (centros/linhas/alocações) — ver models_estrutura.py
+from .models_estrutura import Alocacao, CentroFaturamento, Equipe, LinhaFaturamento  # noqa: E402,F401

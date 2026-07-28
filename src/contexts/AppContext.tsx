@@ -15,7 +15,7 @@ interface AppState {
   activeSetorId: string | null;
   activeSedeId: string | null;
   periodoAtivo: string;
-  view: 'dashboard' | 'setor' | 'projecoes' | 'ranking' | 'sede' | 'honorarios' | 'config-estrategica'; 
+  view: 'dashboard' | 'setor' | 'projecoes' | 'ranking' | 'sede' | 'honorarios' | 'config-estrategica' | 'pessoal' | 'estrutura'; 
   viewMode: ViewMode;
 }
 

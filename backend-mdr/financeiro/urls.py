@@ -19,6 +19,10 @@ from .dp_simulacao import (
     DpTabelaFiscalViewSet, dp_opcoes_escopo, dp_projecao, dp_simular,
 )
 from . import sso_views
+from .estrutura_views import (
+    alocacao_percentual, alocar_equipe, equipes as ef_equipes, estrutura,
+    linha_igualar, remover_alocacao,
+)
 
 router = DefaultRouter()
 router.register(r'sedes', SedeViewSet)
@@ -37,6 +41,13 @@ router.register(r'dp/tabelas-fiscais', DpTabelaFiscalViewSet, basename='dp-fisca
 router.register(r'dp/rescisoes', DpRescisaoViewSet, basename='dp-rescisoes')
 
 urlpatterns = [
+    # Estrutura de Faturamento (proposta de reestruturação)
+    path('estrutura/', estrutura),
+    path('estrutura/equipes/', ef_equipes),
+    path('estrutura/alocacoes/', alocar_equipe),
+    path('estrutura/alocacoes/<uuid:pk>/', alocacao_percentual),
+    path('estrutura/alocacoes/<uuid:pk>/remover/', remover_alocacao),
+    path('estrutura/linhas/<uuid:pk>/igualar/', linha_igualar),
     path('', include(router.urls)),
     path('login/', CustomAuthToken.as_view()), # <-- Rota de Login Nova
     path('sso/', sso_views.sso_session),  # login via Microsoft Entra ID

@@ -9,6 +9,7 @@ import { SedeView } from "@/components/SedeView";
 import HonorariosBB from "./HonorariosBB";
 import { StrategicConfig } from "@/components/StrategicConfig";
 import Pessoal from "./Pessoal";
+import EstruturaView from "@/components/EstruturaView";
 import { SaveIndicator } from "@/components/SaveIndicator";
 import { usePermissions } from "@/hooks/usePermissions";
 import { ShieldAlert } from "lucide-react";
@@ -21,11 +22,12 @@ const VIEW_MODULO: Record<string, string> = {
   ranking: "ranking",
   honorarios: "honorarios",
   "config-estrategica": "config-estrategica",
+  estrutura: "estrutura",
   sede: "sedes",
   setor: "setores",
   pessoal: "pessoal",
 };
-const ORDEM_FALLBACK = ["dashboard", "projecoes", "ranking", "honorarios", "config-estrategica", "pessoal"];
+const ORDEM_FALLBACK = ["dashboard", "projecoes", "ranking", "honorarios", "config-estrategica", "pessoal", "estrutura"];
 
 const SemAcesso = ({ semNenhum }: { semNenhum?: boolean }) => (
   <div className="flex flex-1 items-center justify-center p-8">
@@ -92,6 +94,7 @@ const MainContent = () => {
           {view === "honorarios" && <HonorariosBB />}
           {view === "config-estrategica" && <StrategicConfig />}
           {view === "pessoal" && <Pessoal />}
+          {view === "estrutura" && <EstruturaView />}
         </>
       )}
     </main>

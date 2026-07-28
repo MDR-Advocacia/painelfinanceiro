@@ -16,6 +16,7 @@ import { useNavigate } from "react-router-dom";
 import {
   Plus,
   LayoutDashboard,
+  Network,
   Trash2,
   TrendingUp,
   BarChart3,
@@ -111,6 +112,7 @@ export function Sidebar() {
     { key: "honorarios", label: "Honorários BB", icon: FileSpreadsheet },
     { key: "config-estrategica", label: "Gestão Estratégica", icon: Target },
     { key: "pessoal", label: "Pessoal (DP)", icon: Contact },
+    { key: "estrutura", label: "Estrutura de Faturamento", icon: Network },
   ] as const).filter((p) => pode(p.key));
   const podeSedes = pode("sedes");
   const podeSetores = pode("setores");
