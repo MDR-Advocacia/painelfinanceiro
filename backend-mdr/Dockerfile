@@ -23,5 +23,7 @@ RUN python manage.py collectstatic --noinput
 # Expõe a porta que o Django vai rodar
 EXPOSE 8080
 
-# Comando padrão (em produção o Coolify vai usar o gunicorn)
-CMD ["gunicorn", "--bind", "0.0.0.0:8080", "backend.wsgi:application"]
+# O entrypoint aplica as MIGRATIONS no boot e só então sobe o gunicorn.
+# (deploy com código novo + banco desatualizado já derrubou o painel)
+RUN chmod +x /app/entrypoint.sh
+CMD ["/app/entrypoint.sh"]
