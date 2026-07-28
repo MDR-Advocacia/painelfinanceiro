@@ -34,8 +34,8 @@ import {
 } from "@/components/ui/dialog";
 
 const ITEM_BASE =
-  "w-full flex items-center gap-3 rounded-lg px-3 py-2 text-sm font-medium text-muted-foreground transition-all hover:text-primary";
-const ITEM_ACTIVE = "bg-muted !text-primary";
+  "w-full flex items-center gap-3 rounded-lg px-3 py-2 text-sm font-medium text-sidebar-foreground/75 transition-all hover:bg-sidebar-accent/50 hover:text-white";
+const ITEM_ACTIVE = "bg-sidebar-accent !text-white";
 
 function SectionHeader({
   title, collapsed, onToggle,
@@ -45,7 +45,7 @@ function SectionHeader({
       type="button"
       onClick={onToggle}
       aria-expanded={!collapsed}
-      className="flex w-full items-center justify-between rounded-md px-3 py-1.5 text-[11px] font-semibold uppercase tracking-wider text-muted-foreground/70 transition-colors hover:text-muted-foreground"
+      className="flex w-full items-center justify-between rounded-md px-3 py-1.5 text-[11px] font-semibold uppercase tracking-wider text-sidebar-foreground/50 transition-colors hover:text-sidebar-foreground"
     >
       <span>{title}</span>
       <ChevronDown className={`h-3.5 w-3.5 shrink-0 transition-transform ${collapsed ? "-rotate-90" : ""}`} />
@@ -104,13 +104,13 @@ export function Sidebar() {
   const podeSetores = pode("setores");
 
   return (
-    <aside className="flex min-h-screen w-72 flex-col border-r bg-muted/40">
+    <aside className="flex min-h-screen w-72 flex-col border-r border-sidebar-border bg-sidebar">
       {/* Header — marca (logo adaptativa: preta no claro, branca no noturno) */}
-      <div className="flex h-[72px] items-center gap-3 border-b px-4">
-        <img src={logoMdr} alt="MDR" className="logo-mdr-auto h-11" />
+      <div className="flex h-[72px] items-center gap-3 border-b border-sidebar-border px-4">
+        <img src={logoMdr} alt="MDR" className="logo-mdr-onnavy h-11" />
         <div className="leading-tight">
-          <h1 className="painel-wordmark font-heading text-base font-bold">Painel Financeiro</h1>
-          <p className="text-[10px] tracking-wider text-muted-foreground">MDR ADVOCACIA</p>
+          <h1 className="painel-wordmark-onnavy font-heading text-base font-bold">Painel Financeiro</h1>
+          <p className="text-[10px] tracking-wider text-sidebar-foreground/50">MDR ADVOCACIA</p>
         </div>
       </div>
 
@@ -143,7 +143,7 @@ export function Sidebar() {
                 <div
                   key={sede.id}
                   className={`group flex cursor-pointer items-center gap-2 rounded-lg px-3 py-2 text-sm transition-all ${
-                    isActive ? ITEM_ACTIVE : "text-muted-foreground hover:text-primary"
+                    isActive ? ITEM_ACTIVE : "text-sidebar-foreground/75 hover:bg-sidebar-accent/50 hover:text-white"
                   }`}
                   onClick={() => setActiveSede(sede.id)}
                 >
@@ -151,7 +151,7 @@ export function Sidebar() {
                   <span className="flex-1 truncate font-medium">{sede.nome}</span>
                   <button
                     onClick={(e) => { e.stopPropagation(); removeSede(sede.id); }}
-                    className="rounded p-1 text-muted-foreground/40 opacity-0 transition-all hover:bg-destructive/10 hover:text-destructive group-hover:opacity-100"
+                    className="rounded p-1 text-sidebar-foreground/40 opacity-0 transition-all hover:bg-destructive/30 hover:text-red-300 group-hover:opacity-100"
                   >
                     <Trash2 className="h-3 w-3" />
                   </button>
@@ -160,7 +160,7 @@ export function Sidebar() {
             })}
             <Dialog open={sedeDialogOpen} onOpenChange={setSedeDialogOpen}>
               <DialogTrigger asChild>
-                <button className="flex w-full items-center gap-3 rounded-lg px-3 py-1.5 text-xs text-muted-foreground/60 transition-colors hover:text-primary">
+                <button className="flex w-full items-center gap-3 rounded-lg px-3 py-1.5 text-xs text-sidebar-foreground/50 transition-colors hover:text-white">
                   <Plus className="h-3 w-3" /> Nova Sede
                 </button>
               </DialogTrigger>
@@ -199,14 +199,14 @@ export function Sidebar() {
                 <div
                   key={setor.id}
                   className={`group flex cursor-pointer items-center gap-2 rounded-lg px-3 py-2 text-sm transition-all ${
-                    isActive ? ITEM_ACTIVE : "text-muted-foreground hover:text-primary"
+                    isActive ? ITEM_ACTIVE : "text-sidebar-foreground/75 hover:bg-sidebar-accent/50 hover:text-white"
                   }`}
                   onClick={() => setActiveSetor(setor.id)}
                 >
                   <TipoIcon className="h-4 w-4 shrink-0" />
                   <div className="min-w-0 flex-1">
                     <span className="block truncate font-medium">{setor.nome}</span>
-                    <span className="text-[10px] text-muted-foreground/70">
+                    <span className="text-[10px] text-sidebar-foreground/50">
                       {setor.tipo === "operacional" ? "Oper." : "Admin."}
                       {sedeName && <> · {sedeName}</>}
                       {hasData && (
@@ -216,7 +216,7 @@ export function Sidebar() {
                   </div>
                   <button
                     onClick={(e) => { e.stopPropagation(); removeSetor(setor.id); }}
-                    className="rounded p-1 text-muted-foreground/40 opacity-0 transition-all hover:bg-destructive/10 hover:text-destructive group-hover:opacity-100"
+                    className="rounded p-1 text-sidebar-foreground/40 opacity-0 transition-all hover:bg-destructive/30 hover:text-red-300 group-hover:opacity-100"
                   >
                     <Trash2 className="h-3 w-3" />
                   </button>
@@ -224,13 +224,13 @@ export function Sidebar() {
               );
             })}
             {setores.length === 0 && (
-              <p className="px-3 py-4 text-center text-xs text-muted-foreground/60">
+              <p className="px-3 py-4 text-center text-xs text-sidebar-foreground/50">
                 Nenhum setor ainda. Crie o primeiro abaixo.
               </p>
             )}
             <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
               <DialogTrigger asChild>
-                <button className="flex w-full items-center gap-3 rounded-lg px-3 py-1.5 text-xs text-muted-foreground/60 transition-colors hover:text-primary">
+                <button className="flex w-full items-center gap-3 rounded-lg px-3 py-1.5 text-xs text-sidebar-foreground/50 transition-colors hover:text-white">
                   <Plus className="h-3 w-3" /> Novo Setor
                 </button>
               </DialogTrigger>
@@ -292,15 +292,15 @@ export function Sidebar() {
       </nav>
 
       {/* Rodapé — tema + sair + assinatura DunaTech (padrão da família Flow) */}
-      <div className="border-t px-3 py-3">
+      <div className="border-t border-sidebar-border px-3 py-3">
         <ThemeToggle />
         <button
           onClick={handleSignOut}
-          className="flex w-full items-center gap-3 rounded-lg px-3 py-2 text-xs text-muted-foreground transition-colors hover:bg-destructive/10 hover:text-destructive"
+          className="flex w-full items-center gap-3 rounded-lg px-3 py-2 text-xs text-sidebar-foreground/70 transition-colors hover:bg-destructive/25 hover:text-red-300"
         >
           <LogOut className="h-4 w-4" /> Sair
         </button>
-        <div className="pt-2 text-center text-[0.65rem] tracking-wider text-muted-foreground">
+        <div className="pt-2 text-center text-[0.65rem] tracking-wider text-sidebar-foreground/40">
           © 2026 Duna.Tech
         </div>
       </div>
