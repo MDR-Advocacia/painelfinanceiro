@@ -8,6 +8,7 @@ import { Button } from "@/components/ui/button";
 import { Target, Calendar, Save, Plus, Trash2, Building, Users, Receipt, Copy } from "lucide-react";
 import { formatCurrency } from "@/utils/calculations";
 import { toast } from "sonner";
+import { PageHeader } from "@/components/Pagina";
 
 // Tipagem local para os itens dinâmicos
 interface CustoDinamico {
@@ -30,7 +31,7 @@ export function StrategicConfig() {
 
   // --- SINCRONIZAÇÃO E CLONAGEM DO BANCO DE DADOS ---
   const configAtual = vpdConfigs.find(v => v.periodo === periodoAtivo);
-  
+
   // Verifica se existe algum mês anterior no banco para habilitar o botão
   const hasPreviousData = vpdConfigs.some(v => v.periodo < periodoAtivo && v.despesasBase && v.despesasBase.length > 0);
 
@@ -86,7 +87,7 @@ export function StrategicConfig() {
   };
 
   const updateDespesa = (tipo: 'base' | 'apoio', id: string, campo: 'nome' | 'valor', novoValor: any) => {
-    const atualizarLista = (lista: CustoDinamico[]) => lista.map(item => 
+    const atualizarLista = (lista: CustoDinamico[]) => lista.map(item =>
       item.id === id ? { ...item, [campo]: novoValor } : item
     );
     if (tipo === 'base') setDespesasBase(atualizarLista(despesasBase));
@@ -100,17 +101,16 @@ export function StrategicConfig() {
 
   return (
     <div className="space-y-6 animate-fade-in pb-10">
-      <div className="flex items-start justify-between gap-4 flex-wrap">
-        <div>
-          <h2 className="font-heading text-2xl font-bold text-foreground">Construtor Estratégico de VPD</h2>
-          <p className="text-sm text-muted-foreground mt-1">Configure detalhadamente as variáveis de despesa do escritório.</p>
-        </div>
-        
-        <div className="flex items-center gap-2 flex-wrap">
+      <PageHeader
+        eyebrow="Gestão estratégica"
+        titulo="Construtor de VPD"
+        icone={<Target className="h-4.5 w-4.5" />}
+        descricao="As variáveis de despesa que o escritório rateia entre os setores."
+        acoes={<>
           {/* Botão de clonar só aparece se as listas estiverem vazias */}
           {despesasBase.length === 0 && pessoalApoio.length === 0 && (
-            <Button 
-              variant="outline" 
+            <Button
+              variant="outline"
               onClick={handleCloneFromPrevious}
               disabled={!hasPreviousData}
               className="gap-2 h-9 text-sm"
@@ -124,12 +124,12 @@ export function StrategicConfig() {
             <Calendar className="w-4 h-4 text-muted-foreground" />
             <PeriodSelector value={periodoAtivo} onChange={setPeriodoAtivo} />
           </div>
-        </div>
-      </div>
+        </>}
+      />
 
       <div className="grid lg:grid-cols-12 gap-6">
         <div className="lg:col-span-7 space-y-6">
-          
+
           <Card className="border-primary/20 shadow-sm">
             <CardHeader className="bg-muted/30 border-b pb-4 flex flex-row items-center justify-between">
               <div>
@@ -147,16 +147,16 @@ export function StrategicConfig() {
               {despesasBase.map((item) => (
                 <div key={item.id} className="flex gap-2 items-start">
                   <div className="flex-1">
-                    <Input 
-                      value={item.nome} 
+                    <Input
+                      value={item.nome}
                       onChange={(e) => updateDespesa('base', item.id, 'nome', e.target.value)}
                       placeholder="Ex: Aluguel"
                       className="h-9 text-sm"
                     />
                   </div>
                   <div className="w-40">
-                    <NumberField 
-                      value={item.valor} 
+                    <NumberField
+                      value={item.valor}
                       onChange={(v) => updateDespesa('base', item.id, 'valor', v)}
                     />
                   </div>
@@ -185,16 +185,16 @@ export function StrategicConfig() {
               {pessoalApoio.map((item) => (
                 <div key={item.id} className="flex gap-2 items-start">
                   <div className="flex-1">
-                    <Input 
-                      value={item.nome} 
+                    <Input
+                      value={item.nome}
                       onChange={(e) => updateDespesa('apoio', item.id, 'nome', e.target.value)}
                       placeholder="Ex: Equipe de TI"
                       className="h-9 text-sm"
                     />
                   </div>
                   <div className="w-40">
-                    <NumberField 
-                      value={item.valor} 
+                    <NumberField
+                      value={item.valor}
                       onChange={(v) => updateDespesa('apoio', item.id, 'valor', v)}
                     />
                   </div>
@@ -230,15 +230,15 @@ export function StrategicConfig() {
                 Resumo analítico para o período de {periodoAtivo}
               </CardDescription>
             </CardHeader>
-            
+
             <CardContent className="pt-6 space-y-5">
-              
+
               <div className="space-y-3 text-sm">
                 <div className="flex justify-between items-center text-sidebar-foreground/80">
                   <span>1. Despesas Base</span>
                   <span className="font-mono">{formatCurrency(totalDespesasBase)}</span>
                 </div>
-                
+
                 <div className="flex justify-between items-center text-sidebar-foreground/80 border-b border-sidebar-border/50 pb-3">
                   <span>+ Pessoal Apoio</span>
                   <span className="font-mono">{formatCurrency(totalApoio)}</span>
@@ -251,7 +251,7 @@ export function StrategicConfig() {
               </div>
 
               <div className="bg-background/5 p-4 rounded-lg border border-sidebar-border/50 space-y-4 mt-6">
-                
+
                 <div className="flex justify-between items-center text-sm">
                   <span className="text-sidebar-foreground/70">1. Valor Base por Funcionário</span>
                   <span className="font-mono text-sidebar-foreground">{formatCurrency(valorBasePorFuncionario)}</span>
@@ -277,9 +277,9 @@ export function StrategicConfig() {
                   <span className="text-sidebar-foreground/60">VPD Salvo Atual:</span>
                   <span className="font-mono font-bold text-sidebar-foreground">{formatCurrency(currentVpdValor)}</span>
                 </div>
-                
-                <Button 
-                  onClick={handleAplicarVpd} 
+
+                <Button
+                  onClick={handleAplicarVpd}
                   className="w-full gap-2 font-bold py-6 text-base shadow-lg hover:scale-[1.02] transition-transform"
                   disabled={headcountGlobal === 0}
                 >

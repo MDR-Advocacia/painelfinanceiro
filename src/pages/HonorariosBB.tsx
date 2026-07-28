@@ -11,6 +11,7 @@ import ExcelJS from 'exceljs';
 import { saveAs } from 'file-saver';
 import { MapeadorColunas } from "@/components/MapeadorColunas";
 import { authHeaders } from "@/hooks/useAuth";
+import { PageHeader } from "@/components/Pagina";
 
 const API_URL = import.meta.env.VITE_API_URL;
 
@@ -25,12 +26,12 @@ const MAPA_CENTRO_CUSTO: Record<string, string[]> = {
 const normalizar_chave = (valor: any): string => {
   if (!valor || valor === 'NaN' || valor === 'nan') return "";
   let v = String(valor).trim();
-  
+
   if (v.includes('-')) v = v.split('-')[0]; // Corta o final após o hífen
-  
+
   v = v.replace(/\D/g, ''); // Remove barras, pontos, etc
   v = v.replace(/^0+/, ''); // Remove zeros à esquerda mantendo como texto puro
-  
+
   return v;
 };
 
@@ -51,7 +52,7 @@ export default function HonorariosBB() {
   const [faturasFiles, setFaturasFiles] = useState<File[]>([]);
   const [showMapeador, setShowMapeador] = useState(false);
   const [colunasDisponiveis, setColunasDisponiveis] = useState<string[]>([]);
-  const [previewData, setPreviewData] = useState<any[]>([]); 
+  const [previewData, setPreviewData] = useState<any[]>([]);
   const [arquivosReferencia, setArquivosReferencia] = useState<File[]>([]);
   const [stats, setStats] = useState({ total: 0, autor: 0, reu: 0 });
 
@@ -59,12 +60,12 @@ export default function HonorariosBB() {
     try {
       const response = await fetch(`${API_URL}/base_referencia/`, { headers: authHeaders() });
       if (!response.ok) throw new Error('Falha ao carregar dados');
-      
+
       const data = await response.json();
-      
+
       let autor = 0;
       let reu = 0;
-      
+
       data.forEach((item: any) => {
           const poloUpper = (item.polo || '').toUpperCase();
           if (/AUTOR|REQUERENTE|EXEQUENTE|EMBARGANTE|IMPUGNANTE|ATIVO/i.test(poloUpper)) {
@@ -74,10 +75,10 @@ export default function HonorariosBB() {
           }
       });
 
-      setStats({ 
-        total: data.length, 
-        autor: autor, 
-        reu: reu 
+      setStats({
+        total: data.length,
+        autor: autor,
+        reu: reu
       });
     } catch (err) {
       console.error("Erro ao carregar estatísticas:", err);
@@ -97,13 +98,13 @@ export default function HonorariosBB() {
       const deletePromises = data.map((item: any) =>
         fetch(`${API_URL}/base_referencia/${item.id}/`, { method: 'DELETE', headers: authHeaders() })
       );
-      
+
       await Promise.all(deletePromises);
-      
+
       toast.success("Base limpa com sucesso!");
       fetchStats();
-    } catch (err) { 
-        toast.error("Erro ao limpar base."); 
+    } catch (err) {
+        toast.error("Erro ao limpar base.");
         console.error(err);
     }
     finally { setLoading(false); }
@@ -116,7 +117,7 @@ export default function HonorariosBB() {
     try {
       const fileList = Array.from(files);
       setArquivosReferencia(fileList);
-      
+
       const reader = new FileReader();
       reader.onload = (evt) => {
         try {
@@ -147,7 +148,7 @@ export default function HonorariosBB() {
         const file = arquivosReferencia[i];
         toast.info(`Lendo arquivo ${i + 1} de ${arquivosReferencia.length}...`);
         await delay(100);
-        
+
         const data = await new Promise<any[]>((resolve, reject) => {
           const reader = new FileReader();
           reader.onload = (evt) => {
@@ -175,7 +176,7 @@ export default function HonorariosBB() {
 
       if (todosOsProcessos.length > 0) {
         toast.info(`⏳ Enviando ${todosOsProcessos.length} processos para o servidor (Isso levará alguns segundos)...`);
-        
+
         // AQUI ESTÁ A MÁGICA: Manda TUDO num único POST para a rota de Bulk Upsert!
         const response = await fetch(`${API_URL}/base_referencia/bulk_upsert/`, {
             method: 'POST',
@@ -184,17 +185,17 @@ export default function HonorariosBB() {
         });
 
         if (!response.ok) throw new Error("Falha ao salvar lote no servidor.");
-        
+
         const result = await response.json();
         toast.success(`✅ ${result.sucesso}`);
         fetchStats();
       }
 
-    } catch (err: any) { 
-      toast.error(`❌ Erro: ${err.message}`); 
-    } finally { 
-      setLoading(false); 
-      setArquivosReferencia([]); 
+    } catch (err: any) {
+      toast.error(`❌ Erro: ${err.message}`);
+    } finally {
+      setLoading(false);
+      setArquivosReferencia([]);
     }
   };
 
@@ -242,7 +243,7 @@ export default function HonorariosBB() {
       const baseRef = await resBanco.json();
 
       const refMap = new Map(baseRef?.map((r: any) => [r.npj_limpo, r.polo]));
-      
+
       toast.info("📊 Passo 3/4: Classificando Centro de Custo e montando Excel...", { duration: 3000 });
       await delay(300);
 
@@ -281,11 +282,11 @@ export default function HonorariosBB() {
         const npjOriginal = item[colunaNpjFatura];
         const npjLimpo = normalizar_chave(npjOriginal);
         const polo = refMap.get(npjLimpo) || 'NAN';
-        
+
         const valorNum = limpar_moeda(item.Valor);
         const eventoOriginal = String(item.Evento || '').trim();
         const isBonus = eventoOriginal === EVENTO_BONUS;
-        
+
         const isAutor = /AUTOR|REQUERENTE|EXEQUENTE|EMBARGANTE|IMPUGNANTE|ATIVO/i.test(polo);
         const isReu = /RÉU|REU|REQUERIDO|EXECUTADO|EMBARGADO|IMPUGNADO|PASSIVO/i.test(polo);
 
@@ -303,7 +304,7 @@ export default function HonorariosBB() {
         } else if (isReu) {
             targetSheet = sheetReu;
             const eventoNorm = eventoOriginal.toUpperCase().trim();
-            
+
             if (isBonus) {
                 somaBonusReu += valorNum;
                 diagnosticoOuCC = 'BÔNUS - SATISFAÇÃO';
@@ -311,7 +312,7 @@ export default function HonorariosBB() {
                 diagnosticoOuCC = 'Outros Eventos (Réu)';
                 for (const [cc, lista] of Object.entries(MAPA_CENTRO_CUSTO)) {
                     if (lista.some(term => eventoNorm === term.toUpperCase().trim())) {
-                        diagnosticoOuCC = cc; 
+                        diagnosticoOuCC = cc;
                         break;
                     }
                 }
@@ -353,10 +354,10 @@ export default function HonorariosBB() {
           { header: 'Setor / Categoria', key: 'cat', width: 50 },
           { header: 'Valor Total', key: 'val', width: 25 }
       ];
-      
+
       // 1. Honorários Normais
       sheetResumo.addRow({ cat: 'Polo Ativo (AUTOR)', val: somaAutor });
-      
+
       let somaTotalReuNorm = 0;
       for (const [cc, valor] of Object.entries(somaReuPorCC)) {
         if (valor > 0 || cc !== 'Outros Eventos (Réu)') {
@@ -378,7 +379,7 @@ export default function HonorariosBB() {
           if (somaBonusReu > 0) sheetResumo.addRow({ cat: 'BÔNUS - SATISFAÇÃO (RÉU)', val: somaBonusReu });
           if (somaBonusInteressado > 0) sheetResumo.addRow({ cat: 'BÔNUS - SATISFAÇÃO (INTERESSADO)', val: somaBonusInteressado });
       }
-      
+
       // 3. Total Geral
       const totalGeral = somaAutor + somaTotalReuNorm + somaInteressadoResto + somaBonusAutor + somaBonusReu + somaBonusInteressado;
       const rowTotal = sheetResumo.addRow({ cat: 'Total Geral', val: totalGeral });
@@ -400,18 +401,19 @@ export default function HonorariosBB() {
 
     } catch (err: any) {
       toast.error(`❌ Erro detectado: ${err.message}`, { duration: 8000 });
-    } finally { 
-      setLoading(false); 
+    } finally {
+      setLoading(false);
     }
   };
 
   return (
     <div className="space-y-6">
-      <div className="flex items-center justify-between">
-        <h1 className="font-heading text-2xl font-bold flex items-center gap-2">
-          <FileSpreadsheet className="w-6 h-6 text-primary" /> Honorários BB
-        </h1>
-      </div>
+      <PageHeader
+        eyebrow="Conciliação"
+        titulo="Honorários BB"
+        icone={<FileSpreadsheet className="h-4.5 w-4.5" />}
+        descricao="Cruzamento das faturas com a base de referência de NPJ."
+      />
 
       <Tabs defaultValue="processar">
         <TabsList className="grid w-full grid-cols-2 max-w-[400px]">
@@ -420,14 +422,14 @@ export default function HonorariosBB() {
         </TabsList>
 
         <TabsContent value="processar" className="space-y-4 pt-4">
-          <Card>
+          <Card className="glass-card border-0">
             <CardHeader>
               <CardTitle className="text-sm">Cruzamento de Faturas</CardTitle>
               <CardDescription>O sistema usará os {stats.total.toLocaleString()} processos salvos.</CardDescription>
             </CardHeader>
             <CardContent className="space-y-4">
               <div className="border-2 border-dashed border-muted rounded-lg p-8 text-center space-y-3 relative hover:border-primary/40 transition-colors">
-                <input 
+                <input
                   type="file" multiple accept=".xlsx, .xls, .csv" className="absolute inset-0 opacity-0 cursor-pointer"
                   onChange={(e) => setFaturasFiles(Array.from(e.target.files || []))}
                 />
@@ -446,11 +448,11 @@ export default function HonorariosBB() {
         <TabsContent value="referencia" className="space-y-6 pt-4">
           <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
             <Card className="bg-primary/5 border-primary/20"><CardContent className="pt-4"><p className="text-[10px] font-bold text-muted-foreground uppercase">Processos Totais</p><p className="text-2xl font-bold">{stats.total.toLocaleString()}</p></CardContent></Card>
-            <Card><CardContent className="pt-4"><p className="text-[10px] font-bold text-muted-foreground uppercase">Polo Autor / Ativo</p><p className="text-2xl font-bold">{stats.autor.toLocaleString()}</p></CardContent></Card>
-            <Card><CardContent className="pt-4"><p className="text-[10px] font-bold text-muted-foreground uppercase">Polo Réu / Passivo</p><p className="text-2xl font-bold">{stats.reu.toLocaleString()}</p></CardContent></Card>
+            <Card className="glass-card border-0"><CardContent className="pt-4"><p className="text-[10px] font-bold text-muted-foreground uppercase">Polo Autor / Ativo</p><p className="text-2xl font-bold">{stats.autor.toLocaleString()}</p></CardContent></Card>
+            <Card className="glass-card border-0"><CardContent className="pt-4"><p className="text-[10px] font-bold text-muted-foreground uppercase">Polo Réu / Passivo</p><p className="text-2xl font-bold">{stats.reu.toLocaleString()}</p></CardContent></Card>
           </div>
 
-          <Card>
+          <Card className="glass-card border-0">
             <CardHeader className="flex flex-row items-center justify-between space-y-0">
               <div>
                 <CardTitle className="text-sm">Importar Base (Ativos/Baixados)</CardTitle>
@@ -468,11 +470,11 @@ export default function HonorariosBB() {
         </TabsContent>
       </Tabs>
 
-      <MapeadorColunas 
-        open={showMapeador} 
+      <MapeadorColunas
+        open={showMapeador}
         onOpenChange={setShowMapeador}
         colunas={colunasDisponiveis}
-        previewData={previewData} 
+        previewData={previewData}
         onConfirm={salvarNoBanco}
       />
     </div>

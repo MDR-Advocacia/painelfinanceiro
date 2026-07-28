@@ -21,7 +21,7 @@ export function BillingForm() {
 
   return (
     <div className="space-y-4">
-      <Card>
+      <Card className="glass-card border-0">
         <CardHeader className="pb-3">
           <CardTitle className="text-sm font-heading flex items-center gap-2">
             <Receipt className="w-4 h-4 text-primary" />
@@ -81,7 +81,7 @@ export function BillingForm() {
         </CardContent>
       </Card>
 
-      <Card>
+      <Card className="glass-card border-0">
         <CardHeader className="pb-3">
           <CardTitle className="text-sm font-heading flex items-center gap-2">
             <Award className="w-4 h-4 text-primary" />
@@ -107,7 +107,7 @@ export function BillingForm() {
       </Card>
 
       {fat.bruto > 0 && (
-        <Card>
+        <Card className="glass-card border-0">
           <CardHeader className="pb-3">
             <CardTitle className="text-sm font-heading">Impostos Calculados (Lucro Presumido)</CardTitle>
           </CardHeader>

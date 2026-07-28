@@ -39,6 +39,7 @@ import {
   type DpEvento, type DpLideranca, type DpResumo,
   REGIME_LABELS, dpApi, exportApi, fmtBRL, fmtData,
 } from "@/services/dp";
+import { PageHeader } from "@/components/Pagina";
 
 const PAGE = 50;
 const TODOS = "__todos__";
@@ -76,15 +77,13 @@ export default function Pessoal() {
 
   return (
     <div className="animate-fade-in space-y-6">
-      <div className="flex flex-wrap items-start justify-between gap-4">
-        <div>
-          <h2 className="font-heading text-2xl font-bold text-foreground">Controle de Pessoal</h2>
-          <p className="mt-1 text-sm text-muted-foreground">
-            Quadro, admissões, desligamentos e centros de custo — com trilha de auditoria.
-          </p>
-        </div>
-        {resumo && (
-          <div className="grid w-full grid-cols-3 gap-2 sm:w-auto sm:grid-cols-6">
+      <PageHeader
+        eyebrow="Departamento pessoal"
+        titulo="Controle de Pessoal"
+        icone={<Contact className="h-4.5 w-4.5" />}
+        descricao="Quadro, folha, desligamentos e centros de custo — com trilha de auditoria."
+        acoes={resumo && (
+          <div className="grid grid-cols-3 gap-2 sm:grid-cols-6">
             <KPI label="Ativos" valor={resumo.ativos} />
             <KPI label="CLT" valor={resumo.por_regime.clt} />
             <KPI label="Estagiários" valor={resumo.por_regime.estagiario} />
@@ -93,10 +92,10 @@ export default function Pessoal() {
             <KPI label="Desligados" valor={resumo.inativos} tom="rose" />
           </div>
         )}
-      </div>
+      />
 
       <Tabs value={aba} onValueChange={setAba}>
-        <TabsList className="flex h-auto w-full flex-wrap justify-start gap-1">
+        <TabsList className="flex h-auto w-full flex-wrap justify-start gap-1 rounded-xl border border-border/60 bg-muted/50 p-1">
           <TabsTrigger value="dash" className="gap-2"><LayoutDashboard className="h-4 w-4" /> Dashboard</TabsTrigger>
           <TabsTrigger value="quadro" className="gap-2"><Users className="h-4 w-4" /> Quadro</TabsTrigger>
           <TabsTrigger value="folha" className="gap-2"><Wallet className="h-4 w-4" /> Folha</TabsTrigger>
@@ -144,9 +143,11 @@ export default function Pessoal() {
 
 function KPI({ label, valor, tom }: { label: string; valor: number; tom?: "rose" }) {
   return (
-    <div className="glass-card rounded-lg border-0 px-4 py-2 text-center">
-      <div className={`font-mono text-lg font-bold ${tom === "rose" ? "text-rose-600" : "text-foreground"}`}>{valor}</div>
-      <div className="text-[10px] uppercase tracking-wider text-muted-foreground">{label}</div>
+    <div className="glass-card card-hover rounded-xl border-0 px-3.5 py-2 text-center">
+      <div className={`font-mono-numbers text-lg font-bold leading-none ${tom === "rose" ? "text-destructive" : "text-foreground"}`}>
+        {valor}
+      </div>
+      <div className="eyebrow mt-1.5 text-[0.58rem]">{label}</div>
     </div>
   );
 }

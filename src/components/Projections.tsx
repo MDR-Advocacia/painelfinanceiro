@@ -7,6 +7,7 @@ import {
   ResponsiveContainer, Legend,
 } from "recharts";
 import { TrendingUp } from "lucide-react";
+import { PageHeader, SectionTitle, Vazio } from "@/components/Pagina";
 import { MONTH_NAMES } from "@/types/sector";
 
 const PERIODS = [
@@ -37,29 +38,26 @@ export function Projections() {
 
   return (
     <div className="animate-fade-in space-y-6">
-      <div className="flex items-start justify-between gap-4 flex-wrap">
-        <div>
-          <h2 className="font-heading text-2xl font-bold text-foreground">Projeções Financeiras</h2>
-          <p className="text-sm text-muted-foreground mt-1">Projeção acumulada com base nos dados do período selecionado</p>
-        </div>
-        <PeriodSelector value={periodoAtivo} onChange={setPeriodoAtivo} />
-      </div>
+      <PageHeader
+        eyebrow="Olhando pra frente"
+        titulo="Projeções"
+        descricao="Acumulado projetado a partir do que já foi lançado no período selecionado."
+        acoes={<PeriodSelector value={periodoAtivo} onChange={setPeriodoAtivo} />}
+      />
 
       {setores.length === 0 || totalFaturamento === 0 ? (
-        <Card>
-          <CardContent className="py-16 text-center">
-            <TrendingUp className="w-12 h-12 text-muted-foreground/30 mx-auto mb-4" />
-            <h3 className="font-heading text-lg font-semibold text-muted-foreground">Sem dados para projeção</h3>
-            <p className="text-sm text-muted-foreground/60 mt-1">Cadastre setores com faturamento para visualizar projeções</p>
-          </CardContent>
-        </Card>
+        <Vazio
+          icone={TrendingUp}
+          titulo="Sem dados para projetar"
+          texto="A projeção parte do faturamento lançado — cadastre ao menos um setor com receita no período."
+        />
       ) : (
         <>
           <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
             {PERIODS.map(p => (
-              <Card key={p.months}>
-                <CardContent className="pt-5 pb-4">
-                  <p className="text-xs text-muted-foreground font-medium mb-2">Projeção {p.label}</p>
+              <Card key={p.months} className="glass-card card-hover border-0">
+                <CardContent className="pb-4 pt-5">
+                  <p className="eyebrow mb-3">Projeção {p.label}</p>
                   <div className="space-y-1.5">
                     <Row label="Faturamento" value={formatCurrency(totalFaturamento * p.months)} />
                     <Row label="Impostos" value={formatCurrency(totalImpostos * p.months)} color="text-warning" />
@@ -73,9 +71,10 @@ export function Projections() {
             ))}
           </div>
 
-          <Card>
+          <Card className="glass-card border-0">
             <CardContent className="pt-6">
-              <h4 className="font-heading text-sm font-semibold mb-4">Evolução Acumulada (12 meses)</h4>
+              <SectionTitle eyebrow="Horizonte" titulo="Evolução acumulada em 12 meses"
+                            acoes={<span className="text-xs text-muted-foreground">linha tracejada = margem acumulada</span>} />
               <ResponsiveContainer width="100%" height={320}>
                 <LineChart data={projectionData}>
                   <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))" />
@@ -92,27 +91,29 @@ export function Projections() {
             </CardContent>
           </Card>
 
-          <Card>
+          <Card className="glass-card border-0">
             <CardContent className="pt-6">
-              <h4 className="font-heading text-sm font-semibold mb-4">Projeção por Setor (12 meses)</h4>
+              <SectionTitle eyebrow="Por setor" titulo="Margem projetada"
+                            acoes={<span className="text-xs text-muted-foreground">mantendo o ritmo do período</span>} />
               <div className="overflow-x-auto">
                 <table className="w-full text-sm">
                   <thead>
-                    <tr className="border-b text-muted-foreground">
-                      <th className="text-left py-2 text-xs font-medium">Setor</th>
-                      <th className="text-right py-2 text-xs font-medium">3 meses</th>
-                      <th className="text-right py-2 text-xs font-medium">6 meses</th>
-                      <th className="text-right py-2 text-xs font-medium">12 meses</th>
+                    <tr className="border-b">
+                      <th className="eyebrow py-2 text-left">Setor</th>
+                      <th className="eyebrow py-2 text-right">3 meses</th>
+                      <th className="eyebrow py-2 text-right">6 meses</th>
+                      <th className="eyebrow py-2 text-right">12 meses</th>
                     </tr>
                   </thead>
                   <tbody>
                     {resumos.map(({ setor, resumo }) => {
                       const margem = resumo.margemBruta;
                       return (
-                        <tr key={setor.id} className="border-b border-border/50">
-                          <td className="py-2 font-medium">{setor.nome}</td>
-                          {[3, 6, 12].map(m => (
-                            <td key={m} className={`py-2 text-right font-mono text-xs ${margem >= 0 ? 'text-success' : 'text-destructive'}`}>
+                        <tr key={setor.id}
+                            className="border-b border-border/50 border-l-2 border-l-transparent transition-colors last:border-b-0 hover:border-l-[hsl(var(--dunatech-blue))] hover:bg-[hsl(var(--dunatech-blue))]/5">
+                          <td className="py-2 pl-2 font-medium">{setor.nome}</td>
+                          {[3, 6, 12].map((m) => (
+                            <td key={m} className={`py-2 text-right font-mono-numbers text-xs ${margem >= 0 ? "text-success" : "text-destructive"}`}>
                               {formatCurrency(margem * m)}
                             </td>
                           ))}

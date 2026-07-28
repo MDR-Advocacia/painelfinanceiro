@@ -11,11 +11,12 @@ import { formatCurrency, formatPercent } from "@/utils/calculations";
 import { MONTH_NAMES } from "@/types/sector";
 import type { CustoItem } from "@/types/sector";
 import { toast } from "sonner";
+import { PageHeader, SectionTitle } from "@/components/Pagina";
 
 // Função auxiliar para calcular o próximo mês no formato YYYY-MM
 function getNextMonth(periodo: string): string {
   const [year, month] = periodo.split('-').map(Number);
-  const nextDate = new Date(year, month, 1); 
+  const nextDate = new Date(year, month, 1);
   return `${nextDate.getFullYear()}-${String(nextDate.getMonth() + 1).padStart(2, '0')}`;
 }
 
@@ -69,24 +70,20 @@ export function SedeView() {
 
   return (
     <div className="animate-fade-in space-y-6">
-      <div className="flex items-start justify-between gap-4 flex-wrap">
-        <div className="flex items-center gap-3">
-          <Building className="w-5 h-5 text-primary" />
-          <div>
-            <h2 className="font-heading text-2xl font-bold text-foreground">{sede.nome}</h2>
-            <p className="text-sm text-muted-foreground mt-0.5">Custos de Estrutura / Patrimônio</p>
-          </div>
-        </div>
-        
-        <div className="flex items-center gap-3 flex-wrap">
-          <div className="flex items-center gap-2 bg-muted/50 rounded-lg px-3 py-1.5">
+      <PageHeader
+        eyebrow="Sede"
+        titulo={sede.nome}
+        icone={<Building className="h-4.5 w-4.5" />}
+        descricao="Custos de estrutura e patrimônio, rateados entre os setores da sede."
+        acoes={<>
+          <div className="flex items-center gap-2 rounded-lg bg-muted/50 px-3 py-1.5">
             <Calendar className="w-4 h-4 text-muted-foreground" />
             <PeriodSelector value={periodoAtivo} onChange={setPeriodoAtivo} />
           </div>
 
-          <Button 
-            variant="outline" 
-            size="sm" 
+          <Button
+            variant="outline"
+            size="sm"
             className="h-10 gap-2 border-primary/20 hover:bg-primary/10 transition-colors"
             onClick={handleReplicateToNextMonth}
             disabled={custos.length === 0}
@@ -97,11 +94,11 @@ export function SedeView() {
 
           {!hasPeriodData && custos.length > 0 && (
             <Badge variant="secondary" className="text-[10px]">
-              Dados herdados do período anterior
+              Herdado do período anterior
             </Badge>
           )}
-        </div>
-      </div>
+        </>}
+      />
 
       {availablePeriods.length > 1 && (
         <div className="flex items-center gap-2 flex-wrap">
@@ -125,13 +122,13 @@ export function SedeView() {
 
       {/* Resumo */}
       <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-        <Card>
+        <Card className="glass-card border-0">
           <CardContent className="pt-5 pb-4">
             <p className="text-xs text-muted-foreground">Total Custos Estrutura</p>
             <p className="font-mono text-lg font-bold text-foreground mt-1">{formatCurrency(totalCustos)}</p>
           </CardContent>
         </Card>
-        <Card>
+        <Card className="glass-card border-0">
           <CardContent className="pt-5 pb-4">
             <div className="flex items-center gap-2 mb-1">
               <Users className="w-4 h-4 text-primary" />
@@ -147,7 +144,7 @@ export function SedeView() {
             )}
           </CardContent>
         </Card>
-        <Card>
+        <Card className="glass-card border-0">
           <CardContent className="pt-5 pb-4">
             <p className="text-xs text-muted-foreground">Rateio por Setor</p>
             <p className={`font-mono text-lg font-bold ${setoresVinculados.length > 0 ? 'text-foreground' : 'text-muted-foreground'}`}>
@@ -161,7 +158,7 @@ export function SedeView() {
       </div>
 
       {/* Itens de custo */}
-      <Card>
+      <Card className="glass-card border-0">
         <CardHeader className="pb-3">
           <CardTitle className="text-sm font-heading flex items-center gap-2">
             <Building className="w-4 h-4 text-primary" />

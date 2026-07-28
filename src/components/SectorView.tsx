@@ -11,18 +11,19 @@ import {
   Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
 } from "@/components/ui/select";
 import { toast } from "sonner";
+import { PageHeader, SectionTitle } from "@/components/Pagina";
 
 // Função auxiliar para calcular o próximo mês no formato YYYY-MM
 function getNextMonth(periodo: string): string {
   const [year, month] = periodo.split('-').map(Number);
   // No JavaScript os meses começam em 0. Então passar o 'month' atual já pega o mês seguinte
-  const nextDate = new Date(year, month, 1); 
+  const nextDate = new Date(year, month, 1);
   return `${nextDate.getFullYear()}-${String(nextDate.getMonth() + 1).padStart(2, '0')}`;
 }
 
 export function SectorView() {
   const { activeSetor, periodoAtivo, setPeriodoAtivo, activePeriodoData, sedes, updateSetorSedeId, updatePeriodoData } = useApp();
-  
+
   if (!activeSetor || !activePeriodoData) return null;
 
   const isOp = activeSetor.tipo === 'operacional';
@@ -40,22 +41,12 @@ export function SectorView() {
 
   return (
     <div className="animate-fade-in space-y-6">
-      <div className="flex items-start justify-between gap-4 flex-wrap">
-        
-        <div className="flex items-center gap-3">
-          {isOp ? <Factory className="w-5 h-5 text-primary" /> : <Landmark className="w-5 h-5 text-primary" />}
-          <div>
-            <h2 className="font-heading text-2xl font-bold text-foreground">{activeSetor.nome}</h2>
-            <p className="text-sm text-muted-foreground mt-0.5 flex items-center gap-2">
-              <Badge variant="outline" className="text-[10px]">
-                {isOp ? 'Operacional' : 'Administrativo'}
-              </Badge>
-            </p>
-          </div>
-        </div>
-
-        <div className="flex items-center gap-3 flex-wrap">
-          
+      <PageHeader
+        eyebrow={isOp ? "Setor operacional" : "Setor administrativo"}
+        titulo={activeSetor.nome}
+        icone={isOp ? <Factory className="h-4.5 w-4.5" /> : <Landmark className="h-4.5 w-4.5" />}
+        descricao={hasPeriodData ? undefined : "Dados herdados do período anterior"}
+        acoes={<>
           {/* Sede selector */}
           <div className="flex items-center gap-2 bg-muted/50 rounded-lg px-3 py-1.5">
             <Building className="w-4 h-4 text-muted-foreground" />
@@ -82,9 +73,9 @@ export function SectorView() {
           </div>
 
           {/* Botão de Clonagem Rápida */}
-          <Button 
-            variant="outline" 
-            size="sm" 
+          <Button
+            variant="outline"
+            size="sm"
             className="h-10 gap-2 border-primary/20 hover:bg-primary/10 transition-colors"
             onClick={handleReplicateToNextMonth}
           >
@@ -92,13 +83,8 @@ export function SectorView() {
             <span className="hidden sm:inline">Clonar para Mês Seguinte</span>
           </Button>
 
-          {!hasPeriodData && (
-            <Badge variant="secondary" className="text-[10px]">
-              Dados herdados do período anterior
-            </Badge>
-          )}
-        </div>
-      </div>
+        </>}
+      />
 
       {/* Histórico de Períodos Rápidos */}
       {availablePeriods.length > 1 && (
@@ -125,15 +111,11 @@ export function SectorView() {
 
       <div className="grid lg:grid-cols-2 gap-6">
         <div>
-          <h3 className="font-heading text-sm font-semibold text-muted-foreground uppercase tracking-wider mb-3">
-            Custos de Pessoal
-          </h3>
+          <SectionTitle eyebrow="Entrada" titulo="Custos de pessoal" />
           <PersonnelForm />
         </div>
         <div>
-          <h3 className="font-heading text-sm font-semibold text-muted-foreground uppercase tracking-wider mb-3">
-            Faturamento & Impostos
-          </h3>
+          <SectionTitle eyebrow="Entrada" titulo="Faturamento e impostos" />
           <BillingForm />
         </div>
       </div>

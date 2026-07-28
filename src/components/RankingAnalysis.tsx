@@ -8,7 +8,8 @@ import {
   BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip as RTooltip,
   ResponsiveContainer,
 } from "recharts";
-import { BarChart3 } from "lucide-react";
+import { BarChart3, Coins, Gauge, Trophy } from "lucide-react";
+import { PageHeader, SectionTitle, SegButtons, Vazio } from "@/components/Pagina";
 
 const VIEW_MODE_LABELS: Record<ViewMode, string> = {
   mensal: 'Mensal',
@@ -40,43 +41,33 @@ export function RankingAnalysis() {
 
   return (
     <div className="animate-fade-in space-y-6">
-      <div className="flex items-start justify-between gap-4 flex-wrap">
-        <div>
-          <h2 className="font-heading text-2xl font-bold text-foreground">Análise de Rentabilidade</h2>
-          <p className="text-sm text-muted-foreground mt-1">Rankings comparativos entre setores</p>
-        </div>
-        <div className="flex items-center gap-3 flex-wrap">
-          <div className="flex bg-muted rounded-lg p-0.5">
-            {(['mensal', 'trimestral', 'semestral', 'anual'] as ViewMode[]).map(m => (
-              <button
-                key={m}
-                onClick={() => setViewMode(m)}
-                className={`px-3 py-1.5 text-xs font-medium rounded-md transition-colors ${
-                  viewMode === m ? 'bg-background text-foreground shadow-sm' : 'text-muted-foreground hover:text-foreground'
-                }`}
-              >
-                {VIEW_MODE_LABELS[m]}
-              </button>
-            ))}
-          </div>
+      <PageHeader
+        eyebrow="Comparativo"
+        titulo="Rentabilidade"
+        descricao="Quem sustenta o escritório e quem consome — ranking por margem, faturamento e custo."
+        acoes={<>
+          <SegButtons
+            valor={viewMode}
+            onChange={(m) => setViewMode(m as ViewMode)}
+            opcoes={(['mensal', 'trimestral', 'semestral', 'anual'] as ViewMode[]).map((m) => ({ v: m, label: VIEW_MODE_LABELS[m] }))}
+          />
           <PeriodSelector value={periodoAtivo} onChange={setPeriodoAtivo} />
-        </div>
-      </div>
+        </>}
+      />
 
       {resumos.length === 0 ? (
-        <Card>
-          <CardContent className="py-16 text-center">
-            <BarChart3 className="w-12 h-12 text-muted-foreground/30 mx-auto mb-4" />
-            <h3 className="font-heading text-lg font-semibold text-muted-foreground">Sem dados para análise</h3>
-            <p className="text-sm text-muted-foreground/60 mt-1">Cadastre setores com faturamento para visualizar rankings</p>
-          </CardContent>
-        </Card>
+        <Vazio
+          icone={BarChart3}
+          titulo="Sem dados para análise"
+          texto="O ranking aparece assim que houver faturamento lançado em pelo menos um setor no período."
+        />
       ) : (
         <>
           {chartData.length > 0 && (
-            <Card>
+            <Card className="glass-card border-0">
               <CardContent className="pt-6">
-                <h4 className="font-heading text-sm font-semibold mb-4">Ranking de Margem Bruta (%)</h4>
+                <SectionTitle eyebrow="Ranking" titulo="Margem bruta por setor"
+                              acoes={<span className="text-xs text-muted-foreground">quanto sobra de cada real faturado</span>} />
                 <ResponsiveContainer width="100%" height={Math.max(200, resumos.length * 50)}>
                   <BarChart data={chartData} layout="vertical" margin={{ left: 20 }}>
                     <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))" />
@@ -92,7 +83,9 @@ export function RankingAnalysis() {
 
           <div className="grid md:grid-cols-3 gap-4">
             <RankingCard
-              title="🏆 Por Margem Bruta"
+              icone={Trophy}
+              eyebrow="Eficiência"
+              title="Por margem bruta"
               items={byMargem.map((r, i) => ({
                 pos: i + 1,
                 name: r.setor.nome,
@@ -103,7 +96,9 @@ export function RankingAnalysis() {
               }))}
             />
             <RankingCard
-              title="💰 Por Faturamento"
+              icone={Coins}
+              eyebrow="Volume"
+              title="Por faturamento"
               items={byFaturamento.map((r, i) => ({
                 pos: i + 1,
                 name: r.setor.nome,
@@ -114,7 +109,9 @@ export function RankingAnalysis() {
               }))}
             />
             <RankingCard
-              title="⚡ Custo por R$ Faturado"
+              icone={Gauge}
+              eyebrow="Custo"
+              title="Custo por R$ faturado"
               items={byCustoPerReal.map((r, i) => ({
                 pos: i + 1,
                 name: r.setor.nome,
@@ -131,29 +128,53 @@ export function RankingAnalysis() {
   );
 }
 
-function RankingCard({ title, items }: {
+/**
+ * Cartão de ranking. As três primeiras posições ganham medalha (o pódio é o
+ * que o olho procura primeiro); da quarta em diante, número discreto.
+ */
+function RankingCard({ title, eyebrow, icone: Icone, items }: {
   title: string;
+  eyebrow?: string;
+  icone?: React.ElementType;
   items: { pos: number; name: string; primary: string; secondary: string; status: string; onClick: () => void }[];
 }) {
+  const medalha = ["bg-amber-400/15 text-amber-500 ring-amber-400/40",
+                   "bg-slate-300/20 text-slate-400 ring-slate-300/40",
+                   "bg-orange-400/15 text-orange-500 ring-orange-400/40"];
   return (
-    <Card>
-      <CardContent className="pt-5 pb-4">
-        <h4 className="font-heading text-sm font-semibold mb-3">{title}</h4>
-        <div className="space-y-2">
-          {items.map(item => (
+    <Card className="glass-card border-0">
+      <CardContent className="pb-4 pt-5">
+        <div className="mb-3 flex items-center gap-2">
+          {Icone && (
+            <span className="flex h-7 w-7 items-center justify-center rounded-lg bg-[hsl(var(--dunatech-blue))]/10">
+              <Icone className="h-3.5 w-3.5 text-[hsl(var(--dunatech-blue))]" strokeWidth={2} />
+            </span>
+          )}
+          <div>
+            {eyebrow && <p className="eyebrow text-[0.6rem]">{eyebrow}</p>}
+            <h4 className="font-heading text-sm font-semibold">{title}</h4>
+          </div>
+        </div>
+        <div className="space-y-1">
+          {items.map((item) => (
             <div
               key={item.pos}
               onClick={item.onClick}
-              className="flex items-center gap-2 p-2 rounded-lg hover:bg-muted/50 cursor-pointer transition-colors"
+              title="Abrir o setor"
+              className="group flex cursor-pointer items-center gap-2.5 rounded-lg border border-transparent px-2 py-1.5 transition-colors hover:border-[hsl(var(--dunatech-blue))]/30 hover:bg-[hsl(var(--dunatech-blue))]/5"
             >
-              <span className={`text-sm font-bold w-6 text-center ${item.pos <= 3 ? 'text-primary' : 'text-muted-foreground'}`}>
-                {item.pos}º
+              <span
+                className={`grid h-6 w-6 shrink-0 place-items-center rounded-full text-[0.65rem] font-bold ring-1 ${
+                  item.pos <= 3 ? medalha[item.pos - 1] : "bg-muted/70 text-muted-foreground ring-transparent"
+                }`}
+              >
+                {item.pos}
               </span>
-              <div className="flex-1 min-w-0">
-                <p className="text-sm font-medium truncate">{item.name}</p>
-                <p className="text-[10px] text-muted-foreground">{item.secondary}</p>
+              <div className="min-w-0 flex-1">
+                <p className="truncate text-sm font-medium group-hover:text-[hsl(var(--dunatech-blue))]">{item.name}</p>
+                <p className="truncate text-[0.65rem] text-muted-foreground">{item.secondary}</p>
               </div>
-              <span className="font-mono text-xs font-semibold text-foreground">{item.primary}</span>
+              <span className="font-mono-numbers text-xs font-bold">{item.primary}</span>
             </div>
           ))}
         </div>

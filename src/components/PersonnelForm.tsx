@@ -102,7 +102,7 @@ export function PersonnelForm() {
 
         return (
           <Collapsible key={key} open={!isCollapsed} onOpenChange={() => toggleCollapsed(key)}>
-            <Card>
+            <Card className="glass-card border-0">
               <CardHeader className="pb-3">
                 <CardTitle className="text-sm font-heading flex items-center gap-2">
                   <Icon className="w-4 h-4 text-primary" />

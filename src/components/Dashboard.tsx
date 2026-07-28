@@ -14,7 +14,8 @@ import {
   BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip as RTooltip,
   ResponsiveContainer, PieChart, Pie, Cell, Legend,
 } from "recharts";
-import { DollarSign, TrendingUp, Users, AlertTriangle, Building2, Award } from "lucide-react"; // <-- Adicionado o ícone Award
+import { DollarSign, TrendingUp, Users, AlertTriangle, Building2, Award } from "lucide-react";
+import { Kpi, PageHeader, SectionTitle, SegButtons, Vazio } from "@/components/Pagina";
 
 // Paleta DunaTech (família Flow): azul elétrico + navy + tints, semânticos por último
 const CHART_COLORS = ["#1E7BFF", "#0A1940", "#7FB5FF", "#27AE60", "#F39C12", "#E74C3C"];
@@ -85,34 +86,20 @@ export function Dashboard() {
 
   return (
     <div className="animate-fade-in space-y-6">
-      {/* cabeçalho fixo: o período e os filtros acompanham a rolagem — em
-          tela longa, perder o contexto do que se está olhando é o pior erro */}
-      <div className="topbar sticky top-0 z-30 -mx-6 -mt-6 flex flex-wrap items-end justify-between gap-4 px-6 py-4 md:-mx-8 md:-mt-8 md:px-8">
-        <div>
-          <p className="eyebrow">Visão consolidada</p>
-          <h2 className="mt-1 font-heading text-2xl font-bold text-foreground">Dashboard</h2>
-          <p className="mt-0.5 text-sm text-muted-foreground">
-            {periodLabel} · visão {VIEW_MODE_LABELS[viewMode].toLowerCase()}
-            {filtroSede !== "todas" && <> · {sedes.find((s) => s.id === filtroSede)?.nome}</>}
-          </p>
-        </div>
-        <div className="flex items-center gap-3 flex-wrap">
-          <div className="flex bg-muted rounded-lg p-0.5">
-            {(['mensal', 'trimestral', 'semestral', 'anual'] as ViewMode[]).map(m => (
-              <button
-                key={m}
-                onClick={() => setViewMode(m)}
-                className={`px-3 py-1.5 text-xs font-medium rounded-md transition-colors ${
-                  viewMode === m ? 'bg-background text-foreground shadow-sm' : 'text-muted-foreground hover:text-foreground'
-                }`}
-              >
-                {VIEW_MODE_LABELS[m]}
-              </button>
-            ))}
-          </div>
-
-          {/* Novos Filtros de Sede e Setor */}
-          <div className="flex gap-2 ml-2">
+      <PageHeader
+        eyebrow="Visão consolidada"
+        titulo="Dashboard"
+        descricao={<>
+          {periodLabel} · visão {VIEW_MODE_LABELS[viewMode].toLowerCase()}
+          {filtroSede !== "todas" && <> · {sedes.find((s) => s.id === filtroSede)?.nome}</>}
+        </>}
+        acoes={<>
+          <SegButtons
+            valor={viewMode}
+            onChange={(m) => setViewMode(m as ViewMode)}
+            opcoes={(['mensal', 'trimestral', 'semestral', 'anual'] as ViewMode[]).map((m) => ({ v: m, label: VIEW_MODE_LABELS[m] }))}
+          />
+          <div className="flex gap-2">
             <Select value={filtroSede} onValueChange={(v) => { setFiltroSede(v); setFiltroSetor('todos'); }}>
               <SelectTrigger className="w-[140px] h-9 text-xs">
                 <SelectValue placeholder="Todas as Sedes" />
@@ -139,40 +126,42 @@ export function Dashboard() {
               </SelectContent>
             </Select>
           </div>
-
           <PeriodSelector value={periodoAtivo} onChange={setPeriodoAtivo} />
-        </div>
-      </div>
+        </>}
+      />
 
       {setores.length === 0 ? (
-        <Card className="glass-card border-0">
-          <CardContent className="py-16 text-center">
-            <Building2 className="w-12 h-12 text-muted-foreground/30 mx-auto mb-4" />
-            <h3 className="font-heading text-lg font-semibold text-muted-foreground">Nenhum setor cadastrado</h3>
-            <p className="text-sm text-muted-foreground/60 mt-1">Crie seu primeiro setor usando o botão na barra lateral</p>
-          </CardContent>
-        </Card>
+        <Vazio
+          icone={Building2}
+          titulo="Nenhum setor cadastrado"
+          texto="Crie o primeiro setor pela barra lateral — o dashboard começa a somar assim que houver faturamento lançado."
+        />
       ) : (
         <>
           {/* Grade alterada para 4 colunas em telas médias/grandes para comportar os 8 cards em 2 linhas */}
           <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-            <KPICard icon={DollarSign} label="Faturamento Total" value={formatCurrency(totalFaturamento)} />
-            <KPICard icon={AlertTriangle} label="Total Impostos" value={formatCurrency(totalImpostos)} color="text-warning" />
-            <KPICard icon={Users} label="Custos de Pessoal" value={formatCurrency(totalCustos)} color="text-destructive" />
-            <KPICard icon={Award} label="Var. Centro de Custo" value={formatCurrency(totalVariaveis)} color="text-destructive" />
-            
-            <KPICard icon={DollarSign} label="Lucro Bruto" value={formatCurrency(lucroBrutoConsolidado)} sub={formatPercent(margemBrutaPercent)} color={lucroBrutoConsolidado >= 0 ? 'text-success' : 'text-destructive'} />
-            <KPICard icon={Building2} label="Despesas Ind. (VPD)" value={formatCurrency(totalVPD)} color="text-destructive" />
-            <KPICard icon={TrendingUp} label="Margem Líquida Real" value={formatCurrency(lucroLiquidoConsolidado)} sub={formatPercent(margemLiquidaPercent)} color={lucroLiquidoConsolidado >= 0 ? 'text-success' : 'text-destructive'} />
-            <KPICard icon={Users} label="Total Profissionais" value={String(totalProfissionais)} />
+            <Kpi icone={DollarSign} rotulo="Faturamento total" valor={formatCurrency(totalFaturamento)} />
+            <Kpi icone={AlertTriangle} rotulo="Total de impostos" valor={formatCurrency(totalImpostos)} tom="atencao" corValor="text-warning" />
+            <Kpi icone={Users} rotulo="Custos de pessoal" valor={formatCurrency(totalCustos)} tom="negativo" corValor="text-destructive" />
+            <Kpi icone={Award} rotulo="Var. centro de custo" valor={formatCurrency(totalVariaveis)} tom="negativo" corValor="text-destructive" />
+
+            <Kpi icone={DollarSign} rotulo="Lucro bruto" valor={formatCurrency(lucroBrutoConsolidado)}
+                 sub={formatPercent(margemBrutaPercent)}
+                 tom={lucroBrutoConsolidado >= 0 ? "positivo" : "negativo"}
+                 corValor={lucroBrutoConsolidado >= 0 ? "text-success" : "text-destructive"} />
+            <Kpi icone={Building2} rotulo="Despesas ind. (VPD)" valor={formatCurrency(totalVPD)} tom="negativo" corValor="text-destructive" />
+            <Kpi icone={TrendingUp} rotulo="Margem líquida real" valor={formatCurrency(lucroLiquidoConsolidado)}
+                 sub={formatPercent(margemLiquidaPercent)}
+                 tom={lucroLiquidoConsolidado >= 0 ? "positivo" : "negativo"}
+                 corValor={lucroLiquidoConsolidado >= 0 ? "text-success" : "text-destructive"} />
+            <Kpi icone={Users} rotulo="Total de profissionais" valor={String(totalProfissionais)} />
           </div>
 
           {barData.some(d => d.Faturamento > 0) && (
             <div className="grid lg:grid-cols-2 gap-4">
               <Card className="glass-card border-0">
                 <CardContent className="pt-6">
-                  <p className="eyebrow">Comparação</p>
-                  <h4 className="mb-4 mt-1 font-heading text-base font-semibold">Faturamento vs custos por setor</h4>
+                  <SectionTitle eyebrow="Comparação" titulo="Faturamento vs custos por setor" />
                   <ResponsiveContainer width="100%" height={250}>
                     <BarChart data={barData}>
                       <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))" />
@@ -190,8 +179,7 @@ export function Dashboard() {
 
               <Card className="glass-card border-0">
                 <CardContent className="pt-6">
-                  <p className="eyebrow">Participação</p>
-                  <h4 className="mb-4 mt-1 font-heading text-base font-semibold">Distribuição do faturamento</h4>
+                  <SectionTitle eyebrow="Participação" titulo="Distribuição do faturamento" />
                   <ResponsiveContainer width="100%" height={250}>
                     <PieChart>
                       <Pie data={pieData} dataKey="value" nameKey="name" cx="50%" cy="50%" innerRadius={50} outerRadius={90} paddingAngle={3}>
@@ -210,8 +198,8 @@ export function Dashboard() {
 
           <Card className="glass-card border-0">
             <CardContent className="pt-6">
-              <p className="eyebrow">Detalhamento</p>
-              <h4 className="mb-4 mt-1 font-heading text-base font-semibold">Comparativo de setores</h4>
+              <SectionTitle eyebrow="Detalhamento" titulo="Comparativo de setores"
+                            acoes={<span className="text-xs text-muted-foreground">clique numa linha para abrir o setor</span>} />
               <div className="overflow-x-auto">
                 <Table>
                   <TableHeader className="sticky top-0 bg-card/95 backdrop-blur">
@@ -267,40 +255,3 @@ export function Dashboard() {
   );
 }
 
-/**
- * Indicador do topo. O rótulo vira eyebrow (some do caminho da leitura) e o
- * NÚMERO manda na hierarquia; o ícone ganha o tom do próprio indicador, então
- * dá pra varrer a linha inteira pela cor sem ler uma palavra.
- */
-function KPICard({ icon: Icon, label, value, sub, color }: {
-  icon: React.ElementType; label: string; value: string; sub?: string; color?: string;
-}) {
-  const tom = color?.includes("success")
-    ? { fg: "text-success", bg: "bg-success/10" }
-    : color?.includes("destructive")
-      ? { fg: "text-destructive", bg: "bg-destructive/10" }
-      : color?.includes("warning")
-        ? { fg: "text-warning", bg: "bg-warning/10" }
-        : { fg: "text-[hsl(var(--dunatech-blue))]", bg: "bg-[hsl(var(--dunatech-blue))]/10" };
-
-  return (
-    <Card className="glass-card card-hover border-0">
-      <CardContent className="px-4 pb-4 pt-4">
-        <div className="mb-3 flex items-center gap-2">
-          <span className={`flex h-7 w-7 items-center justify-center rounded-lg ${tom.bg}`}>
-            <Icon className={`h-3.5 w-3.5 ${tom.fg}`} strokeWidth={2} />
-          </span>
-          <span className="eyebrow truncate text-[0.65rem]">{label}</span>
-        </div>
-        <p className={`font-mono-numbers text-[1.35rem] font-bold leading-none tracking-tight ${color || "text-foreground"}`}>
-          {value}
-        </p>
-        {sub && (
-          <p className="mt-2 inline-flex rounded-full bg-muted/70 px-1.5 py-0.5 font-mono-numbers text-[0.68rem] text-muted-foreground">
-            {sub}
-          </p>
-        )}
-      </CardContent>
-    </Card>
-  );
-}
