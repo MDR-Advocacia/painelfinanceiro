@@ -8,8 +8,8 @@
 // iguais; o % é editável.
 import { useCallback, useEffect, useMemo, useState } from "react";
 import {
-  AlertTriangle, Coins, Equal, Landmark, Loader2, Network, Pencil, Plus,
-  Server, Trash2, Users,
+  AlertTriangle, Building2, Coins, Equal, Landmark, Loader2, Network, Pencil,
+  Plus, Server, Trash2, Users,
 } from "lucide-react";
 import { toast } from "sonner";
 
@@ -49,6 +49,8 @@ export function EstruturaView() {
   const [loading, setLoading] = useState(true);
   const [gerindoEquipes, setGerindoEquipes] = useState(false);
   const [novoCentro, setNovoCentro] = useState<"faturamento" | "infraestrutura" | null>(null);
+  const [sedes, setSedes] = useState<{ id: string; nome: string }[]>([]);
+  useEffect(() => { estruturaApi.sedes().then(setSedes).catch(() => undefined); }, []);
 
   const carregar = useCallback(() => {
     estruturaApi.carregar()
@@ -129,6 +131,60 @@ export function EstruturaView() {
              corValor={resumo.desbalanceadas.length ? "text-warning" : "text-success"} />
       </div>
 
+      {/* ── Por sede ── */}
+      {dados.por_sede?.length > 0 && (
+        <div className="space-y-4">
+          <SectionTitle eyebrow="Onde é operado" titulo="Por sede"
+                        acoes={<Ajuda titulo="Rateio por sede"
+                                      texto="A sede vem da área da linha: Recuperação de Crédito é Manhattan, Contencioso Passivo é Capim Macio (dá pra mudar linha a linha). O custo dos centros de infraestrutura é dividido entre as sedes pelo rateio configurado." />} />
+          <div className="grid gap-4 md:grid-cols-2">
+            {dados.por_sede.map((s) => {
+              const pct = s.receita > 0 ? (s.margem / s.receita) * 100 : null;
+              return (
+                <Card key={s.id} className="glass-card border-0">
+                  <CardContent className="pt-5">
+                    <div className="flex flex-wrap items-baseline justify-between gap-2">
+                      <h3 className="flex items-center gap-2 font-heading text-base font-bold">
+                        <span className="flex h-8 w-8 items-center justify-center rounded-lg bg-[hsl(var(--dunatech-blue))]/10">
+                          <Building2 className="h-4 w-4 text-[hsl(var(--dunatech-blue))]" />
+                        </span>
+                        {s.nome}
+                      </h3>
+                      <span className="font-mono-numbers text-sm font-bold">{formatCurrency(s.receita)}</span>
+                    </div>
+                    <div className="mt-3 grid grid-cols-3 gap-2 text-center">
+                      <div className="rounded-lg bg-muted/40 px-2 py-1.5">
+                        <div className="font-mono-numbers text-xs font-semibold text-destructive">
+                          {formatCurrency(s.custo_operacional)}
+                        </div>
+                        <div className="eyebrow mt-0.5 text-[0.55rem]">Custo operacional</div>
+                      </div>
+                      <div className="rounded-lg bg-muted/40 px-2 py-1.5">
+                        <div className="font-mono-numbers text-xs font-semibold text-destructive">
+                          {formatCurrency(s.custo_infra)}
+                        </div>
+                        <div className="eyebrow mt-0.5 text-[0.55rem]">Infra rateada</div>
+                      </div>
+                      <div className="rounded-lg bg-success/10 px-2 py-1.5">
+                        <div className="font-mono-numbers text-xs font-semibold text-success">
+                          {formatCurrency(s.margem)}
+                        </div>
+                        <div className="eyebrow mt-0.5 text-[0.55rem]">
+                          Margem{pct != null ? ` · ${pct.toFixed(1)}%` : ""}
+                        </div>
+                      </div>
+                    </div>
+                    <p className="mt-2 text-[0.65rem] text-muted-foreground">
+                      {s.linhas} linha(s) de faturamento · {s.equipes} equipe(s)
+                    </p>
+                  </CardContent>
+                </Card>
+              );
+            })}
+          </div>
+        </div>
+      )}
+
       {/* ── Centros de faturamento ── */}
       <div className="space-y-4">
         <SectionTitle eyebrow="Quem paga" titulo="Centros de faturamento"
@@ -145,7 +201,7 @@ export function EstruturaView() {
         <div className="grid gap-4 xl:grid-cols-2">
           {dados.centros.map((c) => (
             <CentroCard key={c.id} centro={c} equipes={equipes} editar={editar} onMudou={mudou}
-                        aoAbrirDetalhe={setView} />
+                        aoAbrirDetalhe={setView} sedes={sedes} />
           ))}
         </div>
       </div>
@@ -166,7 +222,7 @@ export function EstruturaView() {
         <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
           {dados.infraestrutura.map((c) => (
             <InfraCard key={c.id} centro={c} equipes={equipes} editar={editar} onMudou={mudou}
-                       aoAbrirDetalhe={setView} />
+                       aoAbrirDetalhe={setView} sedes={sedes} />
           ))}
         </div>
       </div>
@@ -197,9 +253,9 @@ export function EstruturaView() {
 
 /* ─────────────────────── centro de faturamento ─────────────────────── */
 
-function CentroCard({ centro, equipes, editar, onMudou, aoAbrirDetalhe }: {
+function CentroCard({ centro, equipes, editar, onMudou, aoAbrirDetalhe, sedes }: {
   centro: EfCentro; equipes: EfEquipe[]; editar: boolean; onMudou: () => void;
-  aoAbrirDetalhe: (v: any) => void;
+  aoAbrirDetalhe: (v: any) => void; sedes: { id: string; nome: string }[];
 }) {
   const margem = centro.receita_total - centro.custo_total;
   const [novaLinha, setNovaLinha] = useState(false);
@@ -234,6 +290,15 @@ function CentroCard({ centro, equipes, editar, onMudou, aoAbrirDetalhe }: {
             )}
           </h3>
           <div className="text-right">
+            {centro.sedes?.length > 0 && (
+              <div className="mb-0.5 flex justify-end gap-1">
+                {centro.sedes.map((s) => (
+                  <span key={s.sede_id} className="rounded-full bg-muted/70 px-1.5 py-0.5 text-[0.58rem] font-medium text-muted-foreground">
+                    {s.sede}
+                  </span>
+                ))}
+              </div>
+            )}
             <div className="font-mono-numbers text-sm font-bold">{formatCurrency(centro.receita_total)}</div>
             <div className="text-[0.65rem] text-muted-foreground">
               custo {formatCurrency(centro.custo_total)} ·{" "}
@@ -247,7 +312,7 @@ function CentroCard({ centro, equipes, editar, onMudou, aoAbrirDetalhe }: {
         <div className="space-y-2">
           {centro.linhas.map((l) => (
             <LinhaBloco key={l.id} linha={l} equipes={equipes} editar={editar} onMudou={onMudou}
-                        aoAbrirDetalhe={aoAbrirDetalhe} />
+                        aoAbrirDetalhe={aoAbrirDetalhe} sedes={sedes} />
           ))}
           {editar && (novaLinha ? (
             <NovaLinhaInline centroId={centro.id}
@@ -275,6 +340,85 @@ function CentroCard({ centro, equipes, editar, onMudou, aoAbrirDetalhe }: {
         </div>
       </CardContent>
     </Card>
+  );
+}
+
+/** Chip da sede da linha — clique troca a sede (regra: crédito=Manhattan,
+    passivo=Capim Macio, mas a exceção é permitida). */
+function SedeChip({ linha, sedes, editar, onMudou }: {
+  linha: EfLinha; sedes: { id: string; nome: string }[]; editar: boolean; onMudou: () => void;
+}) {
+  const [abrindo, setAbrindo] = useState(false);
+  if (editar && abrindo) {
+    return (
+      <Select defaultValue={linha.sede_id ?? ""}
+              onValueChange={(v) => {
+                estruturaApi.definirSedeLinha(linha.id, v || null)
+                  .then(() => { toast.success("Sede atualizada."); onMudou(); })
+                  .catch((e) => toast.error(e.message))
+                  .finally(() => setAbrindo(false));
+              }}>
+        <SelectTrigger className="h-5 w-[140px] text-[0.65rem]" autoFocus><SelectValue /></SelectTrigger>
+        <SelectContent>
+          {sedes.map((s) => <SelectItem key={s.id} value={s.id}>{s.nome}</SelectItem>)}
+        </SelectContent>
+      </Select>
+    );
+  }
+  return (
+    <button disabled={!editar} onClick={() => setAbrindo(true)}
+            title={editar ? "Trocar a sede desta linha" : undefined}
+            className={`flex items-center gap-1 rounded-full px-1.5 py-0.5 text-[0.6rem] font-medium ${
+              linha.sede
+                ? "bg-muted/70 text-muted-foreground"
+                : "bg-warning/15 text-warning"
+            } ${editar ? "hover:bg-muted" : ""}`}>
+      <Building2 className="h-2.5 w-2.5" />
+      {linha.sede ?? "sem sede"}
+    </button>
+  );
+}
+
+/** Rateio do custo de um centro de infraestrutura entre as sedes. */
+function RateioSedes({ centro, editar, onMudou }: {
+  centro: EfCentro; editar: boolean; onMudou: () => void;
+}) {
+  const [valores, setValores] = useState<Record<string, string>>({});
+  if (!centro.sedes?.length) return null;
+  const soma = centro.sedes.reduce(
+    (a, s) => a + Number(valores[s.sede_id] ?? s.percentual ?? 0), 0);
+  const fora = Math.abs(soma - 100) > 0.5;
+
+  return (
+    <div className="flex flex-wrap items-center gap-1.5 rounded-lg bg-muted/30 px-2 py-1.5">
+      <span className="text-[0.6rem] font-semibold uppercase tracking-wider text-muted-foreground">
+        Rateio por sede
+      </span>
+      {centro.sedes.map((s) => (
+        <span key={s.sede_id} className="flex items-center gap-1 rounded-full border bg-card px-1.5 py-0.5 text-[0.65rem]">
+          {s.sede}
+          {editar ? (
+            <Input value={valores[s.sede_id] ?? String(s.percentual ?? 0)}
+                   onChange={(e) => setValores((v) => ({ ...v, [s.sede_id]: e.target.value }))}
+                   onBlur={() => {
+                     const rateio = centro.sedes.map((x) => ({
+                       sede_id: x.sede_id,
+                       percentual: Number(valores[x.sede_id] ?? x.percentual ?? 0),
+                     }));
+                     if (Math.abs(rateio.reduce((a, r) => a + r.percentual, 0) - 100) > 0.5) return;
+                     estruturaApi.definirRateioSedes(centro.id, rateio)
+                       .then(() => { toast.success("Rateio atualizado."); onMudou(); })
+                       .catch((e) => toast.error(e.message));
+                   }}
+                   className="h-4 w-10 border-0 bg-transparent p-0 text-center font-mono text-[0.65rem]" />
+          ) : (
+            <b className="font-mono">{s.percentual}</b>
+          )}
+          <span className="text-muted-foreground">%</span>
+        </span>
+      ))}
+      {fora && <span className="text-[0.6rem] font-semibold text-warning">soma {soma.toFixed(0)}%</span>}
+    </div>
   );
 }
 
@@ -402,9 +546,9 @@ function NovoCentroDialog({ tipo, onClose, onCriou }: {
   );
 }
 
-function LinhaBloco({ linha, equipes, editar, onMudou, aoAbrirDetalhe }: {
+function LinhaBloco({ linha, equipes, editar, onMudou, aoAbrirDetalhe, sedes }: {
   linha: EfLinha; equipes: EfEquipe[]; editar: boolean; onMudou: () => void;
-  aoAbrirDetalhe: (v: any) => void;
+  aoAbrirDetalhe: (v: any) => void; sedes: { id: string; nome: string }[];
 }) {
   const area = AREA_UI[linha.area];
   const fora = linha.alocacoes.length > 0 && Math.abs(linha.soma_percentual - 100) > 0.5;
@@ -416,6 +560,7 @@ function LinhaBloco({ linha, equipes, editar, onMudou, aoAbrirDetalhe }: {
       <div className="flex flex-wrap items-center gap-2">
         <Badge variant="outline" className={`text-[0.6rem] ${area.cls}`}>{area.rotulo}</Badge>
         <span className="text-sm font-semibold">{linha.nome}</span>
+        <SedeChip linha={linha} sedes={sedes} editar={editar} onMudou={onMudou} />
         {editar && (
           <span className="flex gap-0.5 opacity-0 transition-opacity group-hover/linha:opacity-100">
             <BotaoRenomear atual={linha.nome}
@@ -547,9 +692,9 @@ function AlocacaoChip({ a, editar, onMudou, aoAbrirDetalhe }: {
 
 /* ─────────────────────── centro de infraestrutura ─────────────────────── */
 
-function InfraCard({ centro, equipes, editar, onMudou, aoAbrirDetalhe }: {
+function InfraCard({ centro, equipes, editar, onMudou, aoAbrirDetalhe, sedes }: {
   centro: EfCentro; equipes: EfEquipe[]; editar: boolean; onMudou: () => void;
-  aoAbrirDetalhe: (v: any) => void;
+  aoAbrirDetalhe: (v: any) => void; sedes: { id: string; nome: string }[];
 }) {
   const [adicionando, setAdicionando] = useState(false);
   const [novaLinha, setNovaLinha] = useState(false);
@@ -562,7 +707,11 @@ function InfraCard({ centro, equipes, editar, onMudou, aoAbrirDetalhe }: {
             <span className="flex h-7 w-7 items-center justify-center rounded-lg bg-muted/70">
               <Server className="h-3.5 w-3.5 text-muted-foreground" />
             </span>
-            {centro.nome}
+            <button onClick={() => abrirDetalheCentro(centro.id, aoAbrirDetalhe)}
+                    title="Abrir a página deste centro"
+                    className="transition-colors hover:text-[hsl(var(--dunatech-blue))] hover:underline">
+              {centro.nome}
+            </button>
           </h3>
           <span className="font-mono-numbers text-xs font-semibold text-muted-foreground">
             {formatCurrency(centro.custo_total)}
@@ -573,7 +722,7 @@ function InfraCard({ centro, equipes, editar, onMudou, aoAbrirDetalhe }: {
           <div className="space-y-2">
             {centro.linhas.map((l) => (
               <LinhaBloco key={l.id} linha={l} equipes={equipes} editar={editar} onMudou={onMudou}
-                          aoAbrirDetalhe={aoAbrirDetalhe} />
+                          aoAbrirDetalhe={aoAbrirDetalhe} sedes={sedes} />
             ))}
           </div>
         )}
@@ -587,6 +736,9 @@ function InfraCard({ centro, equipes, editar, onMudou, aoAbrirDetalhe }: {
             <Plus className="h-3 w-3" /> linha de infraestrutura
           </button>
         ))}
+        {/* rateio do custo entre as sedes */}
+        <RateioSedes centro={centro} editar={editar} onMudou={onMudou} />
+
         <div className="flex flex-wrap items-center gap-1.5">
           {centro.alocacoes.map((a) => (
             <AlocacaoChip key={a.id} a={a} editar={editar} onMudou={onMudou} aoAbrirDetalhe={aoAbrirDetalhe} />

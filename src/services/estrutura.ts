@@ -9,11 +9,20 @@ export interface EfAlocacao {
 export interface EfLinha {
   id: string; nome: string; area: "passivo" | "credito" | "especializada";
   ativo: boolean; receita_bruta: number;
+  sede: string | null; sede_id: string | null;
   soma_percentual: number; alocacoes: EfAlocacao[];
+}
+export interface EfSedeRateio {
+  id?: string; sede: string; sede_id: string; percentual?: number;
+}
+export interface EfPorSede {
+  id: string; nome: string; receita: number;
+  custo_operacional: number; custo_infra: number; custo_total: number;
+  margem: number; linhas: number; equipes: number;
 }
 export interface EfCentro {
   id: string; nome: string; tipo: "faturamento" | "infraestrutura";
-  linhas: EfLinha[]; alocacoes: EfAlocacao[];
+  linhas: EfLinha[]; alocacoes: EfAlocacao[]; sedes: EfSedeRateio[];
   receita_total: number; custo_total: number;
 }
 export interface EfEquipe {
@@ -60,6 +69,7 @@ export interface EfEstrutura {
   custo_parcial: boolean;
   centros: EfCentro[];
   infraestrutura: EfCentro[];
+  por_sede: EfPorSede[];
   sem_alocacao: EfEquipe[];
 }
 
@@ -110,6 +120,20 @@ export const estruturaApi = {
   },
 
   // ── CRUD: tudo tabelado e editável ──
+  sedes: () =>
+    fetch(`${API_URL}/estrutura/sedes/`, { headers: authHeaders() })
+      .then((r) => j<{ id: string; nome: string }[]>(r)),
+
+  definirSedeLinha: (linhaId: string, sede_id: string | null) =>
+    fetch(`${API_URL}/estrutura/linhas/${linhaId}/sede/`, {
+      method: "PATCH", headers: H(), body: JSON.stringify({ sede_id }),
+    }).then((r) => j<{ sede: string | null }>(r)),
+
+  definirRateioSedes: (centroId: string, rateio: { sede_id: string; percentual: number }[]) =>
+    fetch(`${API_URL}/estrutura/centros/${centroId}/rateio-sedes/`, {
+      method: "PATCH", headers: H(), body: JSON.stringify({ rateio }),
+    }).then((r) => j<{ ok: boolean }>(r)),
+
   criarCentro: (nome: string, tipo: "faturamento" | "infraestrutura") =>
     fetch(`${API_URL}/estrutura/centros/`, { method: "POST", headers: H(), body: JSON.stringify({ nome, tipo }) })
       .then((r) => j<{ id: string }>(r)),

@@ -20,9 +20,10 @@ from .dp_simulacao import (
 )
 from . import sso_views
 from .estrutura_views import (
-    alocacao_percentual, alocar_equipe, centro_crud, centro_detalhe, equipe_crud,
-    equipe_detalhe, equipes as ef_equipes, estrutura, linha_crud, linha_igualar,
-    remover_alocacao,
+    alocacao_percentual, alocar_equipe, centro_crud, centro_detalhe,
+    centro_sede_rateio, equipe_crud, equipe_detalhe, equipes as ef_equipes,
+    estrutura, linha_crud, linha_igualar, linha_sede, remover_alocacao,
+    sedes_lista,
 )
 
 router = DefaultRouter()
@@ -51,6 +52,9 @@ urlpatterns = [
     path('estrutura/linhas/<uuid:pk>/igualar/', linha_igualar),
     path('estrutura/centros/<uuid:pk>/detalhe/', centro_detalhe),
     path('estrutura/equipes/<uuid:pk>/detalhe/', equipe_detalhe),
+    path('estrutura/sedes/', sedes_lista),
+    path('estrutura/linhas/<uuid:pk>/sede/', linha_sede),
+    path('estrutura/centros/<uuid:pk>/rateio-sedes/', centro_sede_rateio),
     path('estrutura/centros/', centro_crud),
     path('estrutura/centros/<uuid:pk>/', centro_crud),
     path('estrutura/linhas/', linha_crud),

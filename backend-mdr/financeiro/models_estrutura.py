@@ -89,6 +89,11 @@ class LinhaFaturamento(models.Model):
                                related_name="linhas")
     nome = models.CharField(max_length=120)
     area = models.CharField(max_length=20, choices=AREAS)
+    # SEDE onde a linha é operada. Regra da casa: Recuperação de Crédito é
+    # Manhattan, Contencioso Passivo é Capim Macio — mas o campo é editável,
+    # porque a exceção existe e o operador manda.
+    sede = models.ForeignKey("financeiro.Sede", on_delete=models.SET_NULL,
+                             null=True, blank=True, related_name="linhas_faturamento")
     periodos = models.JSONField(default=dict, blank=True)
     setor_legado = models.ForeignKey("financeiro.Setor", on_delete=models.SET_NULL,
                                      null=True, blank=True, related_name="linhas_novas",
@@ -107,6 +112,30 @@ class LinhaFaturamento(models.Model):
 
     def __str__(self):
         return f"{self.centro.nome} · {self.nome}"
+
+
+class CentroSede(models.Model):
+    """Rateio de um centro de INFRAESTRUTURA entre as sedes.
+
+    Infra não tem área (nem receita), então não dá pra deduzir a sede: o custo
+    é dividido por percentual — igual entre as sedes, por padrão.
+    """
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    centro = models.ForeignKey(CentroFaturamento, on_delete=models.CASCADE,
+                               related_name="sedes")
+    sede = models.ForeignKey("financeiro.Sede", on_delete=models.CASCADE,
+                             related_name="centros_estrutura")
+    percentual = models.FloatField(default=0)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        db_table = "ef_centro_sedes"
+        ordering = ["sede__nome"]
+        constraints = [models.UniqueConstraint(fields=["centro", "sede"], name="uq_centro_sede")]
+
+    def __str__(self):
+        return f"{self.centro.nome} · {self.sede.nome} ({self.percentual:g}%)"
 
 
 class Alocacao(models.Model):

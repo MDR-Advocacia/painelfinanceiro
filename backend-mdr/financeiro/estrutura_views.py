@@ -9,7 +9,8 @@ from rest_framework.response import Response
 
 from .dp_views import _quem, audit
 from .models import (
-    Alocacao, CentroFaturamento, DpCompetencia, DpFolhaItem, Equipe, LinhaFaturamento,
+    Alocacao, CentroFaturamento, CentroSede, DpCompetencia, DpFolhaItem, Equipe,
+    LinhaFaturamento, Sede,
 )
 from .views import modulo_permission
 
@@ -74,7 +75,7 @@ def estrutura(request):
     competência FECHADA da folha, descido pela equipe → centro de custo do DP
     e multiplicado pelo percentual de alocação.
     """
-    linhas_qs = (LinhaFaturamento.objects.select_related("centro", "setor_legado")
+    linhas_qs = (LinhaFaturamento.objects.select_related("centro", "setor_legado", "sede")
                  .prefetch_related("alocacoes__equipe__centro_custo"))
     linhas = list(linhas_qs)
     per = request.query_params.get("periodo") or _ultimo_periodo(linhas)
@@ -132,6 +133,8 @@ def estrutura(request):
         alocs = sorted(l.alocacoes.all(), key=lambda a: -a.percentual)
         return {
             "id": str(l.id), "nome": l.nome, "area": l.area, "ativo": l.ativo,
+            "sede": l.sede.nome if l.sede_id else None,
+            "sede_id": str(l.sede_id) if l.sede_id else None,
             "receita_bruta": (f or {}).get("bruto", 0) or 0,
             "soma_percentual": round(sum(a.percentual or 0 for a in alocs), 2),
             "alocacoes": [json_alocacao(a) for a in alocs],
@@ -147,17 +150,66 @@ def estrutura(request):
     for l in linhas:
         por_centro.setdefault(l.centro_id, []).append(l)
 
+    rateios = {}
+    for cs in CentroSede.objects.select_related("sede"):
+        rateios.setdefault(cs.centro_id, []).append(
+            {"id": str(cs.id), "sede": cs.sede.nome, "sede_id": str(cs.sede_id),
+             "percentual": cs.percentual})
+
     for c in CentroFaturamento.objects.prefetch_related("alocacoes__equipe__centro_custo"):
         ls = [json_linha(l) for l in sorted(por_centro.get(c.id, []), key=lambda x: x.ordem)]
         diretas = [json_alocacao(a) for a in c.alocacoes.all()]
+        # sedes do centro: rateio explícito (infra) ou as sedes das linhas
+        if c.tipo == "infraestrutura":
+            sedes_do_centro = sorted(rateios.get(c.id, []), key=lambda x: x["sede"])
+        else:
+            vistos, sedes_do_centro = set(), []
+            for l in ls:
+                if l["sede"] and l["sede"] not in vistos:
+                    vistos.add(l["sede"])
+                    sedes_do_centro.append({"sede": l["sede"], "sede_id": l["sede_id"]})
         bloco = {
             "id": str(c.id), "nome": c.nome, "tipo": c.tipo,
-            "linhas": ls, "alocacoes": diretas,
+            "linhas": ls, "alocacoes": diretas, "sedes": sedes_do_centro,
             "receita_total": round(sum(l["receita_bruta"] for l in ls), 2),
             "custo_total": round(sum((a["custo_total"] or 0) for l in ls for a in l["alocacoes"])
                                  + sum((a["custo_total"] or 0) for a in diretas), 2),
         }
         (saida["centros"] if c.tipo == "faturamento" else saida["infraestrutura"]).append(bloco)
+
+    # ── RESUMO POR SEDE ──
+    # Receita: some as linhas daquela sede. Custo: o das equipes alocadas nas
+    # linhas da sede + a fatia rateada de cada centro de infraestrutura.
+    por_sede = {}
+    for s_ in Sede.objects.all():
+        por_sede[str(s_.id)] = {"id": str(s_.id), "nome": s_.nome, "receita": 0.0,
+                                "custo_operacional": 0.0, "custo_infra": 0.0,
+                                "linhas": 0, "equipes": set()}
+    for bloco in saida["centros"]:
+        for l in bloco["linhas"]:
+            if not l["sede_id"] or l["sede_id"] not in por_sede:
+                continue
+            d = por_sede[l["sede_id"]]
+            d["receita"] = round(d["receita"] + (l["receita_bruta"] or 0), 2)
+            d["linhas"] += 1
+            for a in l["alocacoes"]:
+                d["custo_operacional"] = round(d["custo_operacional"] + (a["custo_total"] or 0), 2)
+                d["equipes"].add(a["equipe"])
+    for bloco in saida["infraestrutura"]:
+        for r in bloco["sedes"]:
+            if r["sede_id"] in por_sede:
+                d = por_sede[r["sede_id"]]
+                d["custo_infra"] = round(
+                    d["custo_infra"] + bloco["custo_total"] * (r["percentual"] or 0) / 100, 2)
+    saida["por_sede"] = []
+    for d in sorted(por_sede.values(), key=lambda x: -x["receita"]):
+        custo = round(d["custo_operacional"] + d["custo_infra"], 2)
+        saida["por_sede"].append({
+            **{k: v for k, v in d.items() if k != "equipes"},
+            "equipes": len(d["equipes"]),
+            "custo_total": custo,
+            "margem": round(d["receita"] - custo, 2),
+        })
 
     # equipes sem nenhuma alocação (ex.: Equipe Mista) — visíveis pra não sumir gente
     alocadas = set(Alocacao.objects.values_list("equipe_id", flat=True))
@@ -643,3 +695,59 @@ def equipe_detalhe(request, pk):
         "competencia_custo": f"{comp.mes:02d}/{comp.ano}" if comp else None,
         "custo_parcial": custo_parcial,
     })
+
+
+@api_view(["PATCH"])
+@permission_classes(_PERM)
+def linha_sede(request, pk):
+    """Troca a sede de uma linha. {sede_id: uuid|null}"""
+    l = LinhaFaturamento.objects.select_related("centro", "sede").filter(pk=pk).first()
+    if not l:
+        return Response(status=404)
+    antes = l.sede.nome if l.sede_id else None
+    sede_id = request.data.get("sede_id") or None
+    sede = Sede.objects.filter(pk=sede_id).first() if sede_id else None
+    if sede_id and not sede:
+        return Response({"detail": "Sede não encontrada."}, status=400)
+    l.sede = sede
+    l.save(update_fields=["sede", "updated_at"])
+    audit(request, "editar", "ef_linha", l.id,
+          antes={"linha": str(l), "sede": antes},
+          depois={"linha": str(l), "sede": sede.nome if sede else None})
+    return Response({"sede": sede.nome if sede else None})
+
+
+@api_view(["PATCH"])
+@permission_classes(_PERM)
+def centro_sede_rateio(request, pk):
+    """Ajusta o rateio de um centro de infraestrutura entre as sedes.
+    {rateio: [{sede_id, percentual}, …]}"""
+    c = CentroFaturamento.objects.filter(pk=pk).first()
+    if not c:
+        return Response(status=404)
+    itens = request.data.get("rateio") or []
+    if not isinstance(itens, list) or not itens:
+        return Response({"detail": "Informe o rateio."}, status=400)
+    total = sum(float(i.get("percentual") or 0) for i in itens)
+    if abs(total - 100) > 0.5:
+        return Response({"detail": f"A soma precisa fechar 100% (veio {total:g}%)."}, status=400)
+    antes = {r.sede.nome: r.percentual for r in c.sedes.select_related("sede")}
+    with transaction.atomic():
+        for i in itens:
+            sede = Sede.objects.filter(pk=i.get("sede_id")).first()
+            if not sede:
+                continue
+            CentroSede.objects.update_or_create(
+                centro=c, sede=sede, defaults={"percentual": round(float(i.get("percentual") or 0), 2)})
+    depois = {r.sede.nome: r.percentual for r in c.sedes.select_related("sede")}
+    audit(request, "editar", "ef_centro", c.id,
+          antes={"nome": c.nome, "rateio_sedes": antes},
+          depois={"nome": c.nome, "rateio_sedes": depois})
+    return Response({"ok": True})
+
+
+@api_view(["GET"])
+@permission_classes(_PERM)
+def sedes_lista(request):
+    """Sedes cadastradas (pro seletor da linha e do rateio)."""
+    return Response([{"id": str(s.id), "nome": s.nome} for s in Sede.objects.all()])

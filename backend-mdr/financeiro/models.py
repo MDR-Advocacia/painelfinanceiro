@@ -609,4 +609,6 @@ class DpAuditLog(models.Model):
         ordering = ['-created_at']
 
 # Estrutura de faturamento (centros/linhas/alocações) — ver models_estrutura.py
-from .models_estrutura import Alocacao, CentroFaturamento, Equipe, LinhaFaturamento  # noqa: E402,F401
+from .models_estrutura import (  # noqa: E402,F401
+    Alocacao, CentroFaturamento, CentroSede, Equipe, LinhaFaturamento,
+)

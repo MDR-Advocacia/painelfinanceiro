@@ -17,8 +17,12 @@ from django.core.management.base import BaseCommand
 from django.db import transaction
 
 from financeiro.models import (
-    Alocacao, CentroFaturamento, DpCentroCusto, Equipe, LinhaFaturamento, Setor,
+    Alocacao, CentroFaturamento, CentroSede, DpCentroCusto, Equipe,
+    LinhaFaturamento, Sede, Setor,
 )
+
+# Regra da casa (2026-07-29): crédito é Manhattan, passivo é Capim Macio.
+SEDE_POR_AREA = {"credito": "Manhattan", "passivo": "Capim Macio"}
 
 # slug do Flow → (nome, grupo, nome do centro de custo no DP)
 EQUIPES = [
@@ -122,6 +126,7 @@ class Command(BaseCommand):
                 nome=nome, defaults={"tipo": "infraestrutura", "ordem": 100 + i})
             centros[nome] = c
 
+        sedes = {s.nome: s for s in Sede.objects.all()}
         criadas = atualizadas = 0
         for i, (centro_nome, nome, area, setor_nome, slugs) in enumerate(LINHAS):
             setor = setores.get(setor_nome) if setor_nome else None
@@ -131,16 +136,20 @@ class Command(BaseCommand):
                 receita = {per: (d or {}).get("faturamento", {})
                            for per, d in (setor.periodos or {}).items()
                            if (d or {}).get("faturamento")}
+            sede = sedes.get(SEDE_POR_AREA.get(area, ""))
             linha, criada = LinhaFaturamento.objects.get_or_create(
                 centro=centros[centro_nome], nome=nome,
                 defaults={"area": area, "ordem": i, "setor_legado": setor,
-                          "periodos": receita})
+                          "periodos": receita, "sede": sede})
             if criada:
                 criadas += 1
             else:
                 # re-run atualiza vínculo e histórico, sem tocar em percentuais
                 linha.area, linha.ordem = area, i
                 linha.setor_legado = setor or linha.setor_legado
+                # só preenche a sede se ainda estiver vazia (respeita ajuste manual)
+                if sede and not linha.sede_id:
+                    linha.sede = sede
                 if receita:
                     linha.periodos = receita
                 linha.save()
@@ -171,6 +180,16 @@ class Command(BaseCommand):
         for nome, slug in DIRETAS:
             Alocacao.objects.get_or_create(centro=centros[nome], equipe=equipes[slug],
                                            defaults={"percentual": 100.0})
+
+        # infraestrutura: rateio IGUAL entre as sedes (só cria o que falta —
+        # se alguém editou o percentual, o re-run preserva)
+        todas = list(sedes.values())
+        if todas:
+            parte = round(100.0 / len(todas), 2)
+            for nome, _slugs in INFRA:
+                for sede in todas:
+                    CentroSede.objects.get_or_create(centro=centros[nome], sede=sede,
+                                                     defaults={"percentual": parte})
 
         self.stdout.write(self.style.SUCCESS(
             f"Estrutura: {len(centros)} centros · linhas +{criadas}/{atualizadas} atualizadas · "

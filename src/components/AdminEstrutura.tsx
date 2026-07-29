@@ -37,6 +37,8 @@ export default function AdminEstrutura() {
   const { podeEditar } = usePermissions();
   const editar = podeEditar("estrutura");
   const [dados, setDados] = useState<EfEstrutura | null>(null);
+  const [sedes, setSedes] = useState<{ id: string; nome: string }[]>([]);
+  useEffect(() => { estruturaApi.sedes().then(setSedes).catch(() => undefined); }, []);
 
   const carregar = useCallback(() => {
     estruturaApi.carregar().then(setDados).catch((e) => toast.error(e.message));
@@ -146,6 +148,7 @@ export default function AdminEstrutura() {
                 <TableHead className="text-xs">Centro</TableHead>
                 <TableHead className="text-xs">Linha</TableHead>
                 <TableHead className="text-xs">Área</TableHead>
+                <TableHead className="text-xs">Sede</TableHead>
                 <TableHead className="text-right text-xs">Receita</TableHead>
                 <TableHead className="text-right text-xs">Equipes</TableHead>
                 {editar && <TableHead className="w-10" />}
@@ -175,6 +178,19 @@ export default function AdminEstrutura() {
                       <SelectTrigger className="h-8 w-[190px] text-xs"><SelectValue /></SelectTrigger>
                       <SelectContent>
                         {AREAS.map((a) => <SelectItem key={a.v} value={a.v}>{a.label}</SelectItem>)}
+                      </SelectContent>
+                    </Select>
+                  </TableCell>
+                  <TableCell>
+                    <Select defaultValue={l.sede_id ?? ""} disabled={!editar}
+                            onValueChange={(v) => estruturaApi.definirSedeLinha(l.id, v || null)
+                              .then(() => { toast.success("Sede atualizada."); mudou(); })
+                              .catch((err) => toast.error(err.message))}>
+                      <SelectTrigger className="h-8 w-[150px] text-xs">
+                        <SelectValue placeholder="— sem sede —" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {sedes.map((sd) => <SelectItem key={sd.id} value={sd.id}>{sd.nome}</SelectItem>)}
                       </SelectContent>
                     </Select>
                   </TableCell>
