@@ -49,14 +49,15 @@ import {
 } from "@/components/ui/dialog";
 
 function SectionHeader({
-  title, collapsed, onToggle, contagem,
-}: { title: string; collapsed: boolean; onToggle: () => void; contagem?: number }) {
+  title, collapsed, onToggle, contagem, sub,
+}: { title: string; collapsed: boolean; onToggle: () => void; contagem?: number; sub?: boolean }) {
   return (
     <button
       type="button"
       onClick={onToggle}
       aria-expanded={!collapsed}
-      className="group flex h-7 w-full items-center gap-1.5 px-2.5 pb-1.5 pt-1 text-sidebar-foreground/45 transition-colors hover:text-sidebar-foreground/80"
+      className={`group flex h-7 w-full items-center gap-1.5 pb-1.5 pt-1 text-sidebar-foreground/45 transition-colors hover:text-sidebar-foreground/80 ${
+        sub ? "pl-5 pr-2.5" : "px-2.5"}`}
     >
       {/* Uma linha, sempre. O eyebrow tem tracking largo e um título comprido
           quebrava em duas linhas, empurrando a lista e desalinhando a seção. */}
@@ -235,10 +236,17 @@ export function Sidebar() {
           </div>
         )}
 
-        {/* CENTROS DE FATURAMENTO (nova sistemática) */}
+        {/* CENTROS — faturamento e infraestrutura são os dois tipos de centro,
+            então vivem aninhados sob o mesmo módulo. */}
         {podeEstrutura && estrutura && (
           <div className="space-y-0.5">
-            <SectionHeader title="Faturamento" contagem={estrutura.centros.length}
+            <SectionHeader title="Centros"
+                           contagem={estrutura.centros.length + estrutura.infraestrutura.length}
+                           collapsed={!!collapsed["ef"]} onToggle={() => toggle("ef")} />
+            {!collapsed["ef"] && (
+              <div className="ml-2 space-y-0.5 border-l border-sidebar-border/60 pl-1">
+          <div className="space-y-0.5">
+            <SectionHeader sub title="Faturamento" contagem={estrutura.centros.length}
                            collapsed={!!collapsed["ef-centros"]} onToggle={() => toggle("ef-centros")} />
             {!collapsed["ef-centros"] && estrutura.centros.map((c) => (
               <button key={c.id} onClick={() => irParaCentro(c.id)}
@@ -254,12 +262,9 @@ export function Sidebar() {
               </button>
             ))}
           </div>
-        )}
 
-        {/* CENTROS DE INFRAESTRUTURA */}
-        {podeEstrutura && estrutura && (
           <div className="space-y-0.5">
-            <SectionHeader title="Infraestrutura" contagem={estrutura.infraestrutura.length}
+            <SectionHeader sub title="Infraestrutura" contagem={estrutura.infraestrutura.length}
                            collapsed={!!collapsed["ef-infra"]} onToggle={() => toggle("ef-infra")} />
             {!collapsed["ef-infra"] && estrutura.infraestrutura.map((c) => (
               <button key={c.id} onClick={() => irParaCentro(c.id)}
@@ -268,6 +273,9 @@ export function Sidebar() {
                 <span className="flex-1 truncate text-left">{c.nome}</span>
               </button>
             ))}
+          </div>
+              </div>
+            )}
           </div>
         )}
 

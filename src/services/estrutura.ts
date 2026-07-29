@@ -89,6 +89,16 @@ export const estruturaApi = {
     fetch(`${API_URL}/estrutura/centros/${id}/detalhe/`, { headers: authHeaders() })
       .then((r) => j<EfCentroDetalhe>(r)),
 
+  faturamentoLinha: (linhaId: string, periodo: string) =>
+    fetch(`${API_URL}/estrutura/linhas/${linhaId}/faturamento/?periodo=${periodo}`,
+          { headers: authHeaders() })
+      .then((r) => j<EfFaturamentoLinha>(r)),
+
+  lancarFaturamento: (linhaId: string, periodo: string, dados: Record<string, number | string>) =>
+    fetch(`${API_URL}/estrutura/linhas/${linhaId}/faturamento/`, {
+      method: "PATCH", headers: H(), body: JSON.stringify({ periodo, ...dados }),
+    }).then((r) => j<{ periodo: string; faturamento: Record<string, number | string> }>(r)),
+
   sedeDetalhe: (id: string) =>
     fetch(`${API_URL}/estrutura/sedes/${id}/detalhe/`, { headers: authHeaders() })
       .then((r) => j<EfSedeDetalhe>(r)),
@@ -207,6 +217,14 @@ export interface EfSedeDetalhe {
   };
   competencia_custo: string | null;
   custo_parcial: boolean;
+}
+
+export interface EfFaturamentoLinha {
+  linha: string;
+  centro: string;
+  periodo: string;
+  faturamento: Record<string, number | string>;
+  meses_lancados: string[];
 }
 
 // ── Comunicação leve entre Sidebar e a tela (sem mexer no AppContext) ──

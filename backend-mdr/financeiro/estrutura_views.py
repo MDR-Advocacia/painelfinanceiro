@@ -1,6 +1,7 @@
 # Estrutura de Faturamento — API da proposta de reestruturação.
 # RBAC: módulo `estrutura` ("ver" navega, "editar" altera). Toda escrita
 # audita via DpAuditLog (mesma trilha traduzida do DP).
+import re
 from django.db import transaction
 from django.db.models import Count, Sum
 from rest_framework import status
@@ -886,3 +887,61 @@ def sede_detalhe(request, pk):
         "competencia_custo": f"{comp.mes:02d}/{comp.ano}" if comp else None,
         "custo_parcial": custo_parcial,
     })
+
+
+# Campos do faturamento mensal — MESMO formato do Setor legado, pra que o
+# histórico copiado na migração continue válido e nada se perca.
+_CAMPOS_FAT_NUM = ("bruto", "descontos", "aliquotaLucroPresumido", "aliquotaISS",
+                   "profissionaisISS", "premiacaoTotal", "diversosTotal")
+_PERIODO_RE = re.compile(r"^\d{4}-(0[1-9]|1[0-2])$")
+
+
+@api_view(["GET", "PATCH"])
+@permission_classes(_PERM)
+def linha_faturamento(request, pk):
+    """Lê e lança o faturamento de UM mês da linha.
+
+    GET  ?periodo=2026-06 → os valores daquele mês (vazio vira o default)
+    PATCH {periodo, bruto, descontos, …} → grava só o mês informado
+    """
+    l = LinhaFaturamento.objects.select_related("centro").filter(pk=pk).first()
+    if not l:
+        return Response(status=404)
+
+    periodo = (request.data.get("periodo") if request.method == "PATCH"
+               else request.query_params.get("periodo")) or ""
+    if not _PERIODO_RE.match(periodo):
+        return Response({"detail": "Informe o período no formato AAAA-MM."}, status=400)
+
+    atual = dict((l.periodos or {}).get(periodo) or {})
+    if request.method == "GET":
+        return Response({
+            "linha": l.nome, "centro": l.centro.nome, "periodo": periodo,
+            "faturamento": atual,
+            "meses_lancados": sorted(k for k, v in (l.periodos or {}).items()
+                                     if (v or {}).get("bruto")),
+        })
+
+    novo = dict(atual)
+    for campo in _CAMPOS_FAT_NUM:
+        if campo in request.data:
+            try:
+                novo[campo] = float(request.data[campo] or 0)
+            except (TypeError, ValueError):
+                return Response({"detail": f"Valor inválido em {campo}."}, status=400)
+    if "modoISS" in request.data:
+        modo = request.data["modoISS"]
+        if modo not in ("sociedade", "percentual"):
+            return Response({"detail": "modoISS inválido."}, status=400)
+        novo["modoISS"] = modo
+    if novo.get("bruto", 0) < 0:
+        return Response({"detail": "O faturamento bruto não pode ser negativo."}, status=400)
+
+    periodos = dict(l.periodos or {})
+    periodos[periodo] = novo
+    l.periodos = periodos
+    l.save(update_fields=["periodos", "updated_at"])
+    audit(request, "editar", "ef_linha", l.id,
+          antes={"linha": l.nome, "periodo": periodo, "faturamento": atual},
+          depois={"linha": l.nome, "periodo": periodo, "faturamento": novo})
+    return Response({"periodo": periodo, "faturamento": novo})

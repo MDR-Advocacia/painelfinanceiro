@@ -9,7 +9,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import {
   AlertTriangle, Building2, Coins, Equal, Landmark, Loader2, Network, Pencil,
-  Plus, Server, Trash2, Users,
+  Plus, Receipt, Server, Trash2, Users,
 } from "lucide-react";
 import { toast } from "sonner";
 
@@ -24,10 +24,12 @@ import {
   Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
 } from "@/components/ui/select";
 import { Ajuda } from "@/components/dp/Ajuda";
+import { NumberField } from "@/components/NumberField";
 import { Kpi, PageHeader, SectionTitle } from "@/components/Pagina";
 import { usePermissions } from "@/hooks/usePermissions";
 import { useApp } from "@/contexts/AppContext";
 import { formatCurrency } from "@/utils/calculations";
+import { MONTH_NAMES } from "@/types/sector";
 import EquipesDialog from "@/components/EquipesDialog";
 import {
   type EfAlocacao, type EfCentro, type EfEquipe, type EfEstrutura, type EfLinha,
@@ -553,6 +555,7 @@ function LinhaBloco({ linha, equipes, editar, onMudou, aoAbrirDetalhe, sedes }: 
   const area = AREA_UI[linha.area];
   const fora = linha.alocacoes.length > 0 && Math.abs(linha.soma_percentual - 100) > 0.5;
   const [adicionando, setAdicionando] = useState(false);
+  const [lancando, setLancando] = useState(false);
   const jaAlocadas = new Set(linha.alocacoes.map((a) => a.equipe_id));
 
   return (
@@ -577,10 +580,24 @@ function LinhaBloco({ linha, equipes, editar, onMudou, aoAbrirDetalhe, sedes }: 
             </button>
           </span>
         )}
-        <span className="ml-auto font-mono-numbers text-sm font-bold">
-          {formatCurrency(linha.receita_bruta)}
+        <span className="ml-auto flex items-center gap-1.5">
+          <span className="font-mono-numbers text-sm font-bold">
+            {formatCurrency(linha.receita_bruta)}
+          </span>
+          {editar && (
+            <button onClick={() => setLancando(true)}
+                    title={`Lançar o faturamento mensal de ${linha.nome}`}
+                    className="rounded p-1 text-muted-foreground/60 transition-colors hover:bg-[hsl(var(--dunatech-blue))]/10 hover:text-[hsl(var(--dunatech-blue))]">
+              <Receipt className="h-3.5 w-3.5" />
+            </button>
+          )}
         </span>
       </div>
+
+      {lancando && (
+        <FaturamentoDialog linha={linha} onFechar={() => setLancando(false)}
+                           onSalvou={() => { setLancando(false); onMudou(); }} />
+      )}
 
       <div className="mt-2 flex flex-wrap items-center gap-1.5">
         {linha.alocacoes.map((a) => (
@@ -774,3 +791,127 @@ function InfraCard({ centro, equipes, editar, onMudou, aoAbrirDetalhe, sedes }: 
 }
 
 export default EstruturaView;
+
+
+// ── Lançamento do faturamento MENSAL da linha ──
+// Antes isso vivia em SETORES (BillingForm). Com a reestruturação, a receita
+// passou a ser da LINHA — então o lançamento vem junto, com os mesmos campos
+// e o mesmo formato de dado, pra não perder o histórico nem a apuração de ISS.
+function FaturamentoDialog({ linha, onFechar, onSalvou }: {
+  linha: EfLinha; onFechar: () => void; onSalvou: () => void;
+}) {
+  const { periodoAtivo } = useApp();
+  const [periodo, setPeriodo] = useState(periodoAtivo);
+  const [dados, setDados] = useState<Record<string, any> | null>(null);
+  const [meses, setMeses] = useState<string[]>([]);
+  const [salvando, setSalvando] = useState(false);
+
+  useEffect(() => {
+    setDados(null);
+    estruturaApi.faturamentoLinha(linha.id, periodo)
+      .then((r) => {
+        setMeses(r.meses_lancados);
+        setDados({
+          bruto: 0, descontos: 0, aliquotaLucroPresumido: 0.32, aliquotaISS: 0.02,
+          modoISS: "sociedade", profissionaisISS: 0, premiacaoTotal: 0, diversosTotal: 0,
+          ...r.faturamento,
+        });
+      })
+      .catch((e) => { toast.error(e.message); onFechar(); });
+  }, [linha.id, periodo]);
+
+  const campo = (k: string, v: number | string) => setDados((d) => ({ ...d!, [k]: v }));
+
+  const salvar = () => {
+    setSalvando(true);
+    estruturaApi.lancarFaturamento(linha.id, periodo, dados!)
+      .then(() => { toast.success(`Faturamento de ${rotuloMes(periodo)} lançado em ${linha.nome}.`); onSalvou(); })
+      .catch((e) => { toast.error(e.message); setSalvando(false); });
+  };
+
+  const liquido = dados ? (Number(dados.bruto) || 0) - (Number(dados.descontos) || 0) : 0;
+
+  return (
+    <Dialog open onOpenChange={(o) => !o && onFechar()}>
+      <DialogContent className="max-w-md">
+        <DialogHeader>
+          <DialogTitle className="text-base">Faturamento · {linha.nome}</DialogTitle>
+          <DialogDescription>
+            Receita do mês desta linha. Alimenta a estrutura, o centro de faturamento e a sede.
+          </DialogDescription>
+        </DialogHeader>
+
+        <div className="space-y-3">
+          <div>
+            <label className="mb-1 block text-xs font-medium text-muted-foreground">Mês de competência</label>
+            <input type="month" value={periodo} onChange={(e) => e.target.value && setPeriodo(e.target.value)}
+                   className="h-9 w-full rounded-md border bg-background px-3 text-sm" />
+            {meses.length > 0 && (
+              <p className="mt-1 text-[0.65rem] text-muted-foreground">
+                já lançados: {meses.map(rotuloMes).join(" · ")}
+              </p>
+            )}
+          </div>
+
+          {!dados ? (
+            <div className="flex justify-center py-6">
+              <Loader2 className="h-5 w-5 animate-spin text-muted-foreground" />
+            </div>
+          ) : (
+            <>
+              <div className="grid grid-cols-2 gap-3">
+                <NumberField label="Faturamento bruto" value={Number(dados.bruto) || 0}
+                             onChange={(v) => campo("bruto", v)} />
+                <NumberField label="Descontos / glosas" value={Number(dados.descontos) || 0}
+                             onChange={(v) => campo("descontos", v)} />
+                <NumberField label="Alíquota Lucro Presumido" prefix="%" step={0.1}
+                             value={(Number(dados.aliquotaLucroPresumido) || 0) * 100}
+                             onChange={(v) => campo("aliquotaLucroPresumido", v / 100)} />
+                {dados.modoISS === "sociedade" ? (
+                  <NumberField label="Profissionais (ISS)" prefix=""
+                               value={Number(dados.profissionaisISS) || 0}
+                               onChange={(v) => campo("profissionaisISS", v)} />
+                ) : (
+                  <NumberField label="Alíquota ISS" prefix="%" step={0.1}
+                               value={(Number(dados.aliquotaISS) || 0) * 100}
+                               onChange={(v) => campo("aliquotaISS", v / 100)} />
+                )}
+              </div>
+
+              <div className="grid grid-cols-2 gap-2">
+                {(["sociedade", "percentual"] as const).map((m) => (
+                  <button key={m} onClick={() => campo("modoISS", m)}
+                          className={`rounded-lg border p-2 text-left text-xs transition-colors ${
+                            dados.modoISS === m
+                              ? "border-primary bg-primary/5 font-medium text-primary"
+                              : "border-border text-muted-foreground hover:border-primary/50"}`}>
+                    <span className="block font-medium">
+                      {m === "sociedade" ? "Sociedade de Advogados" : "Percentual"}
+                    </span>
+                    <span className="block opacity-70">
+                      {m === "sociedade" ? "ISS bimestral por profissional" : "ISS sobre o faturamento"}
+                    </span>
+                  </button>
+                ))}
+              </div>
+
+              <div className="flex items-center justify-between rounded-lg bg-muted/40 px-3 py-2 text-sm">
+                <span className="text-muted-foreground">Receita líquida</span>
+                <span className="font-mono-numbers font-bold">{formatCurrency(liquido)}</span>
+              </div>
+
+              <Button onClick={salvar} disabled={salvando} className="glass-button w-full border-0">
+                {salvando ? "Salvando…" : `Lançar em ${rotuloMes(periodo)}`}
+              </Button>
+            </>
+          )}
+        </div>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+function rotuloMes(per: string) {
+  const [a, m] = per.split("-").map(Number);
+  return `${MONTH_NAMES[m - 1].slice(0, 3)}/${String(a).slice(2)}`;
+}
