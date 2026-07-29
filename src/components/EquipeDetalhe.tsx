@@ -20,7 +20,7 @@ import { TabelaRolavel } from "@/components/TabelaRolavel";
 import { Kpi, PageHeader, SectionTitle, Vazio } from "@/components/Pagina";
 import { formatCurrency } from "@/utils/calculations";
 import {
-  type EfEquipeDetalhe, abrirDetalheCentro, estruturaApi, lerSelecionado,
+  type EfEquipeDetalhe, abrirDetalheCentro, estruturaApi, useSelecionadoId,
 } from "@/services/estrutura";
 import { useApp } from "@/contexts/AppContext";
 
@@ -43,7 +43,7 @@ export default function EquipeDetalhe() {
   const [dados, setDados] = useState<EfEquipeDetalhe | null>(null);
   const [erro, setErro] = useState(false);
   const [mostrarInativos, setMostrarInativos] = useState(false);
-  const equipeId = lerSelecionado()?.id;
+  const equipeId = useSelecionadoId();
 
   useEffect(() => {
     if (!equipeId) { setErro(true); return; }

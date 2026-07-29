@@ -1,4 +1,6 @@
 // Estrutura de Faturamento — clientes (centros), linhas e alocações de equipe.
+import { useSyncExternalStore } from "react";
+
 import { API_URL, authHeaders } from "@/hooks/useAuth";
 
 export interface EfAlocacao {
@@ -221,20 +223,40 @@ export function focarCentro(centroId: string) {
 }
 
 // ── Seleção das páginas de detalhe ──
-// A view do app é uma string; o id do centro/equipe aberto vive aqui (module
-// state + sessionStorage pra sobreviver ao refresh da página).
+// A view do app é uma string; o id do centro/equipe/sede aberto vive aqui
+// (module state + sessionStorage pra sobreviver ao refresh da página).
+//
+// Isso PRECISA ser observável. Trocar de centro estando já na página de um
+// centro mantém a view igual ("estrutura-centro"), então o setView não gera
+// re-render e a página continuaria mostrando o centro anterior — parecia que
+// o menu tinha travado. Com o store abaixo, quem lê a seleção re-renderiza
+// mesmo quando a view não muda.
 let selecionado: { tipo: "centro" | "equipe" | "sede"; id: string } | null = null;
 try {
   const salvo = sessionStorage.getItem("ef_selecionado");
   if (salvo) selecionado = JSON.parse(salvo);
 } catch { /* primeira visita */ }
 
+const ouvintesSelecao = new Set<() => void>();
+
 export function lerSelecionado() {
   return selecionado;
 }
 function selecionar(tipo: "centro" | "equipe" | "sede", id: string) {
+  if (selecionado?.tipo === tipo && selecionado?.id === id) return;
   selecionado = { tipo, id };
   try { sessionStorage.setItem("ef_selecionado", JSON.stringify(selecionado)); } catch { /* sem storage */ }
+  ouvintesSelecao.forEach((fn) => fn());
+}
+
+function assinarSelecao(fn: () => void) {
+  ouvintesSelecao.add(fn);
+  return () => { ouvintesSelecao.delete(fn); };
+}
+
+/** Id do item aberto, reativo — re-renderiza a página ao trocar de item. */
+export function useSelecionadoId(): string | null {
+  return useSyncExternalStore(assinarSelecao, () => selecionado?.id ?? null);
 }
 /** Abre a página dedicada do centro. */
 export function abrirDetalheCentro(id: string, setView: (v: any) => void) {

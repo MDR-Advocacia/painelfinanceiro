@@ -23,7 +23,7 @@ import {
 import { Kpi, PageHeader, SectionTitle, Vazio } from "@/components/Pagina";
 import { formatCurrency } from "@/utils/calculations";
 import {
-  type EfSedeDetalhe, abrirDetalheCentro, abrirDetalheEquipe, estruturaApi, lerSelecionado,
+  type EfSedeDetalhe, abrirDetalheCentro, abrirDetalheEquipe, estruturaApi, useSelecionadoId,
 } from "@/services/estrutura";
 import { useApp } from "@/contexts/AppContext";
 import { MONTH_NAMES } from "@/types/sector";
@@ -47,7 +47,7 @@ export default function SedeDetalhe() {
   const { setView } = useApp();
   const [dados, setDados] = useState<EfSedeDetalhe | null>(null);
   const [erro, setErro] = useState(false);
-  const sedeId = lerSelecionado()?.id;
+  const sedeId = useSelecionadoId();
 
   useEffect(() => {
     if (!sedeId) { setErro(true); return; }

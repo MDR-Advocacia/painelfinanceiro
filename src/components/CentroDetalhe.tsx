@@ -22,7 +22,7 @@ import {
 import { Kpi, PageHeader, SectionTitle, Vazio } from "@/components/Pagina";
 import { formatCurrency } from "@/utils/calculations";
 import {
-  type EfCentroDetalhe, abrirDetalheEquipe, estruturaApi, lerSelecionado,
+  type EfCentroDetalhe, abrirDetalheEquipe, estruturaApi, useSelecionadoId,
 } from "@/services/estrutura";
 import { useApp } from "@/contexts/AppContext";
 import { MONTH_NAMES } from "@/types/sector";
@@ -44,7 +44,7 @@ export default function CentroDetalhe() {
   const { setView } = useApp();
   const [dados, setDados] = useState<EfCentroDetalhe | null>(null);
   const [erro, setErro] = useState(false);
-  const centroId = lerSelecionado()?.id;
+  const centroId = useSelecionadoId();
 
   useEffect(() => {
     if (!centroId) { setErro(true); return; }
