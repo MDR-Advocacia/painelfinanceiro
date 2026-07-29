@@ -56,13 +56,16 @@ function SectionHeader({
       type="button"
       onClick={onToggle}
       aria-expanded={!collapsed}
-      className="group flex w-full items-center gap-1.5 px-2.5 pb-1.5 pt-1 text-sidebar-foreground/45 transition-colors hover:text-sidebar-foreground/80"
+      className="group flex h-7 w-full items-center gap-1.5 px-2.5 pb-1.5 pt-1 text-sidebar-foreground/45 transition-colors hover:text-sidebar-foreground/80"
     >
-      <span className="eyebrow text-sidebar-foreground/45 transition-colors group-hover:text-sidebar-foreground/80">
+      {/* Uma linha, sempre. O eyebrow tem tracking largo e um título comprido
+          quebrava em duas linhas, empurrando a lista e desalinhando a seção. */}
+      <span title={title}
+            className="eyebrow min-w-0 flex-1 truncate whitespace-nowrap text-left text-sidebar-foreground/45 transition-colors group-hover:text-sidebar-foreground/80">
         {title}
       </span>
       {contagem !== undefined && contagem > 0 && (
-        <span className="rounded-full bg-white/[0.07] px-1.5 text-[0.6rem] font-semibold tabular-nums text-sidebar-foreground/50">
+        <span className="shrink-0 rounded-full bg-white/[0.07] px-1.5 text-[0.6rem] font-semibold tabular-nums text-sidebar-foreground/50">
           {contagem}
         </span>
       )}
@@ -235,7 +238,7 @@ export function Sidebar() {
         {/* CENTROS DE FATURAMENTO (nova sistemática) */}
         {podeEstrutura && estrutura && (
           <div className="space-y-0.5">
-            <SectionHeader title="Centros de Faturamento" contagem={estrutura.centros.length}
+            <SectionHeader title="Faturamento" contagem={estrutura.centros.length}
                            collapsed={!!collapsed["ef-centros"]} onToggle={() => toggle("ef-centros")} />
             {!collapsed["ef-centros"] && estrutura.centros.map((c) => (
               <button key={c.id} onClick={() => irParaCentro(c.id)}
