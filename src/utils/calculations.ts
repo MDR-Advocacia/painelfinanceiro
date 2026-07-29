@@ -44,26 +44,39 @@ export function calcISSSociedade(numProfissionais: number): number {
   return totalBimestral / 2; // bimestral → mensal
 }
 
+/**
+ * BASE DE CÁLCULO = RECEITA LÍQUIDA (bruto menos descontos/glosa).
+ *
+ * Decisão fiscal do escritório: o valor glosado não foi faturado, então não
+ * pode sofrer tributação. Vale pra tudo que é proporcional à receita — PIS,
+ * COFINS, ISS percentual e o lucro presumido que alimenta IRPJ e CSLL.
+ * O ISS no modo sociedade é fixo por profissional: glosa não o altera.
+ *
+ * ESPELHO de `_impostos` em backend-mdr/financeiro/estrutura_views.py.
+ * Mexeu aqui, mexe lá — as duas TÊM que dar o mesmo número.
+ */
 export function calcImpostos(fat: Faturamento): ImpostosCalculados {
-  const fb = fat.bruto;
+  const descontos = fat.descontos ?? 0;
+  // glosa maior que o bruto não vira base negativa
+  const baseCalculo = Math.max(0, fat.bruto - descontos);
   const aliqLP = fat.aliquotaLucroPresumido;
-  const lucroPresumido = fb * aliqLP;
+  const lucroPresumido = baseCalculo * aliqLP;
 
   const irpj = lucroPresumido * 0.15;
   const trimestral = lucroPresumido * 3;
   const irpjAdicional = trimestral > 60000 ? ((trimestral - 60000) * 0.10) / 3 : 0;
 
   const csll = lucroPresumido * 0.09;
-  const pis = fb * 0.0065;
-  const cofins = fb * 0.03;
+  const pis = baseCalculo * 0.0065;
+  const cofins = baseCalculo * 0.03;
 
   const modoISS = fat.modoISS ?? 'percentual';
   const iss = modoISS === 'sociedade'
     ? calcISSSociedade(fat.profissionaisISS ?? 0)
-    : fb * fat.aliquotaISS;
+    : baseCalculo * fat.aliquotaISS;
 
   const total = irpj + irpjAdicional + csll + pis + cofins + iss;
-  return { lucroPresumido, irpj, irpjAdicional, csll, pis, cofins, iss, total };
+  return { baseCalculo, lucroPresumido, irpj, irpjAdicional, csll, pis, cofins, iss, total };
 }
 
 /**
@@ -92,7 +105,11 @@ export function calcResumo(data: PeriodoData, vpdValor: number = 2472.85): Resum
   const totalVariaveis = premiacaoTotal + diversosTotal;
   const impostos = calcImpostos(data.faturamento);
   
-  const cargaTributaria = fb > 0 ? (impostos.total / fb) * 100 : 0;
+  // carga tributária medida contra a receita que de fato foi tributada (líquida),
+  // e não contra o bruto — senão a glosa faria a carga parecer menor do que é
+  const cargaTributaria = impostos.baseCalculo > 0
+    ? (impostos.total / impostos.baseCalculo) * 100
+    : 0;
   const faturamentoLiquido = fb - impostos.total - descontos;
   
   // Margem Bruta (antes do rateio das despesas indiretas)
@@ -183,6 +200,7 @@ export function aggregateResumos(resumos: ResumoSetor[]): ResumoSetor {
   else if (margemLiquidaPercent > 5) status = 'atencao';
 
   const impostos: ImpostosCalculados = {
+    baseCalculo: resumos.reduce((a, r) => a + r.impostos.baseCalculo, 0),
     lucroPresumido: resumos.reduce((a, r) => a + r.impostos.lucroPresumido, 0),
     irpj: resumos.reduce((a, r) => a + r.impostos.irpj, 0),
     irpjAdicional: resumos.reduce((a, r) => a + r.impostos.irpjAdicional, 0),
@@ -195,7 +213,9 @@ export function aggregateResumos(resumos: ResumoSetor[]): ResumoSetor {
 
   return {
     custosPorCargo, totalCustoPessoal, totalDespesasEventuais, faturamentoBruto, premiacaoTotal, diversosTotal, totalVariaveis, impostos, 
-    cargaTributaria: faturamentoBruto > 0 ? (totalImpostos / faturamentoBruto) * 100 : 0,
+    // denominador é a base tributada (líquida), coerente com calcImpostos
+    cargaTributaria: impostos.baseCalculo > 0
+      ? (totalImpostos / impostos.baseCalculo) * 100 : 0,
     faturamentoLiquido, margemBruta, margemBrutaPercent, status,
     headcount, custoVPD, lucroLiquidoReal, margemLiquidaPercent
   };
@@ -205,7 +225,7 @@ function emptyResumo(): ResumoSetor {
   return {
     custosPorCargo: {}, totalCustoPessoal: 0, totalDespesasEventuais: 0, faturamentoBruto: 0, premiacaoTotal: 0,
     diversosTotal: 0, totalVariaveis:0,
-    impostos: { lucroPresumido: 0, irpj: 0, irpjAdicional: 0, csll: 0, pis: 0, cofins: 0, iss: 0, total: 0 },
+    impostos: { baseCalculo: 0, lucroPresumido: 0, irpj: 0, irpjAdicional: 0, csll: 0, pis: 0, cofins: 0, iss: 0, total: 0 },
     cargaTributaria: 0, faturamentoLiquido: 0, margemBruta: 0, margemBrutaPercent: 0, status: 'critico',
     headcount: 0, custoVPD: 0, lucroLiquidoReal: 0, margemLiquidaPercent: 0
   };

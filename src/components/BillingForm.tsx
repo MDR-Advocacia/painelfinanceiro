@@ -113,7 +113,14 @@ export function BillingForm() {
           </CardHeader>
           <CardContent>
             <div className="space-y-2 text-sm">
-              <Row label="Lucro Presumido" value={impostos.lucroPresumido} sub={`${(fat.aliquotaLucroPresumido * 100).toFixed(0)}% do faturamento`} />
+              <Row
+                label="Base de Cálculo"
+                value={impostos.baseCalculo}
+                sub={(fat.descontos ?? 0) > 0
+                  ? 'receita líquida — glosa fora da base'
+                  : 'receita líquida (sem glosa no mês)'}
+              />
+              <Row label="Lucro Presumido" value={impostos.lucroPresumido} sub={`${(fat.aliquotaLucroPresumido * 100).toFixed(0)}% da base de cálculo`} />
               <Row label="IRPJ (15%)" value={impostos.irpj} />
               {impostos.irpjAdicional > 0 && (
                 <div className="flex items-center gap-2">
@@ -132,7 +139,10 @@ export function BillingForm() {
                 <Row label="TOTAL DE IMPOSTOS" value={impostos.total} bold />
                 <div className="flex justify-between text-xs text-muted-foreground mt-1">
                   <span>Carga Tributária</span>
-                  <span className="font-mono">{formatPercent((impostos.total / fat.bruto) * 100)}</span>
+                  <span className="font-mono">
+                    {formatPercent(impostos.baseCalculo > 0
+                      ? (impostos.total / impostos.baseCalculo) * 100 : 0)}
+                  </span>
                 </div>
               </div>
             </div>

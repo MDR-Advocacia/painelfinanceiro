@@ -26,6 +26,10 @@ from .estrutura_views import (
     centro_faturamento, faturamento_documento, linha_documentos,
     linha_faturamento, sede_detalhe, sedes_lista,
 )
+from .arquivo_contabil import (
+    arquivo_contabil_download, arquivo_contabil_exercicios, arquivo_contabil_gerar,
+    arquivo_contabil_lista,
+)
 
 router = DefaultRouter()
 router.register(r'sedes', SedeViewSet)
@@ -61,6 +65,11 @@ urlpatterns = [
     path('estrutura/linhas/<uuid:pk>/documentos/', linha_documentos),
     path('estrutura/faturamento-documentos/<uuid:pk>/', faturamento_documento),
     path('estrutura/centros/<uuid:pk>/rateio-sedes/', centro_sede_rateio),
+    # Arquivo Contábil — estoque de relatórios técnico-contábeis por exercício
+    path('estrutura/arquivo-contabil/', arquivo_contabil_lista),
+    path('estrutura/arquivo-contabil/exercicios/', arquivo_contabil_exercicios),
+    path('estrutura/arquivo-contabil/gerar/', arquivo_contabil_gerar),
+    path('estrutura/arquivo-contabil/<uuid:pk>/download/', arquivo_contabil_download),
     path('estrutura/centros/', centro_crud),
     path('estrutura/centros/<uuid:pk>/', centro_crud),
     path('estrutura/linhas/', linha_crud),

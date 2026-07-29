@@ -14,6 +14,7 @@ import CentroDetalhe from "@/components/CentroDetalhe";
 import SedeDetalhe from "@/components/SedeDetalhe";
 import EquipeDetalhe from "@/components/EquipeDetalhe";
 import AdminEstrutura from "@/components/AdminEstrutura";
+import ArquivoContabil from "@/components/ArquivoContabil";
 import { SaveIndicator } from "@/components/SaveIndicator";
 import { usePermissions } from "@/hooks/usePermissions";
 import { ShieldAlert } from "lucide-react";
@@ -31,6 +32,7 @@ const VIEW_MODULO: Record<string, string> = {
   "estrutura-equipe": "equipes",
   "estrutura-sede": "sedes",
   "estrutura-admin": "estrutura",
+  "arquivo-contabil": "faturamento",
   sede: "sedes",
   setor: "setores",
   pessoal: "pessoal",
@@ -107,6 +109,7 @@ const MainContent = () => {
           {view === "estrutura-equipe" && <EquipeDetalhe />}
           {view === "estrutura-sede" && <SedeDetalhe />}
           {view === "estrutura-admin" && <AdminEstrutura />}
+          {view === "arquivo-contabil" && <ArquivoContabil />}
         </>
       )}
     </main>

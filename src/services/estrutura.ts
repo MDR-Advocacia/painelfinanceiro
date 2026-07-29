@@ -378,3 +378,58 @@ export function abrirGerenciadorEquipes() {
 export function avisarEstruturaMudou() {
   window.dispatchEvent(new CustomEvent(EF_EVENTOS.mudou));
 }
+
+
+// ─────────────────────── ARQUIVO CONTÁBIL DO EXERCÍCIO ───────────────────────
+
+export interface RelatorioExercicio {
+  id: string; exercicio: number; versao: number;
+  nome_arquivo: string; tamanho: number; sha256: string;
+  gerado_por: string; gerado_em: string; quando_br: string;
+  definitivo: boolean;
+  competencias_no_ano: number; competencias_fechadas: number;
+  resumo: {
+    bruto?: number; descontos?: number; liquida?: number;
+    impostos?: number; custo_pessoal?: number; margem?: number;
+  };
+}
+
+export interface ExercicioDisponivel {
+  exercicio: number;
+  competencias_no_ano: number; competencias_fechadas: number;
+  definitivo: boolean;
+  versoes_emitidas: number; ultima_versao: number;
+}
+
+export const arquivoContabilApi = {
+  lista: (limit = 25, offset = 0, exercicio?: number) =>
+    fetch(`${API_URL}/estrutura/arquivo-contabil/?limit=${limit}&offset=${offset}`
+          + (exercicio ? `&exercicio=${exercicio}` : ""),
+          { headers: authHeaders() })
+      .then((r) => j<{ total: number; items: RelatorioExercicio[] }>(r)),
+
+  exercicios: () =>
+    fetch(`${API_URL}/estrutura/arquivo-contabil/exercicios/`, { headers: authHeaders() })
+      .then((r) => j<{ total: number; items: ExercicioDisponivel[] }>(r)),
+
+  gerar: (exercicio: number) =>
+    fetch(`${API_URL}/estrutura/arquivo-contabil/gerar/`, {
+      method: "POST", headers: H(), body: JSON.stringify({ exercicio }),
+    }).then((r) => j<RelatorioExercicio>(r)),
+
+  /** O PDF nunca é servido direto pelo nginx: baixa autenticado e entrega o blob. */
+  baixar: async (r: RelatorioExercicio) => {
+    const res = await fetch(`${API_URL}/estrutura/arquivo-contabil/${r.id}/download/`,
+                            { headers: authHeaders() });
+    if (!res.ok) throw new Error(`Erro ${res.status} ao baixar o relatório`);
+    const blob = await res.blob();
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = r.nome_arquivo;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    URL.revokeObjectURL(url);
+  },
+};

@@ -86,6 +86,8 @@ ACOES = {
     "enviar_revisao": ("enviou a folha para revisão", "revisao"),
     "fechar_competencia": ("fechou a competência", "fechar"),
     "reabrir_competencia": ("reabriu a competência", "reabrir"),
+    "congelar_retroativo": ("congelou retroativamente a competência", "fechar"),
+    "gerar_relatorio_exercicio": ("emitiu o relatório técnico-contábil", "criar"),
     "desfazer_revisao": ("desfez o envio para revisão", "reabrir"),
     "ajuste_pontual": ("fez um ajuste pontual em", "ajuste"),
     "excluir": ("excluiu", "sair"),
@@ -104,6 +106,7 @@ ENTIDADES = {
     "dp_folha_item": "linha da folha",
     "dp_lideranca": "liderança",
     "dp_documento": "documento",
+    "ef_relatorio_exercicio": "relatório do exercício",
 }
 
 
@@ -238,6 +241,18 @@ def humanizar(log) -> dict:
     elif log.acao == "fechar_competencia":
         titulo = f"Fechou a competência (aprovada por {depois.get('fechada_por', '')})"
         mudancas = []
+    elif log.acao == "gerar_relatorio_exercicio":
+        titulo = (f"Emitiu o relatório técnico-contábil do exercício "
+                  f"{depois.get('exercicio', '')} (versão {depois.get('versao', '')})")
+        mudancas = [{"campo": "Exercício definitivo", "de": None,
+                     "para": depois.get("definitivo", "—")},
+                    {"campo": "Impressão digital (SHA-256)", "de": None,
+                     "para": (depois.get("sha256") or "—")[:16] + "…"}]
+    elif log.acao == "congelar_retroativo":
+        titulo = (f"Congelou retroativamente a competência {depois.get('competencia', '')} "
+                  f"({depois.get('foto_enquadramentos', 0)} pessoas)")
+        mudancas = [{"campo": "Observação", "de": None,
+                     "para": depois.get("observacao", "—")}]
     elif log.acao == "reabrir_competencia":
         titulo = "Reabriu uma competência fechada"
         mudancas = [{"campo": "Justificativa", "de": None,

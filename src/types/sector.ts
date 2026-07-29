@@ -48,6 +48,8 @@ export interface Setor {
 }
 
 export interface ImpostosCalculados {
+  /** Receita líquida (bruto - glosa): base de tudo que é proporcional à receita. */
+  baseCalculo: number;
   lucroPresumido: number;
   irpj: number;
   irpjAdicional: number;

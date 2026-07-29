@@ -279,3 +279,50 @@ def descongelar_competencia(competencia):
     n1 = CompetenciaEnquadramento.objects.filter(competencia=competencia).delete()[0]
     n2 = CompetenciaAlocacao.objects.filter(competencia=competencia).delete()[0]
     return n1, n2
+
+
+# ─────────────────────── ARQUIVO CONTÁBIL DO EXERCÍCIO ───────────────────────
+# Estoque permanente dos relatórios técnico-contábeis: um PDF por exercício
+# cobrindo a movimentação inteira do ano (receita, tributos, folha, margem,
+# quebras e rastreabilidade das competências).
+#
+# REGRA DO ARQUIVO: nada é sobrescrito. Cada geração cria uma VERSÃO nova e as
+# anteriores continuam baixáveis. Arquivo contábil que apaga o que já emitiu
+# não serve de arquivo — se um número mudou, o valor está justamente em poder
+# comparar a emissão antiga com a nova.
+
+def _caminho_relatorio_exercicio(instance, filename):
+    """media/arquivo-contabil/<exercicio>/<arquivo>."""
+    return f"arquivo-contabil/{instance.exercicio}/{filename}"
+
+
+class RelatorioExercicio(models.Model):
+    """Um PDF técnico-contábil fechado, de um exercício, congelado no tempo."""
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    exercicio = models.IntegerField(help_text="Ano do exercício (ex.: 2026)")
+    versao = models.IntegerField(default=1)
+    arquivo = models.FileField(upload_to=_caminho_relatorio_exercicio)
+    nome_arquivo = models.CharField(max_length=255)
+    tamanho = models.IntegerField(default=0)
+    # impressão digital do PDF: prova que o arquivo baixado hoje é byte a byte
+    # o mesmo que foi emitido na data da geração
+    sha256 = models.CharField(max_length=64, blank=True, default="")
+    gerado_por = models.CharField(max_length=150, blank=True, default="")
+    gerado_em = models.DateTimeField(auto_now_add=True)
+    # DEFINITIVO = os 12 meses do exercício existem e estão todos fechados.
+    # Parcial não é defeito: é o retrato de um exercício ainda em curso, e o
+    # PDF diz isso na cara para ninguém arquivar um ano incompleto como final.
+    definitivo = models.BooleanField(default=False)
+    competencias_no_ano = models.IntegerField(default=0)
+    competencias_fechadas = models.IntegerField(default=0)
+    # números de capa, para a listagem não precisar abrir o PDF
+    resumo = models.JSONField(null=True, blank=True)
+
+    class Meta:
+        db_table = "ef_relatorios_exercicio"
+        ordering = ["-exercicio", "-versao"]
+        constraints = [models.UniqueConstraint(fields=["exercicio", "versao"],
+                                               name="uq_relatorio_exercicio_versao")]
+
+    def __str__(self):
+        return f"Relatório técnico-contábil {self.exercicio} (v{self.versao})"

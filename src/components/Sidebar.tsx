@@ -23,7 +23,6 @@ import {
   TrendingUp,
   BarChart3,
   Factory,
-  Landmark,
   Building,
   LogOut,
   Users,
@@ -31,6 +30,7 @@ import {
   Target,
   Contact,
   ChevronDown,
+  Archive,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -154,7 +154,11 @@ export function Sidebar() {
     { key: "config-estrategica", label: "Gestão Estratégica", icon: Target },
     { key: "pessoal", label: "Pessoal (DP)", icon: Contact },
     { key: "estrutura", label: "Estrutura de Faturamento", icon: Network },
-  ] as const).filter((p) => pode(p.key));
+    // O arquivo contábil junta receita e folha consolidada: gate no módulo
+    // `faturamento`, não numa chave própria — daí o `modulo` explícito.
+    { key: "arquivo-contabil", label: "Arquivo Contábil", icon: Archive,
+      modulo: "faturamento" },
+  ] as const).filter((p) => pode(("modulo" in p ? p.modulo : p.key) as string));
   const podeSedes = pode("sedes");
   const podeSetores = pode("setores");
 

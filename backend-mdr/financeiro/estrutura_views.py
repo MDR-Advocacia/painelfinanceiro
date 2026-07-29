@@ -60,24 +60,38 @@ def _impostos(fat: dict) -> dict:
     """Carga tributária do mês da linha — porte fiel do calcImpostos do painel
     antigo, pra estrutura e painel legado nunca divergirem.
 
-    ATENÇÃO: a base é o faturamento BRUTO, inclusive pra PIS/COFINS. É a regra
-    que já estava em produção; mudar isso é decisão fiscal, não de código.
+    BASE DE CÁLCULO = RECEITA LÍQUIDA (bruto menos descontos/glosa).
+
+    Decisão fiscal do escritório: o valor glosado não foi faturado, então não
+    pode sofrer tributação. Vale pra TUDO que é proporcional à receita — PIS,
+    COFINS, ISS percentual e o lucro presumido que alimenta IRPJ, adicional de
+    IRPJ e CSLL. Aplicar só em PIS/COFINS deixaria o restante contradizendo a
+    mesma premissa.
+
+    Exceção: ISS no modo sociedade é valor FIXO por profissional (tabela de
+    faixas), não olha receita — glosa não muda nada nele.
+
+    Se a glosa superar o bruto, a base vira zero e não negativa: imposto a
+    recuperar é evento contábil próprio, não sai de cálculo de margem.
     """
     fat = fat or {}
     bruto = float(fat.get("bruto") or 0)
-    lucro_presumido = bruto * float(fat.get("aliquotaLucroPresumido") or 0)
+    descontos = float(fat.get("descontos") or 0)
+    base = max(0.0, bruto - descontos)
+    lucro_presumido = base * float(fat.get("aliquotaLucroPresumido") or 0)
     irpj = lucro_presumido * 0.15
     trimestral = lucro_presumido * 3
     irpj_adicional = ((trimestral - 60000) * 0.10) / 3 if trimestral > 60000 else 0.0
     csll = lucro_presumido * 0.09
-    pis = bruto * 0.0065
-    cofins = bruto * 0.03
+    pis = base * 0.0065
+    cofins = base * 0.03
     if (fat.get("modoISS") or "percentual") == "sociedade":
         iss = _iss_sociedade(fat.get("profissionaisISS"))
     else:
-        iss = bruto * float(fat.get("aliquotaISS") or 0)
+        iss = base * float(fat.get("aliquotaISS") or 0)
     total = irpj + irpj_adicional + csll + pis + cofins + iss
-    return {"lucro_presumido": round(lucro_presumido, 2), "irpj": round(irpj, 2),
+    return {"base_calculo": round(base, 2),
+            "lucro_presumido": round(lucro_presumido, 2), "irpj": round(irpj, 2),
             "irpj_adicional": round(irpj_adicional, 2), "csll": round(csll, 2),
             "pis": round(pis, 2), "cofins": round(cofins, 2), "iss": round(iss, 2),
             "total": round(total, 2)}
