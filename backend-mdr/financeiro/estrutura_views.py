@@ -9,6 +9,12 @@ from rest_framework.decorators import api_view, permission_classes
 from rest_framework.response import Response
 
 from .dp_views import _quem, audit
+from django.conf import settings
+from django.http import FileResponse
+from rest_framework.decorators import parser_classes
+from rest_framework.parsers import FormParser, MultiPartParser
+
+from .models_estrutura import FaturamentoDocumento
 from .models import (
     Alocacao, CentroFaturamento, CentroSede, DpCompetencia, DpFolhaItem, Equipe,
     LinhaFaturamento, Sede,
@@ -945,3 +951,221 @@ def linha_faturamento(request, pk):
           antes={"linha": l.nome, "periodo": periodo, "faturamento": atual},
           depois={"linha": l.nome, "periodo": periodo, "faturamento": novo})
     return Response({"periodo": periodo, "faturamento": novo})
+
+
+def _espelhar_no_setor_legado(linha, periodo):
+    """Mantém o Setor legado alimentado a partir das LINHAS.
+
+    O Setor virou arquivo morto: ninguém lança nele. Mas Dashboard, Projeções,
+    Rentabilidade e Gestão Estratégica ainda leem de lá — então toda gravação
+    na linha reflete no setor de origem, somando as linhas que apontam pra ele
+    (o mapeamento é 1:1 hoje, a soma é só pra não quebrar se virar 1:N).
+    """
+    setor = linha.setor_legado
+    if not setor:
+        return None
+    irmas = LinhaFaturamento.objects.filter(setor_legado_id=setor.id)
+    base = None
+    total_bruto = total_desc = 0.0
+    for l in irmas:
+        f = (l.periodos or {}).get(periodo) or {}
+        total_bruto += float(f.get("bruto") or 0)
+        total_desc += float(f.get("descontos") or 0)
+        if l.id == linha.id:
+            base = f
+    fat = dict(base or {})
+    fat["bruto"] = round(total_bruto, 2)
+    fat["descontos"] = round(total_desc, 2)
+
+    pers = dict(setor.periodos or {})
+    bloco = dict(pers.get(periodo) or {})
+    bloco["faturamento"] = fat
+    bloco.setdefault("pessoal", (pers.get(periodo) or {}).get("pessoal") or {})
+    bloco.setdefault("despesasEventuais", (pers.get(periodo) or {}).get("despesasEventuais") or [])
+    pers[periodo] = bloco
+    setor.periodos = pers
+    setor.save(update_fields=["periodos"])
+    return setor.nome
+
+
+def _aplicar_faturamento(linha, periodo, dados):
+    """Grava o faturamento de um mês na linha. Devolve (antes, depois)."""
+    atual = dict((linha.periodos or {}).get(periodo) or {})
+    novo = dict(atual)
+    for campo in _CAMPOS_FAT_NUM:
+        if campo in dados:
+            novo[campo] = float(dados[campo] or 0)
+    if "modoISS" in dados and dados["modoISS"] in ("sociedade", "percentual"):
+        novo["modoISS"] = dados["modoISS"]
+    periodos = dict(linha.periodos or {})
+    periodos[periodo] = novo
+    linha.periodos = periodos
+    linha.save(update_fields=["periodos", "updated_at"])
+    return atual, novo
+
+
+@api_view(["GET", "PATCH"])
+@permission_classes(_PERM)
+def centro_faturamento(request, pk):
+    """Informe de faturamento do MÊS para todas as linhas de um centro.
+
+    GET  ?periodo=2026-06 → uma linha por linha de faturamento
+    PATCH {periodo, lancamentos: [{linha_id, bruto, descontos, …}, …]}
+    """
+    centro = CentroFaturamento.objects.filter(pk=pk).first()
+    if not centro:
+        return Response(status=404)
+
+    periodo = (request.data.get("periodo") if request.method == "PATCH"
+               else request.query_params.get("periodo")) or ""
+    if not _PERIODO_RE.match(periodo):
+        return Response({"detail": "Informe o período no formato AAAA-MM."}, status=400)
+
+    linhas = list(centro.linhas.select_related("sede", "setor_legado").order_by("ordem", "nome"))
+    por_id = {str(l.id): l for l in linhas}
+
+    if request.method == "PATCH":
+        itens = request.data.get("lancamentos") or []
+        if not isinstance(itens, list) or not itens:
+            return Response({"detail": "Nenhum lançamento informado."}, status=400)
+        for it in itens:
+            l = por_id.get(str(it.get("linha_id")))
+            if not l:
+                return Response({"detail": "Linha fora deste centro."}, status=400)
+            for campo in ("bruto", "descontos"):
+                if campo in it:
+                    try:
+                        v = float(it[campo] or 0)
+                    except (TypeError, ValueError):
+                        return Response({"detail": f"Valor inválido em {l.nome}."}, status=400)
+                    if v < 0:
+                        return Response({"detail": f"{l.nome}: valor não pode ser negativo."}, status=400)
+
+        espelhados, mudancas = set(), []
+        with transaction.atomic():
+            for it in itens:
+                l = por_id[str(it.get("linha_id"))]
+                antes, depois = _aplicar_faturamento(l, periodo, it)
+                if antes != depois:
+                    mudancas.append((l, antes, depois))
+                nome = _espelhar_no_setor_legado(l, periodo)
+                if nome:
+                    espelhados.add(nome)
+        for l, antes, depois in mudancas:
+            audit(request, "editar", "ef_linha", l.id,
+                  antes={"linha": l.nome, "centro": centro.nome, "periodo": periodo, "faturamento": antes},
+                  depois={"linha": l.nome, "centro": centro.nome, "periodo": periodo, "faturamento": depois})
+        return Response({"periodo": periodo, "alteradas": len(mudancas),
+                         "espelhado_em": sorted(espelhados)})
+
+    saida = []
+    for l in linhas:
+        f = (l.periodos or {}).get(periodo) or {}
+        saida.append({
+            "linha_id": str(l.id), "linha": l.nome, "area": l.area, "ativo": l.ativo,
+            "sede": l.sede.nome if l.sede_id else None,
+            "bruto": float(f.get("bruto") or 0),
+            "descontos": float(f.get("descontos") or 0),
+            "aliquotaLucroPresumido": float(f.get("aliquotaLucroPresumido") or 0.32),
+            "aliquotaISS": float(f.get("aliquotaISS") or 0.02),
+            "modoISS": f.get("modoISS") or "sociedade",
+            "profissionaisISS": float(f.get("profissionaisISS") or 0),
+            "lancado": bool(f.get("bruto")),
+        })
+    meses = sorted({per for l in linhas for per, f in (l.periodos or {}).items()
+                    if (f or {}).get("bruto")})
+    return Response({"centro": centro.nome, "periodo": periodo,
+                     "meses_lancados": meses, "linhas": saida})
+
+
+def _doc_fat_json(d):
+    return {"id": str(d.id), "linha_id": str(d.linha_id), "periodo": d.periodo,
+            "tipo": d.tipo, "tipo_label": d.get_tipo_display(),
+            "nome": d.nome_original, "tamanho": d.tamanho,
+            "descricao": d.descricao, "enviado_por": d.enviado_por,
+            "enviado_em": d.created_at.isoformat()}
+
+
+@api_view(["GET", "POST"])
+@permission_classes(_PERM)
+@parser_classes([MultiPartParser, FormParser])
+def linha_documentos(request, pk):
+    """Anexos do faturamento de um mês da linha (nota fiscal, medição…).
+
+    GET  ?periodo=2026-06 → lista
+    POST multipart {periodo, arquivo, tipo?, descricao?}
+    """
+    l = LinhaFaturamento.objects.select_related("centro").filter(pk=pk).first()
+    if not l:
+        return Response(status=404)
+
+    if request.method == "GET":
+        periodo = request.query_params.get("periodo") or ""
+        qs = l.documentos.all()
+        if periodo:
+            if not _PERIODO_RE.match(periodo):
+                return Response({"detail": "Informe o período no formato AAAA-MM."}, status=400)
+            qs = qs.filter(periodo=periodo)
+        return Response([_doc_fat_json(d) for d in qs])
+
+    periodo = request.data.get("periodo") or ""
+    if not _PERIODO_RE.match(periodo):
+        return Response({"detail": "Informe o período no formato AAAA-MM."}, status=400)
+    arq = request.FILES.get("arquivo")
+    if not arq:
+        return Response({"detail": "Anexe o arquivo."}, status=400)
+    limite = getattr(settings, "DP_UPLOAD_MAX_BYTES", 25 * 1024 * 1024)
+    if arq.size > limite:
+        return Response({"detail": f"Arquivo grande demais (máximo {limite // (1024*1024)} MB)."},
+                        status=400)
+    nome = arq.name.lower()
+    permitidos = (".pdf", ".xml", ".png", ".jpg", ".jpeg", ".xlsx", ".xls", ".csv")
+    if not nome.endswith(permitidos):
+        return Response({"detail": "Formato não aceito. Use PDF, XML, imagem ou planilha."},
+                        status=400)
+    if nome.endswith(".pdf"):
+        cabecalho = arq.read(5)
+        arq.seek(0)
+        if cabecalho[:4] != b"%PDF":
+            return Response({"detail": "O arquivo não parece um PDF válido."}, status=400)
+
+    tipo = request.data.get("tipo") or "nota"
+    if tipo not in dict(FaturamentoDocumento.TIPOS):
+        tipo = "outro"
+    doc = FaturamentoDocumento.objects.create(
+        linha=l, periodo=periodo, tipo=tipo, arquivo=arq,
+        nome_original=arq.name[:255], tamanho=arq.size,
+        descricao=(request.data.get("descricao") or "")[:200],
+        enviado_por=_quem(request),
+    )
+    audit(request, "anexar", "ef_linha", l.id,
+          depois={"linha": l.nome, "centro": l.centro.nome, "periodo": periodo,
+                  "documento": doc.nome_original, "tipo": doc.get_tipo_display(),
+                  "tamanho_kb": round(doc.tamanho / 1024)})
+    return Response(_doc_fat_json(doc), status=201)
+
+
+@api_view(["GET", "DELETE"])
+@permission_classes(_PERM)
+def faturamento_documento(request, pk):
+    """GET baixa (autenticado) · DELETE remove."""
+    doc = FaturamentoDocumento.objects.select_related("linha__centro").filter(pk=pk).first()
+    if not doc:
+        return Response({"detail": "Documento não encontrado."}, status=404)
+
+    if request.method == "DELETE":
+        audit(request, "excluir", "ef_linha", doc.linha_id,
+              antes={"linha": doc.linha.nome, "periodo": doc.periodo,
+                     "documento": doc.nome_original})
+        doc.arquivo.delete(save=False)
+        doc.delete()
+        return Response(status=204)
+
+    try:
+        f = doc.arquivo.open("rb")
+    except (FileNotFoundError, ValueError):
+        return Response({"detail": "Arquivo sumiu do disco — reenvie o documento."}, status=410)
+    resp = FileResponse(f)
+    resp["Content-Disposition"] = f'attachment; filename="{doc.nome_original}"'
+    resp["Access-Control-Expose-Headers"] = "Content-Disposition"
+    return resp

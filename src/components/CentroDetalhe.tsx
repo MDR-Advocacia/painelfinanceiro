@@ -25,6 +25,8 @@ import {
   type EfCentroDetalhe, abrirDetalheEquipe, estruturaApi, useSelecionadoId,
 } from "@/services/estrutura";
 import { useApp } from "@/contexts/AppContext";
+import { usePermissions } from "@/hooks/usePermissions";
+import InformeFaturamento from "@/components/InformeFaturamento";
 import { MONTH_NAMES } from "@/types/sector";
 
 const CORES = ["#1E7BFF", "#0A1940", "#27AE60", "#F39C12", "#8B5CF6", "#E74C3C", "#7FB5FF", "#14B8A6"];
@@ -42,6 +44,7 @@ function mesCurto(per: string) {
 
 export default function CentroDetalhe() {
   const { setView } = useApp();
+  const { podeEditar } = usePermissions();
   const [dados, setDados] = useState<EfCentroDetalhe | null>(null);
   const [erro, setErro] = useState(false);
   const centroId = useSelecionadoId();
@@ -129,6 +132,10 @@ export default function CentroDetalhe() {
           </CardContent>
         </Card>
       )}
+
+      {/* ── Informe de faturamento: onde a receita do mês é lançada ── */}
+      <InformeFaturamento centroId={dados.id} centroNome={dados.nome}
+                          podeEditar={podeEditar("estrutura")} />
 
       {/* ── Linhas ── */}
       <Card className="glass-card border-0">

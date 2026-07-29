@@ -99,6 +99,66 @@ export const estruturaApi = {
       method: "PATCH", headers: H(), body: JSON.stringify({ periodo, ...dados }),
     }).then((r) => j<{ periodo: string; faturamento: Record<string, number | string> }>(r)),
 
+  informeFaturamento: (centroId: string, periodo: string) =>
+    fetch(`${API_URL}/estrutura/centros/${centroId}/faturamento/?periodo=${periodo}`,
+          { headers: authHeaders() })
+      .then((r) => j<{ centro: string; periodo: string; meses_lancados: string[]; linhas: EfInformeLinha[] }>(r)),
+
+  lancarInforme: (centroId: string, periodo: string,
+                  lancamentos: { linha_id: string; bruto: number; descontos: number }[]) =>
+    fetch(`${API_URL}/estrutura/centros/${centroId}/faturamento/`, {
+      method: "PATCH", headers: H(), body: JSON.stringify({ periodo, lancamentos }),
+    }).then((r) => j<{ periodo: string; alteradas: number; espelhado_em: string[] }>(r)),
+
+  documentosDaLinha: (linhaId: string, periodo: string) =>
+    fetch(`${API_URL}/estrutura/linhas/${linhaId}/documentos/?periodo=${periodo}`,
+          { headers: authHeaders() })
+      .then((r) => j<EfDocumentoFaturamento[]>(r)),
+
+  /** Quantos anexos cada linha do centro tem no mês (pro badge da tabela). */
+  documentosDoCentro: async (centroId: string, periodo: string) => {
+    const info = await fetch(`${API_URL}/estrutura/centros/${centroId}/faturamento/?periodo=${periodo}`,
+                             { headers: authHeaders() })
+      .then((r) => j<{ linhas: EfInformeLinha[] }>(r));
+    const pares = await Promise.all(info.linhas.map(async (l) => {
+      const ds = await fetch(`${API_URL}/estrutura/linhas/${l.linha_id}/documentos/?periodo=${periodo}`,
+                             { headers: authHeaders() })
+        .then((r) => j<EfDocumentoFaturamento[]>(r)).catch(() => []);
+      return [l.linha_id, ds.length] as const;
+    }));
+    return Object.fromEntries(pares) as Record<string, number>;
+  },
+
+  anexarNoFaturamento: (linhaId: string, periodo: string, arquivo: File,
+                        tipo: string, descricao: string) => {
+    const fd = new FormData();
+    fd.append("periodo", periodo);
+    fd.append("arquivo", arquivo);
+    fd.append("tipo", tipo);
+    if (descricao) fd.append("descricao", descricao);
+    return fetch(`${API_URL}/estrutura/linhas/${linhaId}/documentos/`, {
+      method: "POST", headers: authHeaders(), body: fd,
+    }).then((r) => j<EfDocumentoFaturamento>(r));
+  },
+
+  baixarDocumento: async (doc: EfDocumentoFaturamento) => {
+    const r = await fetch(`${API_URL}/estrutura/faturamento-documentos/${doc.id}/`,
+                          { headers: authHeaders() });
+    if (!r.ok) throw new Error(`Não consegui baixar (erro ${r.status}).`);
+    const blob = await r.blob();
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url; a.download = doc.nome;
+    document.body.appendChild(a); a.click(); a.remove();
+    URL.revokeObjectURL(url);
+  },
+
+  removerDocumento: async (id: string) => {
+    const r = await fetch(`${API_URL}/estrutura/faturamento-documentos/${id}/`,
+                          { method: "DELETE", headers: authHeaders() });
+    if (!r.ok && r.status !== 204) throw new Error(`Erro ${r.status}`);
+  },
+
   sedeDetalhe: (id: string) =>
     fetch(`${API_URL}/estrutura/sedes/${id}/detalhe/`, { headers: authHeaders() })
       .then((r) => j<EfSedeDetalhe>(r)),
@@ -225,6 +285,18 @@ export interface EfFaturamentoLinha {
   periodo: string;
   faturamento: Record<string, number | string>;
   meses_lancados: string[];
+}
+
+export interface EfInformeLinha {
+  linha_id: string; linha: string; area: string; ativo: boolean; sede: string | null;
+  bruto: number; descontos: number;
+  aliquotaLucroPresumido: number; aliquotaISS: number;
+  modoISS: string; profissionaisISS: number; lancado: boolean;
+}
+export interface EfDocumentoFaturamento {
+  id: string; linha_id: string; periodo: string;
+  tipo: string; tipo_label: string; nome: string; tamanho: number;
+  descricao: string; enviado_por: string; enviado_em: string;
 }
 
 // ── Comunicação leve entre Sidebar e a tela (sem mexer no AppContext) ──

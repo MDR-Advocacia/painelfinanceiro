@@ -172,3 +172,43 @@ class Alocacao(models.Model):
     def __str__(self):
         destino = self.linha or self.centro
         return f"{self.equipe.nome} em {destino} ({self.percentual:g}%)"
+
+
+def _caminho_doc_faturamento(instance, filename):
+    """media/faturamento/<linha>/<periodo>/<arquivo>."""
+    return f"faturamento/{instance.linha_id}/{instance.periodo}/{filename}"
+
+
+class FaturamentoDocumento(models.Model):
+    """Comprovação do faturamento do mês (nota fiscal, medição, relatório).
+
+    Fica preso ao par LINHA + PERÍODO, que é a granularidade do lançamento.
+    Como no DP, o arquivo NUNCA é servido direto pelo nginx — o download passa
+    por endpoint autenticado, porque nota fiscal é documento do cliente.
+    """
+    TIPOS = [
+        ("nota", "Nota fiscal"),
+        ("medicao", "Relatório de medição"),
+        ("contrato", "Contrato / aditivo"),
+        ("comprovante", "Comprovante de pagamento"),
+        ("outro", "Outro documento"),
+    ]
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    linha = models.ForeignKey(LinhaFaturamento, on_delete=models.CASCADE,
+                              related_name="documentos")
+    periodo = models.CharField(max_length=7, help_text="AAAA-MM")
+    tipo = models.CharField(max_length=20, choices=TIPOS, default="nota")
+    arquivo = models.FileField(upload_to=_caminho_doc_faturamento)
+    nome_original = models.CharField(max_length=255)
+    tamanho = models.IntegerField(default=0)
+    descricao = models.CharField(max_length=200, blank=True, default="")
+    enviado_por = models.CharField(max_length=150, blank=True, default="")
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        db_table = "ef_faturamento_documentos"
+        ordering = ["-created_at"]
+        indexes = [models.Index(fields=["linha", "periodo"])]
+
+    def __str__(self):
+        return f"{self.linha.nome} {self.periodo} — {self.nome_original}"

@@ -93,6 +93,14 @@ class Cargo(models.Model):
     cargo enxerga o módulo. Admin (is_staff do Django) bypassa tudo. Cargos
     padrão são seedados na migration 0003 (Admin, Sócio, Supervisor,
     Departamento Pessoal, Financeiro) e o menu do ADM permite criar outros.
+
+    ⚠️ ARQUIVO MORTO (decidido em 2026-07-29). O faturamento passou a ser
+    lançado na LinhaFaturamento, dentro do centro de faturamento. Ninguém
+    escreve aqui pela interface: quem grava é `_espelhar_no_setor_legado`,
+    a partir da linha, só pra manter vivos os painéis antigos (Dashboard,
+    Projeções, Rentabilidade, Gestão Estratégica) que ainda leem daqui.
+    Quando esses quatro migrarem pra estrutura nova, o espelho sai e este
+    modelo vira histórico puro. NÃO adicionar tela de edição de volta.
     """
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     nome = models.CharField(max_length=100, unique=True)
