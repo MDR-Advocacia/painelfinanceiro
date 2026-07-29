@@ -599,8 +599,15 @@ class DpCompetenciaViewSet(viewsets.ViewSet):
         comp.fechada_por = _quem(request)
         comp.fechada_em = timezone.now()
         comp.save()
+        # CONGELA o retrato da operação: quem estava em qual equipe e como as
+        # equipes estavam alocadas. Sem isso, mexer no enquadramento hoje
+        # reescreveria a margem de um mês já fechado.
+        from .models_estrutura import congelar_competencia
+        n_pessoas, n_alocacoes = congelar_competencia(comp)
         audit(request, "fechar_competencia", "dp_competencia", comp.id,
-              depois={"fechada_por": comp.fechada_por})
+              depois={"fechada_por": comp.fechada_por,
+                      "foto_enquadramentos": n_pessoas,
+                      "foto_alocacoes": n_alocacoes})
         return Response(_comp_row(comp))
 
     @action(detail=True, methods=["post"])
@@ -616,6 +623,10 @@ class DpCompetenciaViewSet(viewsets.ViewSet):
         comp.fechada_por = ""
         comp.fechada_em = None
         comp.save()
+        # Reabriu: a foto sai e volta a valer o estado ao vivo — ela é tirada
+        # de novo no próximo fechamento.
+        from .models_estrutura import descongelar_competencia
+        descongelar_competencia(comp)
         audit(request, "reabrir_competencia", "dp_competencia", comp.id,
-              depois={"justificativa": just})
+              depois={"justificativa": just, "foto": "descongelada"})
         return Response(_comp_row(comp))

@@ -35,6 +35,98 @@ _PERM_CAD = [modulo_permission(read_any=["estrutura", "faturamento"], write="est
 _PERM_EQUIPE = [modulo_permission(read_any=["equipes"], write="estrutura-cadastro")]
 
 
+def _iss_sociedade(n_profissionais) -> float:
+    """ISS fixo da sociedade de advogados: faixa por profissional, bimestral →
+    mensal. Mesma tabela do painel antigo (calcISSSociedade)."""
+    n = int(n_profissionais or 0)
+    if n <= 0:
+        return 0.0
+    bimestral = 0.0
+    for i in range(1, n + 1):
+        if i <= 3:
+            bimestral += 452
+        elif i <= 6:
+            bimestral += 537
+        elif i <= 9:
+            bimestral += 622
+        elif i <= 12:
+            bimestral += 707
+        else:
+            bimestral += 792
+    return bimestral / 2
+
+
+def _impostos(fat: dict) -> dict:
+    """Carga tributária do mês da linha — porte fiel do calcImpostos do painel
+    antigo, pra estrutura e painel legado nunca divergirem.
+
+    ATENÇÃO: a base é o faturamento BRUTO, inclusive pra PIS/COFINS. É a regra
+    que já estava em produção; mudar isso é decisão fiscal, não de código.
+    """
+    fat = fat or {}
+    bruto = float(fat.get("bruto") or 0)
+    lucro_presumido = bruto * float(fat.get("aliquotaLucroPresumido") or 0)
+    irpj = lucro_presumido * 0.15
+    trimestral = lucro_presumido * 3
+    irpj_adicional = ((trimestral - 60000) * 0.10) / 3 if trimestral > 60000 else 0.0
+    csll = lucro_presumido * 0.09
+    pis = bruto * 0.0065
+    cofins = bruto * 0.03
+    if (fat.get("modoISS") or "percentual") == "sociedade":
+        iss = _iss_sociedade(fat.get("profissionaisISS"))
+    else:
+        iss = bruto * float(fat.get("aliquotaISS") or 0)
+    total = irpj + irpj_adicional + csll + pis + cofins + iss
+    return {"lucro_presumido": round(lucro_presumido, 2), "irpj": round(irpj, 2),
+            "irpj_adicional": round(irpj_adicional, 2), "csll": round(csll, 2),
+            "pis": round(pis, 2), "cofins": round(cofins, 2), "iss": round(iss, 2),
+            "total": round(total, 2)}
+
+
+def _receita(fat: dict) -> dict:
+    """Bruto, descontos e LÍQUIDO. O líquido é o que a margem usa — glosa do
+    cliente não é receita do escritório."""
+    fat = fat or {}
+    bruto = float(fat.get("bruto") or 0)
+    descontos = float(fat.get("descontos") or 0)
+    return {"bruto": round(bruto, 2), "descontos": round(descontos, 2),
+            "liquida": round(bruto - descontos, 2)}
+
+
+def _enquadramento_da_competencia(comp) -> dict:
+    """{colaborador_id: equipe_id} VIGENTE NAQUELE MÊS.
+
+    Mês fechado tem foto: usa a foto, senão a margem de um mês encerrado mudaria
+    toda vez que alguém trocasse de equipe. Mês aberto cai no estado ao vivo.
+    """
+    from .models import DpColaborador
+    from .models_estrutura import CompetenciaEnquadramento
+    foto = dict(CompetenciaEnquadramento.objects.filter(competencia=comp)
+                .values_list("colaborador_id", "equipe_id"))
+    if foto:
+        return foto
+    return dict(DpColaborador.objects.exclude(equipe_ref=None)
+                .values_list("id", "equipe_ref_id"))
+
+
+def _soma_percentual_por_equipe(comp) -> dict:
+    """{equipe_id: soma dos percentuais} vigente no mês — da foto, se houver.
+
+    É o denominador do rateio de CUSTO: equipe que atende N linhas tem a folha
+    distribuída na proporção das alocações. Com a foto, um mês fechado mantém
+    o rateio que valia na época.
+    """
+    from .models_estrutura import CompetenciaAlocacao
+    fonte = list(CompetenciaAlocacao.objects.filter(competencia=comp)
+                 .values("equipe_id", "percentual")) if comp else []
+    if not fonte:
+        fonte = list(Alocacao.objects.values("equipe_id", "percentual"))
+    soma = {}
+    for a in fonte:
+        soma[a["equipe_id"]] = soma.get(a["equipe_id"], 0) + (a["percentual"] or 0)
+    return soma
+
+
 def _ultimo_periodo(linhas) -> str | None:
     """Período mais recente COM RECEITA em alguma linha (ex.: '2026-06').
 
@@ -53,9 +145,7 @@ def _custo_por_equipe(ultima_fechada) -> dict:
     exata que a normalização funcionário→equipe permite."""
     if not ultima_fechada:
         return {}
-    from .models import DpColaborador
-    equipe_de = dict(DpColaborador.objects.exclude(equipe_ref=None)
-                     .values_list("id", "equipe_ref_id"))
+    equipe_de = _enquadramento_da_competencia(ultima_fechada)
     saida = {}
     for it in (DpFolhaItem.objects.filter(competencia=ultima_fechada)
                .values("colaborador_id", "custo_total", "total_pagar")):
@@ -115,9 +205,7 @@ def estrutura(request):
     # distribuído na PROPORÇÃO das alocações — senão a mesma folha entraria
     # inteira em cada cliente (dupla contagem: foi o que a primeira versão
     # desta tela mostrou com Ativos Réu em Ativos S.A. E em Banese).
-    soma_por_equipe = {}
-    for a in Alocacao.objects.all():
-        soma_por_equipe[a.equipe_id] = soma_por_equipe.get(a.equipe_id, 0) + (a.percentual or 0)
+    soma_por_equipe = _soma_percentual_por_equipe(fechada)
 
     def json_alocacao(a):
         # 1ª escolha: folha das pessoas ENQUADRADAS na equipe (normalização);
@@ -148,12 +236,18 @@ def estrutura(request):
 
     def json_linha(l):
         f = (l.periodos or {}).get(per, {}) if per else {}
+        r = _receita(f)
+        imp = _impostos(f)
         alocs = sorted(l.alocacoes.all(), key=lambda a: -a.percentual)
         return {
             "id": str(l.id), "nome": l.nome, "area": l.area, "ativo": l.ativo,
             "sede": l.sede.nome if l.sede_id else None,
             "sede_id": str(l.sede_id) if l.sede_id else None,
-            "receita_bruta": (f or {}).get("bruto", 0) or 0,
+            "receita_bruta": r["bruto"],
+            "descontos": r["descontos"],
+            "receita_liquida": r["liquida"],
+            "impostos": imp["total"],
+            "impostos_detalhe": imp,
             "soma_percentual": round(sum(a.percentual or 0 for a in alocs), 2),
             "alocacoes": [json_alocacao(a) for a in alocs],
         }
@@ -189,7 +283,10 @@ def estrutura(request):
         bloco = {
             "id": str(c.id), "nome": c.nome, "tipo": c.tipo,
             "linhas": ls, "alocacoes": diretas, "sedes": sedes_do_centro,
-            "receita_total": round(sum(l["receita_bruta"] for l in ls), 2),
+            "receita_total": round(sum(l["receita_liquida"] for l in ls), 2),
+            "receita_bruta_total": round(sum(l["receita_bruta"] for l in ls), 2),
+            "descontos_total": round(sum(l["descontos"] for l in ls), 2),
+            "impostos_total": round(sum(l["impostos"] for l in ls), 2),
             "custo_total": round(sum((a["custo_total"] or 0) for l in ls for a in l["alocacoes"])
                                  + sum((a["custo_total"] or 0) for a in diretas), 2),
         }
@@ -201,6 +298,7 @@ def estrutura(request):
     por_sede = {}
     for s_ in Sede.objects.all():
         por_sede[str(s_.id)] = {"id": str(s_.id), "nome": s_.nome, "receita": 0.0,
+                                "impostos": 0.0,
                                 "custo_operacional": 0.0, "custo_infra": 0.0,
                                 "linhas": 0, "equipes": set()}
     for bloco in saida["centros"]:
@@ -208,7 +306,8 @@ def estrutura(request):
             if not l["sede_id"] or l["sede_id"] not in por_sede:
                 continue
             d = por_sede[l["sede_id"]]
-            d["receita"] = round(d["receita"] + (l["receita_bruta"] or 0), 2)
+            d["receita"] = round(d["receita"] + (l["receita_liquida"] or 0), 2)
+            d["impostos"] = round(d["impostos"] + (l["impostos"] or 0), 2)
             d["linhas"] += 1
             for a in l["alocacoes"]:
                 d["custo_operacional"] = round(d["custo_operacional"] + (a["custo_total"] or 0), 2)
@@ -221,7 +320,7 @@ def estrutura(request):
                     d["custo_infra"] + bloco["custo_total"] * (r["percentual"] or 0) / 100, 2)
     saida["por_sede"] = []
     for d in sorted(por_sede.values(), key=lambda x: -x["receita"]):
-        custo = round(d["custo_operacional"] + d["custo_infra"], 2)
+        custo = round(d["custo_operacional"] + d["custo_infra"] + d["impostos"], 2)
         saida["por_sede"].append({
             **{k: v for k, v in d.items() if k != "equipes"},
             "equipes": len(d["equipes"]),
@@ -535,9 +634,7 @@ def centro_detalhe(request, pk):
     comp, custo_parcial = _competencia_custo()
     custo_cc = _custo_por_cc(comp)
     custo_eq = _custo_por_equipe(comp)
-    soma_por_equipe = {}
-    for a in Alocacao.objects.all():
-        soma_por_equipe[a.equipe_id] = soma_por_equipe.get(a.equipe_id, 0) + (a.percentual or 0)
+    soma_por_equipe = _soma_percentual_por_equipe(comp)
 
     def custo_alocacao(a):
         base = custo_eq.get(str(a.equipe_id))
@@ -579,11 +676,18 @@ def centro_detalhe(request, pk):
             alocs.append({"id": str(a.id), "equipe_id": str(a.equipe_id),
                           "equipe": a.equipe.nome, "percentual": a.percentual,
                           "custo_total": custo, "a_pagar": pagar, "pessoas": pessoas})
-        receita_ult = round((l.periodos or {}).get(ult, {}).get("bruto", 0) or 0, 2) if ult else 0
+        f_ult = (l.periodos or {}).get(ult) or {} if ult else {}
+        r_ult = _receita(f_ult)
+        imp_ult = _impostos(f_ult)
+        # receita do card = LÍQUIDA (glosa do cliente não é receita nossa)
+        receita_ult = r_ult["liquida"]
         saida_linhas.append({
             "id": str(l.id), "nome": l.nome, "area": l.area, "ativo": l.ativo,
             "receita_ultimo": receita_ult,
-            "receita_acumulada": round(sum((f or {}).get("bruto", 0) or 0
+            "receita_bruta": r_ult["bruto"],
+            "descontos": r_ult["descontos"],
+            "impostos": imp_ult["total"],
+            "receita_acumulada": round(sum(_receita(f)["liquida"]
                                            for f in (l.periodos or {}).values()), 2),
             "soma_percentual": round(sum(a["percentual"] or 0 for a in alocs), 2),
             "alocacoes": alocs,
@@ -615,6 +719,9 @@ def centro_detalhe(request, pk):
         d["pessoas"] = pessoas_por_eq.get(k, 0)
 
     receita_ult_total = round(sum(l["receita_ultimo"] for l in saida_linhas), 2)
+    impostos_total = round(sum(l["impostos"] for l in saida_linhas), 2)
+    descontos_total = round(sum(l["descontos"] for l in saida_linhas), 2)
+    bruta_total = round(sum(l["receita_bruta"] for l in saida_linhas), 2)
     return Response({
         "id": str(c.id), "nome": c.nome, "tipo": c.tipo,
         "periodo": ult, "meses": meses, "series": series,
@@ -622,10 +729,14 @@ def centro_detalhe(request, pk):
         "alocacoes_diretas": diretas,
         "equipes": sorted(equipes_do_centro.values(), key=lambda x: -x["custo_total"]),
         "receita_ultimo": receita_ult_total,
+        "receita_bruta": bruta_total,
+        "descontos": descontos_total,
+        "impostos": impostos_total,
         "receita_acumulada": round(sum(l["receita_acumulada"] for l in saida_linhas), 2),
         "custo_total": round(custo_centro, 2),
         "a_pagar": round(pagar_centro, 2),
-        "margem": round(receita_ult_total - custo_centro, 2),
+        # margem = líquida − impostos − pessoal
+        "margem": round(receita_ult_total - impostos_total - custo_centro, 2),
         "competencia_custo": f"{comp.mes:02d}/{comp.ano}" if comp else None,
         "custo_parcial": custo_parcial,
     })
@@ -789,9 +900,7 @@ def sede_detalhe(request, pk):
     comp, custo_parcial = _competencia_custo()
     custo_cc = _custo_por_cc(comp)
     custo_eq = _custo_por_equipe(comp)
-    soma_por_equipe = {}
-    for a in Alocacao.objects.all():
-        soma_por_equipe[a.equipe_id] = soma_por_equipe.get(a.equipe_id, 0) + (a.percentual or 0)
+    soma_por_equipe = _soma_percentual_por_equipe(comp)
 
     def custo_alocacao(a):
         base = custo_eq.get(str(a.equipe_id))
@@ -810,12 +919,12 @@ def sede_detalhe(request, pk):
                     if (f or {}).get("bruto")})
     ult = meses[-1] if meses else None
     series = [{"mes": m,
-               "total": round(sum((l.periodos or {}).get(m, {}).get("bruto", 0) or 0
+               "total": round(sum(_receita((l.periodos or {}).get(m) or {})["liquida"]
                                   for l in linhas), 2)}
               for m in meses]
 
     por_centro, equipes_sede = {}, {}
-    custo_oper = pagar_oper = 0.0
+    custo_oper = pagar_oper = impostos_sede = 0.0
     for l in linhas:
         alocs = []
         for a in sorted(l.alocacoes.all(), key=lambda x: -x.percentual):
@@ -830,14 +939,18 @@ def sede_detalhe(request, pk):
             alocs.append({"id": str(a.id), "equipe_id": str(a.equipe_id),
                           "equipe": a.equipe.nome, "percentual": a.percentual,
                           "custo_total": custo})
-        receita = round((l.periodos or {}).get(ult, {}).get("bruto", 0) or 0, 2) if ult else 0
+        f_ult = (l.periodos or {}).get(ult) or {} if ult else {}
+        receita = _receita(f_ult)["liquida"]
+        imposto_linha = _impostos(f_ult)["total"]
+        impostos_sede += imposto_linha
         bloco = por_centro.setdefault(str(l.centro_id), {
             "id": str(l.centro_id), "nome": l.centro.nome, "receita": 0.0, "linhas": []})
         bloco["receita"] = round(bloco["receita"] + receita, 2)
         bloco["linhas"].append({"id": str(l.id), "nome": l.nome, "area": l.area,
                                 "receita": receita,
+                                "impostos": imposto_linha,
                                 "receita_acumulada": round(
-                                    sum((f or {}).get("bruto", 0) or 0
+                                    sum(_receita(f)["liquida"]
                                         for f in (l.periodos or {}).values()), 2),
                                 "alocacoes": alocs})
 
@@ -881,7 +994,8 @@ def sede_detalhe(request, pk):
     custo_estrutura = round(sum(float(i.get("valor") or 0) for i in itens_estrutura), 2)
 
     receita = round(sum(b["receita"] for b in por_centro.values()), 2)
-    custo_total = round(custo_oper + custo_infra + custo_estrutura, 2)
+    impostos_sede = round(impostos_sede, 2)
+    custo_total = round(custo_oper + custo_infra + custo_estrutura + impostos_sede, 2)
     return Response({
         "id": str(sede.id), "nome": sede.nome,
         "periodo": ult, "meses": meses, "series": series,
@@ -892,6 +1006,7 @@ def sede_detalhe(request, pk):
         "totais": {
             "receita": receita,
             "custo_operacional": round(custo_oper, 2),
+            "impostos": impostos_sede,
             "a_pagar": round(pagar_oper, 2),
             "custo_infra": round(custo_infra, 2),
             "custo_estrutura": custo_estrutura,

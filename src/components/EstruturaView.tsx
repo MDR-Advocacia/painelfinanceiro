@@ -93,12 +93,19 @@ export function EstruturaView() {
 
   const resumo = useMemo(() => {
     if (!dados) return null;
+    // receita_total já vem LÍQUIDA (bruta − descontos). A margem desce também
+    // os impostos: sem isso a tela mostrava ~14 p.p. a mais do que existe.
     const receita = dados.centros.reduce((a, c) => a + c.receita_total, 0);
+    const bruta = dados.centros.reduce((a, c) => a + c.receita_bruta_total, 0);
+    const descontos = dados.centros.reduce((a, c) => a + c.descontos_total, 0);
+    const impostos = dados.centros.reduce((a, c) => a + c.impostos_total, 0);
     const custo = dados.centros.reduce((a, c) => a + c.custo_total, 0)
       + dados.infraestrutura.reduce((a, c) => a + c.custo_total, 0);
+    const margem = receita - impostos - custo;
     const linhas = dados.centros.flatMap((c) => c.linhas);
     const desbalanceadas = linhas.filter((l) => l.alocacoes.length > 0 && Math.abs(l.soma_percentual - 100) > 0.5);
-    return { receita, custo, linhas: linhas.length, desbalanceadas };
+    return { receita, bruta, descontos, impostos, custo, margem,
+             linhas: linhas.length, desbalanceadas };
   }, [dados]);
 
   if (loading || !dados || !resumo) {
@@ -129,9 +136,17 @@ export function EstruturaView() {
       />
 
       <div className="grid grid-cols-2 gap-4 md:grid-cols-4">
-        <Kpi icone={Coins} rotulo="Receita mapeada" valor={formatCurrency(resumo.receita)} />
+        <Kpi icone={Coins} rotulo="Receita líquida" valor={formatCurrency(resumo.receita)}
+             sub={resumo.descontos > 0
+               ? `bruta ${formatCurrency(resumo.bruta)} − ${formatCurrency(resumo.descontos)} de glosas`
+               : `bruta ${formatCurrency(resumo.bruta)} · sem glosas`} />
+        <Kpi icone={Receipt} rotulo="Impostos" valor={formatCurrency(resumo.impostos)}
+             sub="IRPJ, CSLL, PIS, COFINS e ISS" tom="negativo" corValor="text-destructive" />
         <Kpi icone={Users} rotulo="Custo de pessoal alocado" valor={formatCurrency(resumo.custo)} tom="negativo" corValor="text-destructive" />
-        <Kpi icone={Network} rotulo="Linhas de faturamento" valor={String(resumo.linhas)} />
+        <Kpi icone={Network} rotulo="Margem" valor={formatCurrency(resumo.margem)}
+             sub={resumo.receita > 0 ? `${(resumo.margem / resumo.receita * 100).toFixed(1)}% da líquida` : undefined}
+             tom={resumo.margem >= 0 ? "positivo" : "negativo"}
+             corValor={resumo.margem >= 0 ? "text-success" : "text-destructive"} />
         <Kpi icone={AlertTriangle} rotulo="Linhas fora de 100%" valor={String(resumo.desbalanceadas.length)}
              tom={resumo.desbalanceadas.length ? "atencao" : "positivo"}
              corValor={resumo.desbalanceadas.length ? "text-warning" : "text-success"} />
@@ -263,7 +278,8 @@ function CentroCard({ centro, equipes, editar, cadastrar, onMudou, aoAbrirDetalh
   centro: EfCentro; equipes: EfEquipe[]; editar: boolean; cadastrar: boolean; onMudou: () => void;
   aoAbrirDetalhe: (v: any) => void; sedes: { id: string; nome: string }[];
 }) {
-  const margem = centro.receita_total - centro.custo_total;
+  // receita_total já é LÍQUIDA; a margem do card desce imposto também
+  const margem = centro.receita_total - centro.impostos_total - centro.custo_total;
   const [novaLinha, setNovaLinha] = useState(false);
   return (
     <Card id={`centro-${centro.id}`} className="glass-card scroll-mt-6 border-0 transition-shadow">
@@ -307,7 +323,7 @@ function CentroCard({ centro, equipes, editar, cadastrar, onMudou, aoAbrirDetalh
             )}
             <div className="font-mono-numbers text-sm font-bold">{formatCurrency(centro.receita_total)}</div>
             <div className="text-[0.65rem] text-muted-foreground">
-              custo {formatCurrency(centro.custo_total)} ·{" "}
+              custo {formatCurrency(centro.custo_total)} · imp {formatCurrency(centro.impostos_total)} ·{" "}
               <span className={margem >= 0 ? "text-success" : "text-destructive"}>
                 {centro.receita_total > 0 ? `${((margem / centro.receita_total) * 100).toFixed(1)}%` : "—"}
               </span>

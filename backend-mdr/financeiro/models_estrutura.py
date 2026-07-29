@@ -212,3 +212,70 @@ class FaturamentoDocumento(models.Model):
 
     def __str__(self):
         return f"{self.linha.nome} {self.periodo} — {self.nome_original}"
+
+
+# ═══════════ FOTO DA COMPETÊNCIA (congelamento no fechamento) ═══════════
+# A margem de um mês fechado não pode mudar porque alguém trocou de equipe
+# hoje. Ao FECHAR a competência tiramos uma foto de duas coisas:
+#   1) onde cada pessoa estava enquadrada;
+#   2) como as equipes estavam alocadas (linha/centro e percentual).
+# A partir daí, todo cálculo daquele mês lê a foto. Reabrir a competência
+# apaga a foto — ela é tirada de novo no próximo fechamento.
+
+class CompetenciaEnquadramento(models.Model):
+    """Onde a pessoa estava quando o mês fechou."""
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    competencia = models.ForeignKey("financeiro.DpCompetencia", on_delete=models.CASCADE,
+                                    related_name="foto_enquadramentos")
+    colaborador = models.ForeignKey("financeiro.DpColaborador", on_delete=models.CASCADE,
+                                    related_name="fotos_enquadramento")
+    equipe = models.ForeignKey(Equipe, on_delete=models.PROTECT,
+                               related_name="fotos_enquadramento")
+
+    class Meta:
+        db_table = "ef_foto_enquadramentos"
+        constraints = [models.UniqueConstraint(fields=["competencia", "colaborador"],
+                                               name="uq_foto_enq_comp_colab")]
+
+
+class CompetenciaAlocacao(models.Model):
+    """Como a equipe estava alocada quando o mês fechou."""
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    competencia = models.ForeignKey("financeiro.DpCompetencia", on_delete=models.CASCADE,
+                                    related_name="foto_alocacoes")
+    equipe = models.ForeignKey(Equipe, on_delete=models.PROTECT, related_name="fotos_alocacao")
+    linha = models.ForeignKey(LinhaFaturamento, on_delete=models.SET_NULL, null=True, blank=True,
+                              related_name="fotos_alocacao")
+    centro = models.ForeignKey(CentroFaturamento, on_delete=models.SET_NULL, null=True, blank=True,
+                               related_name="fotos_alocacao")
+    percentual = models.FloatField(default=0)
+
+    class Meta:
+        db_table = "ef_foto_alocacoes"
+
+
+def congelar_competencia(competencia):
+    """Tira a foto do enquadramento e das alocações. Idempotente."""
+    from .models import DpColaborador
+    CompetenciaEnquadramento.objects.filter(competencia=competencia).delete()
+    CompetenciaAlocacao.objects.filter(competencia=competencia).delete()
+    CompetenciaEnquadramento.objects.bulk_create([
+        CompetenciaEnquadramento(competencia=competencia, colaborador_id=cid, equipe_id=eid)
+        for cid, eid in DpColaborador.objects.exclude(equipe_ref=None)
+                                             .values_list("id", "equipe_ref_id")
+    ])
+    CompetenciaAlocacao.objects.bulk_create([
+        CompetenciaAlocacao(competencia=competencia, equipe_id=a.equipe_id,
+                            linha_id=a.linha_id, centro_id=a.centro_id,
+                            percentual=a.percentual or 0)
+        for a in Alocacao.objects.all()
+    ])
+    return (CompetenciaEnquadramento.objects.filter(competencia=competencia).count(),
+            CompetenciaAlocacao.objects.filter(competencia=competencia).count())
+
+
+def descongelar_competencia(competencia):
+    """Reabriu o mês: a foto sai e volta a valer o estado ao vivo."""
+    n1 = CompetenciaEnquadramento.objects.filter(competencia=competencia).delete()[0]
+    n2 = CompetenciaAlocacao.objects.filter(competencia=competencia).delete()[0]
+    return n1, n2

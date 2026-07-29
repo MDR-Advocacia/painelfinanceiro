@@ -8,9 +8,15 @@ export interface EfAlocacao {
   percentual: number; centro_custo: string | null;
   custo_total: number | null; a_pagar: number | null; pessoas: number | null;
 }
+export interface EfImpostos {
+  lucro_presumido: number; irpj: number; irpj_adicional: number; csll: number;
+  pis: number; cofins: number; iss: number; total: number;
+}
 export interface EfLinha {
   id: string; nome: string; area: "passivo" | "credito" | "especializada";
-  ativo: boolean; receita_bruta: number;
+  ativo: boolean;
+  receita_bruta: number; descontos: number; receita_liquida: number;
+  impostos: number; impostos_detalhe: EfImpostos;
   sede: string | null; sede_id: string | null;
   soma_percentual: number; alocacoes: EfAlocacao[];
 }
@@ -18,14 +24,17 @@ export interface EfSedeRateio {
   id?: string; sede: string; sede_id: string; percentual?: number;
 }
 export interface EfPorSede {
-  id: string; nome: string; receita: number;
+  id: string; nome: string; receita: number; impostos: number;
   custo_operacional: number; custo_infra: number; custo_total: number;
   margem: number; linhas: number; equipes: number;
 }
 export interface EfCentro {
   id: string; nome: string; tipo: "faturamento" | "infraestrutura";
   linhas: EfLinha[]; alocacoes: EfAlocacao[]; sedes: EfSedeRateio[];
-  receita_total: number; custo_total: number;
+  /** receita LÍQUIDA (bruta − descontos) — é o que a margem usa */
+  receita_total: number;
+  receita_bruta_total: number; descontos_total: number; impostos_total: number;
+  custo_total: number;
 }
 export interface EfEquipe {
   id: string; nome?: string; equipe?: string; slug: string; grupo: string;
