@@ -1,6 +1,6 @@
 import React, { createContext, useContext, useState, useEffect, useCallback, useRef } from 'react';
 import type { Setor, TipoSetor, PeriodoData, ViewMode, Sede, CustoItem, VpdConfig } from '@/types/sector';
-import { createDefaultSetor, createDefaultPeriodoData, getCurrentPeriodo, createDefaultSede } from '@/types/sector';
+import { createDefaultSetor, createDefaultPeriodoData, getPeriodoAnaliseDefault, createDefaultSede } from '@/types/sector';
 import { useAuth, authHeaders, clearSessionAndReload } from '@/hooks/useAuth';
 import { toast } from "sonner";
 import { getVpdValor } from '@/utils/calculations';
@@ -70,7 +70,8 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
   const [vpdConfigs, setVpdConfigs] = useState<VpdConfig[]>([]);
   const [activeSetorId, setActiveSetorId] = useState<string | null>(null);
   const [activeSedeId, setActiveSedeId] = useState<string | null>(null);
-  const [periodoAtivo, setPeriodoAtivo] = useState(getCurrentPeriodo());
+  // Abre sempre no último mês fechado — o corrente ainda está em curso.
+  const [periodoAtivo, setPeriodoAtivo] = useState(getPeriodoAnaliseDefault());
   const [view, setView] = useState<AppState['view']>('dashboard');
   const [viewMode, setViewMode] = useState<ViewMode>('mensal');
   const [loading, setLoading] = useState(true);

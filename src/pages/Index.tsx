@@ -11,6 +11,7 @@ import { StrategicConfig } from "@/components/StrategicConfig";
 import Pessoal from "./Pessoal";
 import EstruturaView from "@/components/EstruturaView";
 import CentroDetalhe from "@/components/CentroDetalhe";
+import SedeDetalhe from "@/components/SedeDetalhe";
 import EquipeDetalhe from "@/components/EquipeDetalhe";
 import AdminEstrutura from "@/components/AdminEstrutura";
 import { SaveIndicator } from "@/components/SaveIndicator";
@@ -28,6 +29,7 @@ const VIEW_MODULO: Record<string, string> = {
   estrutura: "estrutura",
   "estrutura-centro": "estrutura",
   "estrutura-equipe": "estrutura",
+  "estrutura-sede": "sedes",
   "estrutura-admin": "estrutura",
   sede: "sedes",
   setor: "setores",
@@ -103,6 +105,7 @@ const MainContent = () => {
           {view === "estrutura" && <EstruturaView />}
           {view === "estrutura-centro" && <CentroDetalhe />}
           {view === "estrutura-equipe" && <EquipeDetalhe />}
+          {view === "estrutura-sede" && <SedeDetalhe />}
           {view === "estrutura-admin" && <AdminEstrutura />}
         </>
       )}

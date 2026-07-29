@@ -145,6 +145,23 @@ export function getCurrentPeriodo(): string {
   return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
 }
 
+/** Dia do mês em que o mês anterior passa a ser considerado fechado. */
+export const DIA_FECHAMENTO = 6;
+
+/**
+ * Período padrão dos painéis analíticos: o último mês FECHADO.
+ *
+ * O mês corrente nunca é o padrão — ele ainda está em curso e mostraria
+ * faturamento pela metade. Vale o mês anterior; mas nos primeiros dias
+ * (antes do dia 6) nem ele fechou de verdade, então recua mais um.
+ * Ex.: 29/jul → junho · 03/ago → junho · 06/ago → julho.
+ */
+export function getPeriodoAnaliseDefault(hoje: Date = new Date()): string {
+  const d = new Date(hoje.getFullYear(), hoje.getMonth() - 1, 1);
+  if (hoje.getDate() < DIA_FECHAMENTO) d.setMonth(d.getMonth() - 1);
+  return formatPeriodoKey(d);
+}
+
 export function formatPeriodoKey(date: Date): string {
   return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}`;
 }

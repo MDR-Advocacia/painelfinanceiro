@@ -36,7 +36,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { ThemeToggle } from "@/components/ThemeToggle";
 import { PainelLogo } from "@/components/BrandMark";
-import {
+import { abrirDetalheSede,
   type EfEquipe, type EfEstrutura, EF_EVENTOS, abrirDetalheCentro,
   abrirDetalheEquipe, estruturaApi,
 } from "@/services/estrutura";
@@ -191,10 +191,10 @@ export function Sidebar() {
                     key={sede.id}
                     role="button"
                     tabIndex={0}
-                    data-active={sede.id === activeSedeId && view === "sede"}
+                    data-active={sede.id === activeSedeId && (view === "sede" || view === "estrutura-sede")}
                     className="nav-link group cursor-pointer"
-                    onClick={() => setActiveSede(sede.id)}
-                    onKeyDown={(e) => e.key === "Enter" && setActiveSede(sede.id)}
+                    onClick={() => { setActiveSede(sede.id); abrirDetalheSede(sede.id, setView); }}
+                    onKeyDown={(e) => { if (e.key === "Enter") { setActiveSede(sede.id); abrirDetalheSede(sede.id, setView); } }}
                   >
                     <span className="nav-ico"><Building className="h-full w-full" strokeWidth={1.8} /></span>
                     <span className="flex-1 truncate">{sede.nome}</span>

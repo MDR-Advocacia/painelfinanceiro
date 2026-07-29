@@ -1,6 +1,9 @@
 import { Button } from "@/components/ui/button";
 import { ChevronLeft, ChevronRight } from "lucide-react";
-import { MONTH_NAMES } from "@/types/sector";
+import {
+  Tooltip, TooltipContent, TooltipProvider, TooltipTrigger,
+} from "@/components/ui/tooltip";
+import { MONTH_NAMES, getPeriodoAnaliseDefault } from "@/types/sector";
 
 interface PeriodSelectorProps {
   value: string;
@@ -15,14 +18,29 @@ export function PeriodSelector({ value, onChange }: PeriodSelectorProps) {
     onChange(`${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`);
   };
 
+  // Meses acima do último fechado ainda estão em curso — o número exibido
+  // ali é parcial, então avisamos em vez de deixar o operador concluir errado.
+  const emCurso = value > getPeriodoAnaliseDefault();
+
   return (
     <div className="flex items-center gap-1">
       <Button variant="ghost" size="icon" className="h-8 w-8" onClick={() => navigate(-1)}>
         <ChevronLeft className="w-4 h-4" />
       </Button>
-      <span className="font-heading text-sm font-medium min-w-[150px] text-center">
-        {MONTH_NAMES[month - 1]} {year}
-      </span>
+      <TooltipProvider>
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <span className={`font-heading min-w-[150px] text-center text-sm font-medium ${emCurso ? "text-warning" : ""}`}>
+              {MONTH_NAMES[month - 1]} {year}{emCurso && " *"}
+            </span>
+          </TooltipTrigger>
+          <TooltipContent>
+            {emCurso
+              ? "Mês ainda em curso — os valores estão parciais."
+              : "Mês fechado."}
+          </TooltipContent>
+        </Tooltip>
+      </TooltipProvider>
       <Button variant="ghost" size="icon" className="h-8 w-8" onClick={() => navigate(1)}>
         <ChevronRight className="w-4 h-4" />
       </Button>

@@ -751,3 +751,138 @@ def centro_sede_rateio(request, pk):
 def sedes_lista(request):
     """Sedes cadastradas (pro seletor da linha e do rateio)."""
     return Response([{"id": str(s.id), "nome": s.nome} for s in Sede.objects.all()])
+
+
+@api_view(["GET"])
+@permission_classes(_PERM)
+def sede_detalhe(request, pk):
+    """A página da sede: receita das linhas operadas ali, custo das equipes,
+    infraestrutura rateada, custos de estrutura (patrimônio) e as pessoas."""
+    from .models import DpColaborador
+
+    sede = Sede.objects.filter(pk=pk).first()
+    if not sede:
+        return Response(status=404)
+
+    linhas = list(LinhaFaturamento.objects.filter(sede=sede)
+                  .select_related("centro")
+                  .prefetch_related("alocacoes__equipe__centro_custo"))
+
+    comp, custo_parcial = _competencia_custo()
+    custo_cc = _custo_por_cc(comp)
+    custo_eq = _custo_por_equipe(comp)
+    soma_por_equipe = {}
+    for a in Alocacao.objects.all():
+        soma_por_equipe[a.equipe_id] = soma_por_equipe.get(a.equipe_id, 0) + (a.percentual or 0)
+
+    def custo_alocacao(a):
+        base = custo_eq.get(str(a.equipe_id))
+        if not base:
+            cc = a.equipe.centro_custo
+            base = custo_cc.get(cc.nome) if cc else None
+        if not base:
+            return 0.0, 0.0, 0
+        soma = soma_por_equipe.get(a.equipe_id) or 0
+        fator = ((a.percentual or 0) / soma) if soma else 0.0
+        return (round(base["custo_total"] * fator, 2),
+                round(base["a_pagar"] * fator, 2), base["pessoas"])
+
+    # série mensal da sede + linhas por centro
+    meses = sorted({per for l in linhas for per, f in (l.periodos or {}).items()
+                    if (f or {}).get("bruto")})
+    ult = meses[-1] if meses else None
+    series = [{"mes": m,
+               "total": round(sum((l.periodos or {}).get(m, {}).get("bruto", 0) or 0
+                                  for l in linhas), 2)}
+              for m in meses]
+
+    por_centro, equipes_sede = {}, {}
+    custo_oper = pagar_oper = 0.0
+    for l in linhas:
+        alocs = []
+        for a in sorted(l.alocacoes.all(), key=lambda x: -x.percentual):
+            custo, pagar, pessoas = custo_alocacao(a)
+            custo_oper += custo
+            pagar_oper += pagar
+            eqd = equipes_sede.setdefault(str(a.equipe_id), {
+                "id": str(a.equipe_id), "nome": a.equipe.nome, "grupo": a.equipe.grupo,
+                "custo_total": 0.0, "linhas": []})
+            eqd["custo_total"] = round(eqd["custo_total"] + custo, 2)
+            eqd["linhas"].append(l.nome)
+            alocs.append({"id": str(a.id), "equipe_id": str(a.equipe_id),
+                          "equipe": a.equipe.nome, "percentual": a.percentual,
+                          "custo_total": custo})
+        receita = round((l.periodos or {}).get(ult, {}).get("bruto", 0) or 0, 2) if ult else 0
+        bloco = por_centro.setdefault(str(l.centro_id), {
+            "id": str(l.centro_id), "nome": l.centro.nome, "receita": 0.0, "linhas": []})
+        bloco["receita"] = round(bloco["receita"] + receita, 2)
+        bloco["linhas"].append({"id": str(l.id), "nome": l.nome, "area": l.area,
+                                "receita": receita,
+                                "receita_acumulada": round(
+                                    sum((f or {}).get("bruto", 0) or 0
+                                        for f in (l.periodos or {}).values()), 2),
+                                "alocacoes": alocs})
+
+    # infraestrutura rateada pra esta sede
+    infra = []
+    custo_infra = 0.0
+    for cs in CentroSede.objects.filter(sede=sede).select_related("centro"):
+        c = cs.centro
+        total = 0.0
+        for a in c.alocacoes.select_related("equipe__centro_custo"):
+            total += custo_alocacao(a)[0]
+        for l in c.linhas.prefetch_related("alocacoes__equipe__centro_custo"):
+            for a in l.alocacoes.all():
+                total += custo_alocacao(a)[0]
+        fatia = round(total * (cs.percentual or 0) / 100, 2)
+        custo_infra += fatia
+        infra.append({"id": str(c.id), "nome": c.nome, "percentual": cs.percentual,
+                      "custo_centro": round(total, 2), "fatia": fatia})
+
+    # pessoas das equipes que operam na sede (pelo enquadramento do DP)
+    ids_eq = list(equipes_sede.keys())
+    pessoas_total = 0
+    por_regime = {}
+    if ids_eq:
+        for r in (DpColaborador.objects.filter(status="ativo", equipe_ref_id__in=ids_eq)
+                  .values("equipe_ref_id", "regime")):
+            pessoas_total += 1
+            por_regime[r["regime"]] = por_regime.get(r["regime"], 0) + 1
+        contagem = {}
+        for r in (DpColaborador.objects.filter(status="ativo", equipe_ref_id__in=ids_eq)
+                  .values("equipe_ref_id")):
+            k = str(r["equipe_ref_id"])
+            contagem[k] = contagem.get(k, 0) + 1
+        for k, d in equipes_sede.items():
+            d["pessoas"] = contagem.get(k, 0)
+
+    # custos de ESTRUTURA (patrimônio) do módulo Sedes — período mais recente
+    per_sede = sorted((sede.periodos or {}).keys())
+    ult_sede = per_sede[-1] if per_sede else None
+    itens_estrutura = (sede.periodos or {}).get(ult_sede) or [] if ult_sede else []
+    custo_estrutura = round(sum(float(i.get("valor") or 0) for i in itens_estrutura), 2)
+
+    receita = round(sum(b["receita"] for b in por_centro.values()), 2)
+    custo_total = round(custo_oper + custo_infra + custo_estrutura, 2)
+    return Response({
+        "id": str(sede.id), "nome": sede.nome,
+        "periodo": ult, "meses": meses, "series": series,
+        "centros": sorted(por_centro.values(), key=lambda x: -x["receita"]),
+        "equipes": sorted(equipes_sede.values(), key=lambda x: -x["custo_total"]),
+        "infraestrutura": infra,
+        "estrutura": {"periodo": ult_sede, "itens": itens_estrutura, "total": custo_estrutura},
+        "totais": {
+            "receita": receita,
+            "custo_operacional": round(custo_oper, 2),
+            "a_pagar": round(pagar_oper, 2),
+            "custo_infra": round(custo_infra, 2),
+            "custo_estrutura": custo_estrutura,
+            "custo_total": custo_total,
+            "margem": round(receita - custo_total, 2),
+            "pessoas": pessoas_total,
+            "por_regime": por_regime,
+            "linhas": sum(len(b["linhas"]) for b in por_centro.values()),
+        },
+        "competencia_custo": f"{comp.mes:02d}/{comp.ano}" if comp else None,
+        "custo_parcial": custo_parcial,
+    })

@@ -87,6 +87,10 @@ export const estruturaApi = {
     fetch(`${API_URL}/estrutura/centros/${id}/detalhe/`, { headers: authHeaders() })
       .then((r) => j<EfCentroDetalhe>(r)),
 
+  sedeDetalhe: (id: string) =>
+    fetch(`${API_URL}/estrutura/sedes/${id}/detalhe/`, { headers: authHeaders() })
+      .then((r) => j<EfSedeDetalhe>(r)),
+
   equipeDetalhe: (id: string) =>
     fetch(`${API_URL}/estrutura/equipes/${id}/detalhe/`, { headers: authHeaders() })
       .then((r) => j<EfEquipeDetalhe>(r)),
@@ -177,6 +181,32 @@ export const estruturaApi = {
   },
 };
 
+export interface EfSedeDetalhe {
+  id: string;
+  nome: string;
+  periodo: string | null;
+  meses: string[];
+  series: { mes: string; total: number }[];
+  centros: {
+    id: string; nome: string; receita: number;
+    linhas: {
+      id: string; nome: string; area: string;
+      receita: number; receita_acumulada: number;
+      alocacoes: { id: string; equipe_id: string; equipe: string; percentual: number; custo_total: number }[];
+    }[];
+  }[];
+  equipes: { id: string; nome: string; grupo: string; custo_total: number; pessoas?: number; linhas: string[] }[];
+  infraestrutura: { id: string; nome: string; percentual: number; custo_centro: number; fatia: number }[];
+  estrutura: { periodo: string | null; itens: any[]; total: number };
+  totais: {
+    receita: number; custo_operacional: number; a_pagar: number;
+    custo_infra: number; custo_estrutura: number; custo_total: number;
+    margem: number; pessoas: number; por_regime: Record<string, number>; linhas: number;
+  };
+  competencia_custo: string | null;
+  custo_parcial: boolean;
+}
+
 // ── Comunicação leve entre Sidebar e a tela (sem mexer no AppContext) ──
 // A sidebar navega e FOCA um centro; a tela avisa quando a estrutura mudou
 // (pra sidebar re-listar os centros).
@@ -193,7 +223,7 @@ export function focarCentro(centroId: string) {
 // ── Seleção das páginas de detalhe ──
 // A view do app é uma string; o id do centro/equipe aberto vive aqui (module
 // state + sessionStorage pra sobreviver ao refresh da página).
-let selecionado: { tipo: "centro" | "equipe"; id: string } | null = null;
+let selecionado: { tipo: "centro" | "equipe" | "sede"; id: string } | null = null;
 try {
   const salvo = sessionStorage.getItem("ef_selecionado");
   if (salvo) selecionado = JSON.parse(salvo);
@@ -202,7 +232,7 @@ try {
 export function lerSelecionado() {
   return selecionado;
 }
-function selecionar(tipo: "centro" | "equipe", id: string) {
+function selecionar(tipo: "centro" | "equipe" | "sede", id: string) {
   selecionado = { tipo, id };
   try { sessionStorage.setItem("ef_selecionado", JSON.stringify(selecionado)); } catch { /* sem storage */ }
 }
@@ -215,6 +245,11 @@ export function abrirDetalheCentro(id: string, setView: (v: any) => void) {
 export function abrirDetalheEquipe(id: string, setView: (v: any) => void) {
   selecionar("equipe", id);
   setView("estrutura-equipe");
+}
+/** Abre a página dedicada da sede. */
+export function abrirDetalheSede(id: string, setView: (v: any) => void) {
+  selecionar("sede", id);
+  setView("estrutura-sede");
 }
 export function abrirGerenciadorEquipes() {
   window.dispatchEvent(new CustomEvent(EF_EVENTOS.equipes));

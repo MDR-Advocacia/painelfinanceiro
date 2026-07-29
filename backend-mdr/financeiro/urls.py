@@ -23,7 +23,7 @@ from .estrutura_views import (
     alocacao_percentual, alocar_equipe, centro_crud, centro_detalhe,
     centro_sede_rateio, equipe_crud, equipe_detalhe, equipes as ef_equipes,
     estrutura, linha_crud, linha_igualar, linha_sede, remover_alocacao,
-    sedes_lista,
+    sede_detalhe, sedes_lista,
 )
 
 router = DefaultRouter()
@@ -53,6 +53,7 @@ urlpatterns = [
     path('estrutura/centros/<uuid:pk>/detalhe/', centro_detalhe),
     path('estrutura/equipes/<uuid:pk>/detalhe/', equipe_detalhe),
     path('estrutura/sedes/', sedes_lista),
+    path('estrutura/sedes/<uuid:pk>/detalhe/', sede_detalhe),
     path('estrutura/linhas/<uuid:pk>/sede/', linha_sede),
     path('estrutura/centros/<uuid:pk>/rateio-sedes/', centro_sede_rateio),
     path('estrutura/centros/', centro_crud),
