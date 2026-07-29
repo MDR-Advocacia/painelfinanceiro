@@ -31,7 +31,7 @@ import { Ajuda, TituloAjuda } from "@/components/dp/Ajuda";
 import ParametrosTab from "@/components/dp/ParametrosTab";
 import SimulacoesTab from "@/components/dp/SimulacoesTab";
 import FolhaTab from "@/components/dp/FolhaTab";
-import { CcPicker, ColaboradorPicker, LiderancaPicker, invalidarArvoreCc } from "@/components/dp/Pickers";
+import { EquipePicker, CcPicker, ColaboradorPicker, LiderancaPicker, invalidarArvoreCc } from "@/components/dp/Pickers";
 import DocumentosColaborador from "@/components/dp/DocumentosColaborador";
 import { usePermissions } from "@/hooks/usePermissions";
 import {
@@ -368,7 +368,8 @@ function FichaDialog({ colaborador, ccs, cargos, editar, onClose, onMudou }: {
     try {
       await dpApi.atualizar(c.id, {
         nome: c.nome, cpf: c.cpf, sexo: c.sexo, unidade: c.unidade, area: c.area,
-        centro_custo_id: c.centro_custo_id, supervisor_id: c.supervisor_id,
+        centro_custo_id: c.centro_custo_id, equipe_id: c.equipe_id ?? null,
+        supervisor_id: c.supervisor_id,
         coordenador_id: c.coordenador_id, equipe: c.equipe,
         cargo_id: c.cargo_id, salario_bruto: Number(c.salario_bruto) || 0,
         saldo_livre: Number(c.saldo_livre) || 0, vt: Number(c.vt) || 0,
@@ -440,7 +441,17 @@ function FichaDialog({ colaborador, ccs, cargos, editar, onClose, onMudou }: {
                              ro={ro}
                              onChange={(id, nome) => setC((s) => ({ ...s, coordenador_id: id, coordenador_nome: nome }))} />
           </div>
-          <CampoTexto rotulo="Equipe" valor={c.equipe} onChange={(v) => set("equipe", v)} ro={ro} />
+          <CampoTexto rotulo="Equipe (texto livre)" valor={c.equipe}
+                      onChange={(v) => set("equipe", v)} ro={ro} />
+          <div>
+            <Label className="flex items-center gap-1 text-xs text-muted-foreground">
+              Equipe na estrutura
+              <Ajuda titulo="Equipe na estrutura"
+                     texto="É este vínculo — não o campo de texto acima — que leva a pessoa e o custo dela pra página da equipe e pro centro de faturamento. Vem sozinho do centro de custo; só mexa aqui se a pessoa for exceção." />
+            </Label>
+            <EquipePicker valor={c.equipe_id} ro={ro}
+                          onChange={(id) => set("equipe_id", id)} />
+          </div>
           <div>
             <Label className="text-xs text-muted-foreground">Sexo</Label>
             <Select value={c.sexo || "-"} onValueChange={(v) => set("sexo", v === "-" ? "" : v)} disabled={ro}>

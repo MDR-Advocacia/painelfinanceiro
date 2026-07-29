@@ -60,9 +60,15 @@ function SectionHeader({
         sub ? "pl-5 pr-2.5" : "px-2.5"}`}
     >
       {/* Uma linha, sempre. O eyebrow tem tracking largo e um título comprido
-          quebrava em duas linhas, empurrando a lista e desalinhando a seção. */}
+          quebrava em duas linhas, empurrando a lista e desalinhando a seção.
+          Macro (Painéis, Sedes, Centros…) vem mais forte e claro; subseção
+          (Faturamento, Infraestrutura) mais leve — o recuo sozinho não bastava
+          pra separar o que é módulo do que é subdivisão. */}
       <span title={title}
-            className="eyebrow min-w-0 flex-1 truncate whitespace-nowrap text-left text-sidebar-foreground/45 transition-colors group-hover:text-sidebar-foreground/80">
+            className={`min-w-0 flex-1 truncate whitespace-nowrap text-left uppercase transition-colors ${
+              sub
+                ? "text-[0.6rem] font-medium tracking-[0.12em] text-sidebar-foreground/35 group-hover:text-sidebar-foreground/65"
+                : "text-[0.7rem] font-bold tracking-[0.16em] text-sidebar-foreground/70 group-hover:text-sidebar-foreground"}`}>
         {title}
       </span>
       {contagem !== undefined && contagem > 0 && (

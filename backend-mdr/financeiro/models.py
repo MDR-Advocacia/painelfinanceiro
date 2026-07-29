@@ -55,6 +55,16 @@ class Sede(models.Model):
         return self.nome
 
 class Setor(models.Model):
+    """Setor do painel antigo.
+
+    ⚠️ ARQUIVO MORTO (decidido em 2026-07-29). O faturamento passou a ser
+    lançado na LinhaFaturamento, dentro do centro de faturamento. Ninguém
+    escreve aqui pela interface: quem grava é `_espelhar_no_setor_legado`,
+    a partir da linha, só pra manter vivos os painéis antigos (Dashboard,
+    Projeções, Rentabilidade, Gestão Estratégica) que ainda leem daqui.
+    Quando esses quatro migrarem pra estrutura nova, o espelho sai e este
+    modelo vira histórico puro. NÃO adicionar tela de edição de volta.
+    """
     TIPO_CHOICES = [
         ('operacional', 'Operacional'),
         ('administrativo', 'Administrativo'),
@@ -103,13 +113,6 @@ class Cargo(models.Model):
     padrão são seedados na migration 0003 (Admin, Sócio, Supervisor,
     Departamento Pessoal, Financeiro) e o menu do ADM permite criar outros.
 
-    ⚠️ ARQUIVO MORTO (decidido em 2026-07-29). O faturamento passou a ser
-    lançado na LinhaFaturamento, dentro do centro de faturamento. Ninguém
-    escreve aqui pela interface: quem grava é `_espelhar_no_setor_legado`,
-    a partir da linha, só pra manter vivos os painéis antigos (Dashboard,
-    Projeções, Rentabilidade, Gestão Estratégica) que ainda leem daqui.
-    Quando esses quatro migrarem pra estrutura nova, o espelho sai e este
-    modelo vira histórico puro. NÃO adicionar tela de edição de volta.
     """
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     nome = models.CharField(max_length=100, unique=True)
@@ -332,6 +335,52 @@ class DpColaborador(models.Model):
     conta_caixa = models.CharField(max_length=60, blank=True, default="")
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
+
+    def _equipe_do_centro_custo(self):
+        """Equipe da estrutura que atende este centro de custo (ou None)."""
+        if not self.centro_custo_id:
+            return None
+        from .models_estrutura import Equipe
+        return Equipe.objects.filter(centro_custo_id=self.centro_custo_id).first()
+
+    def save(self, *args, **kwargs):
+        """Mantém o enquadramento na equipe seguindo o centro de custo.
+
+        A Estrutura de Faturamento lê as pessoas por `equipe_ref`. Se isso só
+        fosse preenchido pela migration inicial, todo admitido novo nasceria
+        SEM equipe — invisível em toda página de equipe e com custo contado em
+        lugar nenhum — e quem trocasse de centro de custo continuaria somando
+        pra equipe antiga. Então derivamos aqui:
+
+        - sem equipe → deriva do centro de custo;
+        - trocou de CC e a equipe atual era justamente a do CC ANTIGO (ou seja,
+          tinha vindo da derivação) → re-deriva;
+        - equipe escolhida à mão, que não corresponde ao CC → respeita, porque
+          é override deliberado do operador.
+        """
+        anterior = None
+        if self.pk:
+            anterior = (DpColaborador.objects.filter(pk=self.pk)
+                        .values("centro_custo_id", "equipe_ref_id").first())
+
+        antes_equipe = self.equipe_ref_id
+        if not self.equipe_ref_id:
+            self.equipe_ref = self._equipe_do_centro_custo()
+        elif anterior and anterior["centro_custo_id"] != self.centro_custo_id                 and anterior["equipe_ref_id"] == self.equipe_ref_id:
+            from .models_estrutura import Equipe
+            era_derivada = Equipe.objects.filter(
+                id=self.equipe_ref_id,
+                centro_custo_id=anterior["centro_custo_id"]).exists()
+            if era_derivada:
+                nova = self._equipe_do_centro_custo()
+                if nova:
+                    self.equipe_ref = nova
+
+        # um update_fields que não cite equipe_ref engoliria a derivação
+        uf = kwargs.get("update_fields")
+        if uf is not None and self.equipe_ref_id != antes_equipe:
+            kwargs["update_fields"] = list(set(uf) | {"equipe_ref"})
+        return super().save(*args, **kwargs)
 
     class Meta:
         db_table = 'dp_colaboradores'

@@ -1,3 +1,4 @@
+import { estruturaApi } from "@/services/estrutura";
 // Seletores de catálogo do DP — sempre COM BUSCA (regra da casa: nada de
 // <Select> cru em catálogo grande).
 //
@@ -285,6 +286,64 @@ export function ColaboradorPicker({
                              onSelect={() => { onChange(o.id); setAberto(false); }}>
                   <Check className={cn("mr-2 h-3.5 w-3.5", valor === o.id ? "opacity-100" : "opacity-0")} />
                   <span className="truncate">{o.nome}</span>
+                </CommandItem>
+              ))}
+            </CommandGroup>
+          </CommandList>
+        </Command>
+      </PopoverContent>
+    </Popover>
+  );
+}
+
+
+/** Equipe da Estrutura de Faturamento — searchable, como todo catálogo da casa. */
+export function EquipePicker({ valor, onChange, ro, className }: {
+  valor: string | null | undefined;
+  onChange: (id: string | null) => void;
+  ro?: boolean;
+  className?: string;
+}) {
+  const [equipes, setEquipes] = useState<{ id: string; nome: string; grupo: string }[]>([]);
+  const [aberto, setAberto] = useState(false);
+
+  useEffect(() => {
+    estruturaApi.equipes()
+      .then((es) => setEquipes(es.map((e: any) => ({
+        id: e.id, nome: e.nome ?? e.equipe ?? "—", grupo: e.grupo ?? "",
+      }))))
+      .catch(() => setEquipes([]));
+  }, []);
+
+  const atual = equipes.find((e) => e.id === valor);
+  return (
+    <Popover open={aberto} onOpenChange={setAberto}>
+      <PopoverTrigger asChild disabled={ro}>
+        <Button variant="outline" role="combobox" disabled={ro}
+                className={cn("h-9 w-full justify-between px-3 text-left text-sm font-normal", className)}>
+          <span className={cn("truncate", !atual && "text-muted-foreground")}>
+            {atual ? atual.nome : "Sem equipe"}
+          </span>
+          <ChevronsUpDown className="ml-1 h-3.5 w-3.5 shrink-0 opacity-50" />
+        </Button>
+      </PopoverTrigger>
+      <PopoverContent className="w-[320px] p-0" align="start">
+        <Command>
+          <CommandInput placeholder="Buscar equipe…" className="h-9" />
+          <CommandList>
+            <CommandEmpty>Nenhuma equipe encontrada.</CommandEmpty>
+            <CommandGroup>
+              <CommandItem value="sem-equipe"
+                           onSelect={() => { onChange(null); setAberto(false); }}>
+                <span className="text-muted-foreground">Sem equipe</span>
+              </CommandItem>
+              {equipes.map((e) => (
+                <CommandItem key={e.id} value={`${e.nome} ${e.grupo}`}
+                             onSelect={() => { onChange(e.id); setAberto(false); }}>
+                  <span className="flex-1 truncate">{e.nome}</span>
+                  {e.grupo && (
+                    <span className="ml-2 shrink-0 text-[0.65rem] text-muted-foreground">{e.grupo}</span>
+                  )}
                 </CommandItem>
               ))}
             </CommandGroup>

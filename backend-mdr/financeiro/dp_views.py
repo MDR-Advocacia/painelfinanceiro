@@ -62,6 +62,7 @@ def _snap(obj: DpColaborador) -> dict:
         "unidade": obj.unidade, "area": obj.area,
         "centro_custo": obj.centro_custo.nome if obj.centro_custo_id else None,
         "equipe_estrutura": obj.equipe_ref.nome if obj.equipe_ref_id else None,
+        "equipe_id": str(obj.equipe_ref_id) if obj.equipe_ref_id else None,
         "supervisor": obj.supervisor.nome if obj.supervisor_id else None,
         "coordenador": obj.coordenador.nome if obj.coordenador_id else None,
         "equipe": obj.equipe,
