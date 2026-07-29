@@ -44,7 +44,7 @@ function mesCurto(per: string) {
 
 export default function CentroDetalhe() {
   const { setView } = useApp();
-  const { podeEditar } = usePermissions();
+  const { pode, podeEditar } = usePermissions();
   const [dados, setDados] = useState<EfCentroDetalhe | null>(null);
   const [erro, setErro] = useState(false);
   const centroId = useSelecionadoId();
@@ -133,9 +133,14 @@ export default function CentroDetalhe() {
         </Card>
       )}
 
-      {/* ── Informe de faturamento: onde a receita do mês é lançada ── */}
-      <InformeFaturamento centroId={dados.id} centroNome={dados.nome}
-                          podeEditar={podeEditar("estrutura")} />
+      {/* ── Informe de faturamento: onde a receita do mês é lançada ──
+          Só aparece pra quem tem o módulo: a seção expõe a comprovação
+          (nota fiscal, medição), que é documento do cliente. Os valores em si
+          continuam visíveis na tabela de linhas, abaixo. */}
+      {pode("faturamento") && (
+        <InformeFaturamento centroId={dados.id} centroNome={dados.nome}
+                            podeEditar={podeEditar("faturamento")} />
+      )}
 
       {/* ── Linhas ── */}
       <Card className="glass-card border-0">

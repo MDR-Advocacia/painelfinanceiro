@@ -28,7 +28,7 @@ const VIEW_MODULO: Record<string, string> = {
   "config-estrategica": "config-estrategica",
   estrutura: "estrutura",
   "estrutura-centro": "estrutura",
-  "estrutura-equipe": "estrutura",
+  "estrutura-equipe": "equipes",
   "estrutura-sede": "sedes",
   "estrutura-admin": "estrutura",
   sede: "sedes",

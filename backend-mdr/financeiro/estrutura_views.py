@@ -21,7 +21,18 @@ from .models import (
 )
 from .views import modulo_permission
 
-_PERM = [modulo_permission(read_any=["estrutura"], write="estrutura")]
+# Permissões separadas por RISCO, não por tela:
+#   estrutura          — desenhar a operação (alocar equipe, %, sede)
+#   faturamento        — lançar receita e anexar comprovação (dinheiro entrando)
+#   estrutura-cadastro — criar/renomear/excluir centro, linha, equipe
+#   equipes            — ver gente e CUSTO INDIVIDUAL (dado de folha, do DP)
+_PERM = [modulo_permission(read_any=["estrutura", "faturamento"], write="estrutura")]
+_PERM_FAT = [modulo_permission(read_any=["estrutura", "faturamento"], write="faturamento")]
+# Anexo é documento do CLIENTE (nota fiscal, medição): ler exige o módulo
+# de faturamento, não basta enxergar a estrutura.
+_PERM_DOC = [modulo_permission(read_any=["faturamento"], write="faturamento")]
+_PERM_CAD = [modulo_permission(read_any=["estrutura", "faturamento"], write="estrutura-cadastro")]
+_PERM_EQUIPE = [modulo_permission(read_any=["equipes"], write="estrutura-cadastro")]
 
 
 def _ultimo_periodo(linhas) -> str | None:
@@ -358,7 +369,7 @@ def equipes(request):
 # (receita lançada, alocações) some por acidente.
 
 @api_view(["POST", "PATCH", "DELETE"])
-@permission_classes(_PERM)
+@permission_classes(_PERM_CAD)
 def centro_crud(request, pk=None):
     if request.method == "POST":
         nome = (request.data.get("nome") or "").strip()
@@ -397,7 +408,7 @@ def centro_crud(request, pk=None):
 
 
 @api_view(["POST", "PATCH", "DELETE"])
-@permission_classes(_PERM)
+@permission_classes(_PERM_CAD)
 def linha_crud(request, pk=None):
     if request.method == "POST":
         centro = CentroFaturamento.objects.filter(pk=request.data.get("centro_id")).first()
@@ -441,7 +452,7 @@ def linha_crud(request, pk=None):
 
 
 @api_view(["POST", "PATCH", "DELETE"])
-@permission_classes(_PERM)
+@permission_classes(_PERM_CAD)
 def equipe_crud(request, pk=None):
     from .models import DpCentroCusto
 
@@ -621,7 +632,7 @@ def centro_detalhe(request, pk):
 
 
 @api_view(["GET"])
-@permission_classes(_PERM)
+@permission_classes(_PERM_EQUIPE)
 def equipe_detalhe(request, pk):
     """A página da equipe: QUEM ESTÁ NELA (pessoas do DP com cargo, salário e
     custo real da folha), onde está alocada e quanto de receita representa."""
@@ -903,7 +914,7 @@ _PERIODO_RE = re.compile(r"^\d{4}-(0[1-9]|1[0-2])$")
 
 
 @api_view(["GET", "PATCH"])
-@permission_classes(_PERM)
+@permission_classes(_PERM_FAT)
 def linha_faturamento(request, pk):
     """Lê e lança o faturamento de UM mês da linha.
 
@@ -1005,7 +1016,7 @@ def _aplicar_faturamento(linha, periodo, dados):
 
 
 @api_view(["GET", "PATCH"])
-@permission_classes(_PERM)
+@permission_classes(_PERM_FAT)
 def centro_faturamento(request, pk):
     """Informe de faturamento do MÊS para todas as linhas de um centro.
 
@@ -1087,7 +1098,7 @@ def _doc_fat_json(d):
 
 
 @api_view(["GET", "POST"])
-@permission_classes(_PERM)
+@permission_classes(_PERM_DOC)
 @parser_classes([MultiPartParser, FormParser])
 def linha_documentos(request, pk):
     """Anexos do faturamento de um mês da linha (nota fiscal, medição…).
@@ -1146,7 +1157,7 @@ def linha_documentos(request, pk):
 
 
 @api_view(["GET", "DELETE"])
-@permission_classes(_PERM)
+@permission_classes(_PERM_DOC)
 def faturamento_documento(request, pk):
     """GET baixa (autenticado) · DELETE remove."""
     doc = FaturamentoDocumento.objects.select_related("linha__centro").filter(pk=pk).first()

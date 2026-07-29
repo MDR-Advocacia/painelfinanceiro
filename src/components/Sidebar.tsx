@@ -280,7 +280,7 @@ export function Sidebar() {
         )}
 
         {/* EQUIPES — cada uma tem página própria */}
-        {podeEstrutura && equipesMenu.length > 0 && (
+        {pode("equipes") && equipesMenu.length > 0 && (
           <div className="space-y-0.5">
             <SectionHeader title="Equipes" contagem={equipesMenu.length}
                            collapsed={!!collapsed["ef-equipes"]} onToggle={() => toggle("ef-equipes")} />

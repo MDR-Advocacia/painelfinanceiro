@@ -11,9 +11,18 @@ MODULOS = [
     ("honorarios", "Honorários BB"),
     ("config-estrategica", "Gestão Estratégica (VPD)"),
     ("sedes", "Sedes (estrutura/custos)"),
-    ("setores", "Setores (pessoal/faturamento)"),
+    # Arquivo morto: ninguém lança em setor (o lançamento é na linha, via
+    # módulo `faturamento`). A chave continua porque governa a LEITURA que
+    # Dashboard, Projeções, Rentabilidade e Gestão Estratégica ainda fazem.
+    ("setores", "Setores (arquivo morto — leitura dos painéis antigos)"),
     ("pessoal", "Controle de Pessoal (DP)"),
     ("estrutura", "Estrutura de Faturamento"),
+    # Os três abaixo eram tudo "estrutura". Foram separados porque protegem
+    # coisas diferentes: quem lança receita não precisa poder redesenhar a
+    # empresa, e quem enxerga a estrutura não deveria ver salário de ninguém.
+    ("faturamento", "Lançamento de Faturamento"),
+    ("estrutura-cadastro", "Cadastro da Estrutura (centros, linhas, equipes)"),
+    ("equipes", "Equipes e Pessoas (custo individual)"),
 ]
 MODULO_KEYS = [k for k, _ in MODULOS]
 

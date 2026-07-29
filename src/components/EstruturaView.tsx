@@ -45,7 +45,11 @@ const AREA_UI: Record<string, { rotulo: string; cls: string }> = {
 export function EstruturaView() {
   const { setView } = useApp();
   const { podeEditar } = usePermissions();
+  // Duas permissões distintas: operar a estrutura (alocar equipe, mexer em %
+  // e sede) é rotina; CADASTRAR (criar/renomear/excluir centro, linha, equipe)
+  // redesenha a empresa e fica separado.
   const editar = podeEditar("estrutura");
+  const cadastrar = podeEditar("estrutura-cadastro");
   const [dados, setDados] = useState<EfEstrutura | null>(null);
   const [equipes, setEquipes] = useState<EfEquipe[]>([]);
   const [loading, setLoading] = useState(true);
@@ -191,7 +195,7 @@ export function EstruturaView() {
       <div className="space-y-4">
         <SectionTitle eyebrow="Quem paga" titulo="Centros de faturamento"
                       acoes={<>
-                        {editar && (
+                        {cadastrar && (
                           <Button size="sm" variant="outline" className="h-7 gap-1 text-xs"
                                   onClick={() => setNovoCentro("faturamento")}>
                             <Plus className="h-3.5 w-3.5" /> Novo centro
@@ -202,7 +206,7 @@ export function EstruturaView() {
                       </>} />
         <div className="grid gap-4 xl:grid-cols-2">
           {dados.centros.map((c) => (
-            <CentroCard key={c.id} centro={c} equipes={equipes} editar={editar} onMudou={mudou}
+            <CentroCard key={c.id} centro={c} equipes={equipes} editar={editar} cadastrar={cadastrar} onMudou={mudou}
                         aoAbrirDetalhe={setView} sedes={sedes} />
           ))}
         </div>
@@ -212,7 +216,7 @@ export function EstruturaView() {
       <div className="space-y-4">
         <SectionTitle eyebrow="Quem sustenta" titulo="Centros de infraestrutura"
                       acoes={<>
-                        {editar && (
+                        {cadastrar && (
                           <Button size="sm" variant="outline" className="h-7 gap-1 text-xs"
                                   onClick={() => setNovoCentro("infraestrutura")}>
                             <Plus className="h-3.5 w-3.5" /> Novo centro
@@ -223,14 +227,14 @@ export function EstruturaView() {
                       </>} />
         <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
           {dados.infraestrutura.map((c) => (
-            <InfraCard key={c.id} centro={c} equipes={equipes} editar={editar} onMudou={mudou}
+            <InfraCard key={c.id} centro={c} equipes={equipes} editar={editar} cadastrar={cadastrar} onMudou={mudou}
                        aoAbrirDetalhe={setView} sedes={sedes} />
           ))}
         </div>
       </div>
 
       {gerindoEquipes && (
-        <EquipesDialog editar={editar} onClose={() => { setGerindoEquipes(false); mudou(); }} />
+        <EquipesDialog editar={cadastrar} onClose={() => { setGerindoEquipes(false); mudou(); }} />
       )}
       {novoCentro && (
         <NovoCentroDialog tipo={novoCentro} onClose={() => setNovoCentro(null)}
@@ -255,8 +259,8 @@ export function EstruturaView() {
 
 /* ─────────────────────── centro de faturamento ─────────────────────── */
 
-function CentroCard({ centro, equipes, editar, onMudou, aoAbrirDetalhe, sedes }: {
-  centro: EfCentro; equipes: EfEquipe[]; editar: boolean; onMudou: () => void;
+function CentroCard({ centro, equipes, editar, cadastrar, onMudou, aoAbrirDetalhe, sedes }: {
+  centro: EfCentro; equipes: EfEquipe[]; editar: boolean; cadastrar: boolean; onMudou: () => void;
   aoAbrirDetalhe: (v: any) => void; sedes: { id: string; nome: string }[];
 }) {
   const margem = centro.receita_total - centro.custo_total;
@@ -274,7 +278,7 @@ function CentroCard({ centro, equipes, editar, onMudou, aoAbrirDetalhe, sedes }:
                     className="transition-colors hover:text-[hsl(var(--dunatech-blue))] hover:underline">
               {centro.nome}
             </button>
-            {editar && (
+            {cadastrar && (
               <span className="flex gap-0.5 opacity-0 transition-opacity group-hover:opacity-100">
                 <BotaoRenomear atual={centro.nome}
                                onSalvar={(nome) => estruturaApi.renomearCentro(centro.id, nome)
@@ -313,10 +317,10 @@ function CentroCard({ centro, equipes, editar, onMudou, aoAbrirDetalhe, sedes }:
 
         <div className="space-y-2">
           {centro.linhas.map((l) => (
-            <LinhaBloco key={l.id} linha={l} equipes={equipes} editar={editar} onMudou={onMudou}
+            <LinhaBloco key={l.id} linha={l} equipes={equipes} editar={editar} cadastrar={cadastrar} onMudou={onMudou}
                         aoAbrirDetalhe={aoAbrirDetalhe} sedes={sedes} />
           ))}
-          {editar && (novaLinha ? (
+          {cadastrar && (novaLinha ? (
             <NovaLinhaInline centroId={centro.id}
                              onFechar={() => setNovaLinha(false)}
                              onCriou={() => { setNovaLinha(false); onMudou(); }} />
@@ -548,8 +552,8 @@ function NovoCentroDialog({ tipo, onClose, onCriou }: {
   );
 }
 
-function LinhaBloco({ linha, equipes, editar, onMudou, aoAbrirDetalhe, sedes }: {
-  linha: EfLinha; equipes: EfEquipe[]; editar: boolean; onMudou: () => void;
+function LinhaBloco({ linha, equipes, editar, cadastrar, onMudou, aoAbrirDetalhe, sedes }: {
+  linha: EfLinha; equipes: EfEquipe[]; editar: boolean; cadastrar: boolean; onMudou: () => void;
   aoAbrirDetalhe: (v: any) => void; sedes: { id: string; nome: string }[];
 }) {
   const area = AREA_UI[linha.area];
@@ -564,7 +568,7 @@ function LinhaBloco({ linha, equipes, editar, onMudou, aoAbrirDetalhe, sedes }: 
         <Badge variant="outline" className={`text-[0.6rem] ${area.cls}`}>{area.rotulo}</Badge>
         <span className="text-sm font-semibold">{linha.nome}</span>
         <SedeChip linha={linha} sedes={sedes} editar={editar} onMudou={onMudou} />
-        {editar && (
+        {cadastrar && (
           <span className="flex gap-0.5 opacity-0 transition-opacity group-hover/linha:opacity-100">
             <BotaoRenomear atual={linha.nome}
                            onSalvar={(nome) => estruturaApi.editarLinha(linha.id, { nome })
@@ -709,8 +713,8 @@ function AlocacaoChip({ a, editar, onMudou, aoAbrirDetalhe }: {
 
 /* ─────────────────────── centro de infraestrutura ─────────────────────── */
 
-function InfraCard({ centro, equipes, editar, onMudou, aoAbrirDetalhe, sedes }: {
-  centro: EfCentro; equipes: EfEquipe[]; editar: boolean; onMudou: () => void;
+function InfraCard({ centro, equipes, editar, cadastrar, onMudou, aoAbrirDetalhe, sedes }: {
+  centro: EfCentro; equipes: EfEquipe[]; editar: boolean; cadastrar: boolean; onMudou: () => void;
   aoAbrirDetalhe: (v: any) => void; sedes: { id: string; nome: string }[];
 }) {
   const [adicionando, setAdicionando] = useState(false);
@@ -738,12 +742,12 @@ function InfraCard({ centro, equipes, editar, onMudou, aoAbrirDetalhe, sedes }: 
         {centro.linhas.length > 0 && (
           <div className="space-y-2">
             {centro.linhas.map((l) => (
-              <LinhaBloco key={l.id} linha={l} equipes={equipes} editar={editar} onMudou={onMudou}
+              <LinhaBloco key={l.id} linha={l} equipes={equipes} editar={editar} cadastrar={cadastrar} onMudou={onMudou}
                           aoAbrirDetalhe={aoAbrirDetalhe} sedes={sedes} />
             ))}
           </div>
         )}
-        {editar && (novaLinha ? (
+        {cadastrar && (novaLinha ? (
           <NovaLinhaInline centroId={centro.id}
                            onFechar={() => setNovaLinha(false)}
                            onCriou={() => { setNovaLinha(false); onMudou(); }} />
