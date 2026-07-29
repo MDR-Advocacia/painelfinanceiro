@@ -519,6 +519,21 @@ def centro_detalhe(request, pk):
             "alocacoes": alocs,
         })
 
+    # alocações DIRETAS no centro (equipe sem linha de receita própria)
+    diretas = []
+    for a in c.alocacoes.select_related("equipe__centro_custo"):
+        custo, pagar, pessoas = custo_alocacao(a)
+        custo_centro += custo or 0
+        pagar_centro += pagar or 0
+        eqd = equipes_do_centro.setdefault(str(a.equipe_id), {
+            "id": str(a.equipe_id), "nome": a.equipe.nome, "grupo": a.equipe.grupo,
+            "custo_total": 0.0, "linhas": []})
+        eqd["custo_total"] = round(eqd["custo_total"] + (custo or 0), 2)
+        eqd["linhas"].append({"linha": "— centro (sem linha)", "percentual": a.percentual})
+        diretas.append({"id": str(a.id), "equipe_id": str(a.equipe_id),
+                        "equipe": a.equipe.nome, "percentual": a.percentual,
+                        "custo_total": custo, "a_pagar": pagar, "pessoas": pessoas})
+
     # pessoas nas equipes deste centro (enquadradas via DP)
     ids_eq = list(equipes_do_centro.keys())
     pessoas_por_eq = {}
@@ -534,6 +549,7 @@ def centro_detalhe(request, pk):
         "id": str(c.id), "nome": c.nome, "tipo": c.tipo,
         "periodo": ult, "meses": meses, "series": series,
         "linhas": saida_linhas,
+        "alocacoes_diretas": diretas,
         "equipes": sorted(equipes_do_centro.values(), key=lambda x: -x["custo_total"]),
         "receita_ultimo": receita_ult_total,
         "receita_acumulada": round(sum(l["receita_acumulada"] for l in saida_linhas), 2),

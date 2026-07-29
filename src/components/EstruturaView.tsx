@@ -259,9 +259,55 @@ function CentroCard({ centro, equipes, editar, onMudou, aoAbrirDetalhe }: {
               <Plus className="h-3.5 w-3.5" /> nova linha de faturamento
             </button>
           ))}
+
+          {/* equipes alocadas DIRETO no centro (atendem o cliente sem linha própria) */}
+          {(centro.alocacoes.length > 0 || editar) && (
+            <div className="flex flex-wrap items-center gap-1.5 rounded-lg border border-dashed border-muted-foreground/25 bg-muted/20 px-2.5 py-2">
+              <span className="text-[0.62rem] font-semibold uppercase tracking-wider text-muted-foreground">
+                Equipes do centro
+              </span>
+              {centro.alocacoes.map((a) => (
+                <AlocacaoChip key={a.id} a={a} editar={editar} onMudou={onMudou} aoAbrirDetalhe={aoAbrirDetalhe} />
+              ))}
+              {editar && <AdicionarEquipeCentro centro={centro} equipes={equipes} onMudou={onMudou} />}
+            </div>
+          )}
         </div>
       </CardContent>
     </Card>
+  );
+}
+
+/** Adicionar equipe direto no centro (sem linha específica). */
+function AdicionarEquipeCentro({ centro, equipes, onMudou }: {
+  centro: EfCentro; equipes: EfEquipe[]; onMudou: () => void;
+}) {
+  const [adicionando, setAdicionando] = useState(false);
+  const jaAlocadas = new Set(centro.alocacoes.map((a) => a.equipe_id));
+  if (!adicionando) {
+    return (
+      <button onClick={() => setAdicionando(true)} title="Alocar equipe direto no centro"
+              className="flex h-6 items-center gap-1 rounded-full border border-dashed border-muted-foreground/40 px-2 text-[0.65rem] text-muted-foreground transition-colors hover:border-[hsl(var(--dunatech-blue))] hover:text-[hsl(var(--dunatech-blue))]">
+        <Plus className="h-3 w-3" /> equipe
+      </button>
+    );
+  }
+  return (
+    <Select onValueChange={(equipeId) => {
+      estruturaApi.alocar({ centro_id: centro.id }, equipeId)
+        .then(() => { toast.success("Equipe alocada no centro."); onMudou(); })
+        .catch((e) => toast.error(e.message))
+        .finally(() => setAdicionando(false));
+    }}>
+      <SelectTrigger className="h-6 w-[190px] text-xs" autoFocus>
+        <SelectValue placeholder="Escolher equipe…" />
+      </SelectTrigger>
+      <SelectContent>
+        {equipes.filter((e) => !jaAlocadas.has(e.id)).map((e) => (
+          <SelectItem key={e.id} value={e.id}>{e.nome ?? e.equipe}</SelectItem>
+        ))}
+      </SelectContent>
+    </Select>
   );
 }
 

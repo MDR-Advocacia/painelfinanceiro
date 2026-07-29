@@ -25,7 +25,8 @@ EQUIPES = [
     ("bb-reu", "BB Réu", "passivo", "Réu - BB Defesa e Recurso"),
     ("bb-execucao", "BB Execução & Encerramento", "passivo", "Réu - BB Encerramento"),
     ("bb-acordos", "BB Acordos", "passivo", "Réu - BB Acordo"),
-    ("bb-estrategico", "BB Estratégico", "passivo", None),
+    # decisão 2026-07-29: o estratégico são DUAS equipes, uma por área
+    ("bb-estrategico", "Estratégico Passivo", "passivo", None),
     ("master-reu", "Master Réu", "passivo", "Réu - Master Liquidante"),
     ("ativos-reu", "Ativos Réu", "passivo", "Réu - Ativos S/A"),
     ("trabalhista", "Trabalhista", "passivo", "Trabalhista"),
@@ -33,7 +34,7 @@ EQUIPES = [
     ("ativos-autor", "Ativos Autor", "credito", "Autor - Banese e Ativos S/A"),
     ("autor-recursal", "Autor — Recursal", "credito", None),
     ("ajuizamento", "Ajuizamento", "credito", None),
-    ("estrategico-autor", "Estratégico Autor", "credito", None),
+    ("estrategico-autor", "Estratégico Ativo", "credito", None),
     ("equipe-mista", "Equipe Mista", "especializada", None),
     # key preservada do Flow: Controladoria sucede o antigo BB Cadastro
     ("bb-cadastro", "Controladoria", "especializada", "Réu - BB Cadastro Técnico"),
@@ -60,7 +61,8 @@ LINHAS = [
      "BB Autor", ["bb-autor-processual", "autor-recursal", "estrategico-autor", "ajuizamento"]),
     ("Ativos S.A.", "Ativos Réu", "passivo",
      "Ativos S.A. - Réu", ["ativos-reu"]),
-    # pendente: abrir o valor histórico entre Ativos Autor e Banese Autor
+    # decisão 2026-07-29: o histórico Banese/Ativos fica AQUI; a separação
+    # com a linha Banese Autor vale só para lançamentos daqui pra frente
     ("Ativos S.A.", "Ativos Autor", "credito",
      "Banese/Ativos - Autor", ["ativos-autor", "ajuizamento"]),
     ("Banese", "Banese Réu", "passivo", None, ["ativos-reu"]),
@@ -75,6 +77,12 @@ LINHAS = [
 INFRA = [
     ("Administrativo", ["adm"]),
     ("Tecnologia", ["ti"]),
+]
+
+# alocações DIRETAS no centro de faturamento (equipe atende o cliente como um
+# todo, sem linha de receita própria — caso do Estratégico Passivo no BB)
+DIRETAS = [
+    ("Banco do Brasil", "bb-estrategico"),
 ]
 
 
@@ -160,6 +168,9 @@ class Command(BaseCommand):
             for s in slugs:
                 Alocacao.objects.get_or_create(centro=centros[nome], equipe=equipes[s],
                                                defaults={"percentual": 100.0})
+        for nome, slug in DIRETAS:
+            Alocacao.objects.get_or_create(centro=centros[nome], equipe=equipes[slug],
+                                           defaults={"percentual": 100.0})
 
         self.stdout.write(self.style.SUCCESS(
             f"Estrutura: {len(centros)} centros · linhas +{criadas}/{atualizadas} atualizadas · "
