@@ -36,3 +36,6 @@ npm-debug.log*
 .playwright-cli/
 __pycache__/
 *.pyc
+
+# Pauta de conversa com o DP - documento de trabalho, nao versionado
+duvidas-dp.md

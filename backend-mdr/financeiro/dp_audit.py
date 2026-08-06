@@ -106,6 +106,7 @@ ENTIDADES = {
     "dp_folha_item": "linha da folha",
     "dp_lideranca": "liderança",
     "dp_documento": "documento",
+    "dp_dependente": "dependente",
     "ef_relatorio_exercicio": "relatório do exercício",
 }
 

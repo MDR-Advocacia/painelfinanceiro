@@ -81,6 +81,62 @@ class DpColaboradorSerializer(serializers.ModelSerializer):
     equipe_nome = serializers.CharField(source='equipe_ref.nome', read_only=True, default=None)
     equipe_id = serializers.PrimaryKeyRelatedField(
         source='equipe_ref', queryset=Equipe.objects.all(), allow_null=True, required=False)
+    salario_familia = serializers.SerializerMethodField()
+
+    def _teto_salario_familia(self) -> float:
+        """Teto vigente, buscado UMA vez por requisição.
+
+        O serializer é reaproveitado no many=True da listagem, então cachear na
+        instância evita uma query por linha do quadro.
+        """
+        if not hasattr(self, "_teto_sf"):
+            from .models import DpTabelaFiscal
+            t = DpTabelaFiscal.objects.order_by("-vigencia_inicio").first()
+            self._teto_sf = float(getattr(t, "salario_familia_teto", 0) or 0) if t else 0.0
+        return self._teto_sf
+
+    def get_salario_familia(self, obj):
+        """Situação do salário-família DESTA pessoa, resumida para o cadastro.
+
+        Existe para o DP conseguir varrer o quadro e achar quem está irregular
+        sem abrir ficha por ficha. Os três requisitos são checados juntos, que é
+        como eles valem na prática: ter dependente na idade, a remuneração caber
+        no teto e a comprovação estar em dia.
+
+        `situacao` é o que a tela pinta:
+          sem_dependente · nao_clt · sem_cota (idade passou) ·
+          acima_teto (perde no mês) · pendente (comprovação vencida) · regular
+        """
+        from datetime import date as _date
+        deps = [d for d in obj.dependentes.all() if d.ativo]
+        base = {"dependentes": len(deps), "cotas": 0, "pendencias": 0,
+                "detalhe": [], "situacao": "sem_dependente", "teto": self._teto_salario_familia()}
+        if not deps:
+            return base
+        if obj.regime != "clt":
+            base["situacao"] = "nao_clt"
+            return base
+
+        hoje = _date.today()
+        com_cota = [d for d in deps if d.elegivel_em(hoje.year, hoje.month)]
+        base["cotas"] = len(com_cota)
+        if not com_cota:
+            base["situacao"] = "sem_cota"
+            return base
+
+        teto = base["teto"]
+        if teto and float(obj.salario_bruto or 0) > teto:
+            # não é irregularidade: é a regra de renda. Some no mês em que a
+            # pessoa cair abaixo do teto.
+            base["situacao"] = "acima_teto"
+            return base
+
+        pend = [{"nome": d.nome, "pendencia": p} for d in com_cota
+                if (p := d.comprovacao_pendente_em(hoje))]
+        base["pendencias"] = len(pend)
+        base["detalhe"] = pend
+        base["situacao"] = "pendente" if pend else "regular"
+        return base
 
     class Meta:
         model = DpColaborador
@@ -92,7 +148,8 @@ class DpColaboradorSerializer(serializers.ModelSerializer):
             'cargo_id', 'cargo_nome', 'regime', 'regime_label', 'status',
             'data_entrada', 'data_admissao', 'data_demissao',
             'salario_bruto', 'saldo_livre', 'vt', 'opta_vt', 'va',
-            'conta_bb', 'pix', 'conta_caixa', 'created_at', 'updated_at',
+            'conta_bb', 'pix', 'conta_caixa', 'salario_familia',
+            'created_at', 'updated_at',
         ]
         read_only_fields = ['matricula']
 

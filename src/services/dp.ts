@@ -27,6 +27,18 @@ export interface DpColaborador {
   data_entrada: string | null; data_admissao: string | null; data_demissao: string | null;
   salario_bruto: number; saldo_livre: number; vt: number; opta_vt: boolean; va: number;
   conta_bb: string; pix: string; conta_caixa: string;
+  /** Situação do salário-família desta pessoa, resumida para o cadastro. */
+  salario_familia?: DpSalarioFamiliaStatus;
+}
+/** Os três requisitos do salário-família avaliados juntos, como valem na prática. */
+export interface DpSalarioFamiliaStatus {
+  dependentes: number;
+  /** dependentes que ainda geram cota (idade / invalidez) */
+  cotas: number;
+  pendencias: number;
+  detalhe: { nome: string; pendencia: string }[];
+  teto: number;
+  situacao: "sem_dependente" | "nao_clt" | "sem_cota" | "acima_teto" | "pendente" | "regular";
 }
 export interface DpLideranca {
   id: string; nome: string; e_supervisor: boolean; e_coordenador: boolean;
@@ -77,11 +89,37 @@ async function j<T>(res: Response): Promise<T> {
 }
 const H = () => ({ "Content-Type": "application/json", ...authHeaders() });
 
+/** Dependente do colaborador — existe para o salário-família. */
+export interface DpDependente {
+  id: string;
+  nome: string;
+  data_nascimento: string;
+  nascimento_br: string;
+  idade: number;
+  tipo: "filho" | "enteado" | "tutelado";
+  tipo_label: string;
+  cpf: string;
+  invalido: boolean;
+  ativo: boolean;
+  observacao: string;
+  vacinacao_valida_ate: string | null;
+  frequencia_escolar_valida_ate: string | null;
+  /** gera cota hoje? (só idade/tipo — a renda do mês é testada na folha) */
+  elegivel_hoje: boolean;
+  /** mês/ano em que a cota se encerra (null = inválido, sem limite) */
+  cota_ate: string | null;
+  /** texto da pendência de comprovação, ou "" se está em dia */
+  comprovacao_pendente: string;
+}
+
 export const dpApi = {
   resumo: () => fetch(`${API_URL}/dp/colaboradores/resumo/`, { headers: authHeaders() }).then((r) => j<DpResumo>(r)),
 
   listar: (p: { busca?: string; regime?: string; status?: string; cc?: string; unidade?: string;
-                supervisor?: string; coordenador?: string; limit?: number; offset?: number }) => {
+                supervisor?: string; coordenador?: string;
+                /** situação do salário-família (ex.: "pendente") */
+                sf?: string;
+                limit?: number; offset?: number }) => {
     const qs = new URLSearchParams();
     Object.entries(p).forEach(([k, v]) => { if (v !== undefined && v !== "") qs.set(k, String(v)); });
     return fetch(`${API_URL}/dp/colaboradores/?${qs}`, { headers: authHeaders() })
@@ -105,6 +143,26 @@ export const dpApi = {
   documentos: (id: string) =>
     fetch(`${API_URL}/dp/colaboradores/${id}/documentos/`, { headers: authHeaders() })
       .then((r) => j<DpDocumento[]>(r)),
+
+  dependentes: (id: string) =>
+    fetch(`${API_URL}/dp/colaboradores/${id}/dependentes/`, { headers: authHeaders() })
+      .then((r) => j<DpDependente[]>(r)),
+
+  criarDependente: (id: string, dados: Partial<DpDependente>) =>
+    fetch(`${API_URL}/dp/colaboradores/${id}/dependentes/`, {
+      method: "POST", headers: H(), body: JSON.stringify(dados),
+    }).then((r) => j<DpDependente>(r)),
+
+  editarDependente: (id: string, depId: string, dados: Partial<DpDependente>) =>
+    fetch(`${API_URL}/dp/colaboradores/${id}/dependentes/${depId}/`, {
+      method: "PATCH", headers: H(), body: JSON.stringify(dados),
+    }).then((r) => j<DpDependente>(r)),
+
+  /** Inativa (nunca apaga: quem já recebeu cota fica no histórico da folha). */
+  removerDependente: (id: string, depId: string) =>
+    fetch(`${API_URL}/dp/colaboradores/${id}/dependentes/${depId}/`, {
+      method: "DELETE", headers: authHeaders(),
+    }).then((r) => j<DpDependente>(r)),
 
   enviarDocumento: async (id: string, arquivo: File, tipo = "contrato", descricao = "") => {
     const fd = new FormData();
@@ -206,6 +264,8 @@ export interface DpFolhaItem {
   faltas_dias: number; faltas_horas: number; desc_faltas: number;
   desc_inss: number; desc_vt: number; vt_com_faltas: number; va_com_faltas: number;
   saldo_livre: number; premiacoes: number; acerto_contabil: number;
+  /** benefício previdenciário: entra no total_pagar, mas NÃO no custo_total */
+  salario_familia?: number; salario_familia_cotas?: number;
   total_pagar: number; custo_provisoes: number; inss_patronal: number; custo_total: number;
   memoria: Record<string, unknown>;
 }
@@ -215,7 +275,14 @@ export interface DpFolhaTotais {
 export interface DpRateioLinha {
   centro_custo_nome: string; nucleo: string; headcount: number;
   salarios: number; vt: number; va: number; saldo_livre: number;
-  premios: number; acertos: number; folha: number; patronal: number;
+  premios: number; acertos: number;
+  /** parcela de CUSTO do que foi pago (já sem o salário-família) */
+  folha: number;
+  /** desembolso cheio, incluindo o salário-família */
+  a_pagar: number;
+  /** adiantado pelo escritório e compensado na GPS — não é custo */
+  salario_familia: number;
+  patronal: number;
   decimo: number; ferias: number; terco: number; fgts: number;
   multa_fgts: number; recesso: number; provisoes: number;
   custo: number; percentual: number;
@@ -223,6 +290,7 @@ export interface DpRateioLinha {
 export interface DpNucleoLinha {
   nucleo: string; centros: number; headcount: number; folha: number;
   provisoes: number; patronal: number; custo: number; percentual: number;
+  salario_familia: number;
 }
 export interface DpRateio {
   linhas: DpRateioLinha[]; nucleos: DpNucleoLinha[];

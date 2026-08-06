@@ -3,7 +3,11 @@
 # O motor espelha a planilha do DP com as correções do estudo
 # (docs/controle-pessoal-plano.md):
 #   • INSS: progressivo OFICIAL com parcela a deduzir (a planilha tinha um bug
-#     de lookup que pegava a faixa errada) e teto na última faixa.
+#     de lookup que pegava a faixa errada) e teto na última faixa, aplicado UMA
+#     vez sobre a base única da competência (salário + férias + 1/3).
+#   • Salário-família: cota por dependente elegível, calculada na competência.
+#     Não é remuneração — fica fora de INSS/FGTS — e não é custo do escritório:
+#     a empresa adianta e compensa na GPS (ver `salario_familia` abaixo).
 #   • Provisões: base configurável na tabela fiscal ("bruto_menos_inss" espelha
 #     a planilha; "bruto" é o padrão contábil) — decisão pendente com o DP.
 #   • VT com faltas: desconta as faltas DA PRÓPRIA competência (a planilha
@@ -54,6 +58,58 @@ def calcular_inss(salario: float, faixas: list) -> tuple:
     ultima = faixas[-1]
     teto = round(ultima["ate"] * ultima["aliquota"] - ultima["deducao"], 2)
     return teto, {"regra": "acima do teto", "teto_desconto": teto}
+
+
+def calcular_salario_familia(colab, comp, fiscal, remuneracao: float) -> tuple:
+    """Cotas de salário-família da competência → (valor, cotas, memória).
+
+    Três regras, e as três dependem do MÊS, não do cadastro:
+      • a remuneração do mês tem que caber no teto legal (quem estoura por hora
+        extra ou férias perde a cota naquele mês e volta no seguinte);
+      • cada dependente elegível vale uma cota (corte aos 14 anos, salvo
+        inválido, que não tem limite de idade);
+      • comprovação vencida gera AVISO, não corte automático — suspender
+        benefício é decisão do DP (ver docstring de DpDependente).
+
+    Só CLT: estagiário, associado e PJ não são segurados empregados.
+    """
+    if colab.regime != "clt":
+        return 0.0, 0, {}
+    teto = float(getattr(fiscal, "salario_familia_teto", 0) or 0)
+    cota = float(getattr(fiscal, "salario_familia_cota", 0) or 0)
+    if not cota:
+        return 0.0, 0, {}
+
+    deps = [d for d in colab.dependentes.all() if d.elegivel_em(comp.ano, comp.mes)]
+    if not deps:
+        return 0.0, 0, {}
+
+    # último dia da competência: é a data em que se afere idade e comprovação
+    if comp.mes == 12:
+        referencia = date(comp.ano, 12, 31)
+    else:
+        referencia = date(comp.ano, comp.mes + 1, 1) - timedelta(days=1)
+
+    pendencias = [f"{d.nome}: {p}" for d in deps
+                  if (p := d.comprovacao_pendente_em(referencia))]
+
+    if teto and remuneracao > teto:
+        mem = {"salario_familia": (
+            f"sem direito neste mês: remuneração {remuneracao:.2f} acima do teto "
+            f"{teto:.2f} ({len(deps)} dependente(s) elegível(is) por idade)")}
+        return 0.0, 0, mem
+
+    valor = round(cota * len(deps), 2)
+    mem = {"salario_familia": (
+        f"{len(deps)} cota(s) × {cota:.2f} = {valor:.2f} "
+        f"(remuneração {remuneracao:.2f} dentro do teto {teto:.2f}) — "
+        f"adiantado pelo escritório e compensado na GPS, não é custo")}
+    if pendencias:
+        mem["salario_familia_pendencias"] = (
+            "PAGO, mas com comprovação irregular — regularize ou suspenda com o "
+            "DP, porque valor pago sem comprovação não é compensável: "
+            + "; ".join(pendencias))
+    return valor, len(deps), mem
 
 
 def calcular_item(colab: DpColaborador, lanc, comp: DpCompetencia, fiscal: DpTabelaFiscal) -> dict:
@@ -137,17 +193,32 @@ def calcular_item(colab: DpColaborador, lanc, comp: DpCompetencia, fiscal: DpTab
             mem["ferias"] = (f"{fer_dias} dia(s) de ausência programada — "
                              f"contrato sem direito legal a férias")
 
-    # INSS (só CLT) — tabela da vigência.
-    # Férias têm tributação PRÓPRIA, separada do salário: por isso duas contas.
+    # INSS (só CLT) — tabela da vigência, sobre a BASE ÚNICA da competência:
+    # salário do mês + remuneração de férias + 1/3.
+    #
+    # Já foi feito em duas contas separadas (uma pro salário, outra pras férias),
+    # e estava ERRADO nos dois sentidos: cada metade entrava na tabela pela
+    # primeira faixa, então na faixa média retinha A MENOS que o devido; e o teto
+    # era aplicado DUAS vezes, então acima dele retinha muito A MAIS — dinheiro
+    # saindo do bolso do colaborador (R$ 574,93 num salário de 12k com 15 dias
+    # de férias). O salário-de-contribuição é o total ganho na competência, e a
+    # tabela progressiva se aplica UMA vez sobre ele.
+    #
+    # NÃO confundir com o IRRF, onde a regra é a oposta: lá as férias se apuram
+    # separadas dos demais rendimentos do mês.
+    #
+    # Fora da base: abono pecuniário (indenizatório) e salário-família
+    # (benefício previdenciário, não remuneração).
     if clt:
-        desc_inss, mem_inss = calcular_inss(sal_faltas, fiscal.inss_faixas)
+        base_inss = round(sal_faltas + fer_valor + fer_terco, 2)
+        desc_inss, mem_inss = calcular_inss(base_inss, fiscal.inss_faixas)
         mem["inss"] = mem_inss
         if fer_valor:
-            inss_fer, mem_inss_fer = calcular_inss(fer_valor + fer_terco, fiscal.inss_faixas)
-            desc_inss = round(desc_inss + inss_fer, 2)
-            mem["inss_ferias"] = mem_inss_fer
+            mem["inss_base"] = (f"base única da competência: salário {sal_faltas} "
+                                f"+ férias {fer_valor} + 1/3 {fer_terco} = {base_inss}")
     else:
         desc_inss = 0.0
+        base_inss = 0.0
 
     # VT 6% (só CLT que opta)
     desc_vt = round(sal_faltas * fiscal.vt_percent, 2) if (clt and colab.opta_vt and vt > 0) else 0.0
@@ -155,9 +226,18 @@ def calcular_item(colab: DpColaborador, lanc, comp: DpCompetencia, fiscal: DpTab
         mem["desc_vt"] = f"{sal_faltas}×{fiscal.vt_percent:.0%}"
 
     sal_desc = round(sal_faltas - desc_inss - desc_vt, 2)
-    # TOTAL a pagar = salário c/ descontos + VT + VA + saldo livre + acerto + prêmios
+
+    # SALÁRIO-FAMÍLIA — o teto se afere pela remuneração DO MÊS, que é a mesma
+    # base do INSS (salário + férias + 1/3). Benefício previdenciário: não entra
+    # em base de INSS nem de FGTS, por isso é calculado depois delas.
+    sal_familia, sf_cotas, mem_sf = calcular_salario_familia(
+        colab, comp, fiscal, base_inss)
+    mem.update(mem_sf)
+
+    # TOTAL a pagar = salário c/ descontos + VT + VA + saldo livre + acerto +
+    # prêmios + férias + salário-família
     total_pagar = round(sal_desc + vt_faltas + va_faltas + saldo + acerto + premio
-                        + fer_valor + fer_terco + fer_abono_valor, 2)
+                        + fer_valor + fer_terco + fer_abono_valor + sal_familia, 2)
 
     # Provisões
     if clt:
@@ -195,8 +275,13 @@ def calcular_item(colab: DpColaborador, lanc, comp: DpCompetencia, fiscal: DpTab
         "fgts_mensal": fgts, "multa_fgts_mensal": multa, "recesso_mensal": recesso,
         "ferias_dias": fer_dias, "ferias_valor": fer_valor, "ferias_terco": fer_terco,
         "ferias_abono": fer_abono_valor, "ferias_inicio": fer_inicio, "ferias_fim": fer_fim,
+        "salario_familia": sal_familia, "salario_familia_cotas": sf_cotas,
         "inss_patronal": patronal, "custo_provisoes": provisoes,
-        "custo_total": round(total_pagar + provisoes + patronal, 2),
+        # o salário-família SAI do custo: entrou no total_pagar porque o
+        # colaborador recebe, mas quem arca é o INSS — o escritório só adianta
+        # e compensa na guia. Mantê-lo aqui inflaria a folha e derrubaria a
+        # margem por cliente sem que um centavo tivesse saído do caixa.
+        "custo_total": round(total_pagar - sal_familia + provisoes + patronal, 2),
         "memoria": mem,
         "ajuste_manual": ajustada,
         "ajuste_motivo": (lanc.ajuste_motivo if lanc else "") or "",
@@ -211,7 +296,11 @@ def elegiveis(comp: DpCompetencia):
     ainda entra na folha, como na planilha)."""
     inicio = date(comp.ano, comp.mes, 1)
     from django.db.models import Q
-    return DpColaborador.objects.select_related("centro_custo", "cargo").filter(
+    # prefetch dos dependentes: o salário-família lê a lista de cada um, e sem
+    # isso o recálculo da folha vira uma query por colaborador
+    return DpColaborador.objects.select_related("centro_custo", "cargo").prefetch_related(
+        "dependentes"
+    ).filter(
         Q(status="ativo") | Q(data_demissao__gte=inicio)
     ).exclude(data_admissao__gt=date(comp.ano, comp.mes, 28))
 
@@ -398,7 +487,8 @@ class DpCompetenciaViewSet(viewsets.ViewSet):
         total = qs.count()
         from django.db.models import Sum
         ag = qs.aggregate(pagar=Sum("total_pagar"), prov=Sum("custo_provisoes"),
-                          patronal=Sum("inss_patronal"), custo=Sum("custo_total"))
+                          patronal=Sum("inss_patronal"), custo=Sum("custo_total"),
+                          sal_familia=Sum("salario_familia"))
         try:
             limit = min(int(request.query_params.get("limit", 50)), 500)
             offset = max(int(request.query_params.get("offset", 0)), 0)
@@ -411,7 +501,8 @@ class DpCompetenciaViewSet(viewsets.ViewSet):
                   "custo_total", "ajuste_manual", "ajuste_motivo", "vt", "va", "cargo_nome",
                   "em_rescisao", "salario_com_faltas", "salario_com_descontos",
                   "ferias_dias", "ferias_valor", "ferias_terco", "ferias_abono",
-                  "ferias_inicio", "ferias_fim"]
+                  "ferias_inicio", "ferias_fim",
+                  "salario_familia", "salario_familia_cotas"]
         items = []
         for it in qs[offset:offset + limit]:
             row = {k: getattr(it, k) for k in campos}
@@ -422,6 +513,9 @@ class DpCompetenciaViewSet(viewsets.ViewSet):
         return Response({"total": total, "items": items, "totais": {
             "total_pagar": round(ag["pagar"] or 0, 2), "provisoes": round(ag["prov"] or 0, 2),
             "inss_patronal": round(ag["patronal"] or 0, 2), "custo_total": round(ag["custo"] or 0, 2),
+            # exposto à parte porque está DENTRO do total_pagar e FORA do custo:
+            # sem isso as duas colunas parecem não fechar
+            "salario_familia": round(ag["sal_familia"] or 0, 2),
         }})
 
     @action(detail=True, methods=["get"])
@@ -442,6 +536,10 @@ class DpCompetenciaViewSet(viewsets.ViewSet):
             vt=Sum("vt_com_faltas"), va=Sum("va_com_faltas"), saldo_livre=Sum("saldo_livre"),
             premios=Sum("premiacoes"), acertos=Sum("acerto_contabil"),
             folha=Sum("total_pagar"), patronal=Sum("inss_patronal"),
+            # dentro de `folha`, fora de `custo`: custo = folha − salario_familia
+            # + provisoes + patronal. Sem esta coluna a tabela do rateio não
+            # fecha e ninguém entende por quê.
+            salario_familia=Sum("salario_familia"),
             decimo=Sum("decimo_mensal"), ferias=Sum("ferias_mensal"),
             terco=Sum("terco_ferias_mensal"), fgts=Sum("fgts_mensal"),
             multa=Sum("multa_fgts_mensal"), recesso=Sum("recesso_mensal"),
@@ -466,7 +564,13 @@ class DpCompetenciaViewSet(viewsets.ViewSet):
                 "saldo_livre": round(l["saldo_livre"] or 0, 2),
                 "premios": round(l["premios"] or 0, 2),
                 "acertos": round(l["acertos"] or 0, 2),
-                "folha": round(l["folha"] or 0, 2),
+                # `folha` aqui é a parcela que é CUSTO do escritório: o valor
+                # pago MENOS o salário-família, que o INSS reembolsa. Assim
+                # folha + provisoes + patronal == custo, exatamente. `a_pagar`
+                # guarda o desembolso cheio, pra quem precisa do outro ângulo.
+                "folha": round((l["folha"] or 0) - (l["salario_familia"] or 0), 2),
+                "a_pagar": round(l["folha"] or 0, 2),
+                "salario_familia": round(l["salario_familia"] or 0, 2),
                 "patronal": round(l["patronal"] or 0, 2),
                 "decimo": round(l["decimo"] or 0, 2), "ferias": round(l["ferias"] or 0, 2),
                 "terco": round(l["terco"] or 0, 2), "fgts": round(l["fgts"] or 0, 2),
@@ -483,10 +587,11 @@ class DpCompetenciaViewSet(viewsets.ViewSet):
         for l in detalhado:
             n = por_nucleo.setdefault(l["nucleo"], {
                 "nucleo": l["nucleo"], "headcount": 0, "folha": 0.0,
-                "provisoes": 0.0, "patronal": 0.0, "custo": 0.0, "centros": 0})
+                "provisoes": 0.0, "patronal": 0.0, "custo": 0.0,
+                "salario_familia": 0.0, "centros": 0})
             n["headcount"] += l["headcount"]
             n["centros"] += 1
-            for k in ("folha", "provisoes", "patronal", "custo"):
+            for k in ("folha", "provisoes", "patronal", "custo", "salario_familia"):
                 n[k] = round(n[k] + l[k], 2)
         for n in por_nucleo.values():
             n["percentual"] = round(n["custo"] / total_geral * 100, 1)

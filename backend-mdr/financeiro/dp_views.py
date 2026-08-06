@@ -13,8 +13,8 @@ from rest_framework.parsers import FormParser, MultiPartParser
 from rest_framework.response import Response
 
 from .models import (
-    DP_MATRICULA_BASE, DpAuditLog, DpCargo, DpCentroCusto, DpColaborador, DpDocumento,
-    DpEvento, DpLideranca,
+    DP_MATRICULA_BASE, DpAuditLog, DpCargo, DpCentroCusto, DpColaborador, DpDependente,
+    DpDocumento, DpEvento, DpLideranca,
 )
 from .dp_audit import humanizar
 from .dp_escopo import filtrar_colaboradores
@@ -44,6 +44,43 @@ def audit(request, acao: str, entidade: str, entidade_id, antes=None, depois=Non
         colaborador=colaborador,
         colaborador_nome=(colaborador.nome if colaborador else ""),
     )
+
+
+def _data_ou_none(v):
+    """Aceita 'AAAA-MM-DD' (ou vazio) e devolve date/None sem estourar."""
+    if not v:
+        return None
+    try:
+        return datetime.strptime(str(v)[:10], "%Y-%m-%d").date()
+    except (ValueError, TypeError):
+        return None
+
+
+def _dependente_json(d: DpDependente, colab=None) -> dict:
+    """Além dos campos, devolve o que a TELA precisa decidir sem recalcular:
+    se hoje ele gera cota e se a comprovação está pendente."""
+    hoje = date.today()
+    idade = (hoje.year - d.data_nascimento.year
+             - ((hoje.month, hoje.day) < (d.data_nascimento.month, d.data_nascimento.day)))
+    ano14, mes14 = d.faz_14_em()
+    return {
+        "id": str(d.id),
+        "nome": d.nome,
+        "data_nascimento": d.data_nascimento.isoformat(),
+        "nascimento_br": f"{d.data_nascimento:%d/%m/%Y}",
+        "idade": idade,
+        "tipo": d.tipo, "tipo_label": d.get_tipo_display(),
+        "cpf": d.cpf, "invalido": d.invalido, "ativo": d.ativo,
+        "observacao": d.observacao,
+        "vacinacao_valida_ate": (d.vacinacao_valida_ate.isoformat()
+                                 if d.vacinacao_valida_ate else None),
+        "frequencia_escolar_valida_ate": (d.frequencia_escolar_valida_ate.isoformat()
+                                          if d.frequencia_escolar_valida_ate else None),
+        # gera cota HOJE? (só idade/tipo — a renda do mês é testada na folha)
+        "elegivel_hoje": d.elegivel_em(hoje.year, hoje.month),
+        "cota_ate": (None if d.invalido else f"{mes14:02d}/{ano14}"),
+        "comprovacao_pendente": d.comprovacao_pendente_em(hoje),
+    }
 
 
 def _doc_json(d: DpDocumento) -> dict:
@@ -146,8 +183,11 @@ class DpCargoViewSet(viewsets.ModelViewSet):
 class DpColaboradorViewSet(viewsets.ModelViewSet):
     """Quadro de pessoal. list aceita: ?busca= (nome/matrícula/cpf), ?regime=,
     ?status=, ?cc= (uuid), ?unidade=, ?limit/?offset — devolve {total, items}."""
+    # prefetch dos dependentes: o serializer resume a situação do salário-família
+    # em cada linha do quadro — sem isso seria uma query por colaborador
     queryset = DpColaborador.objects.select_related(
-        "centro_custo", "cargo", "supervisor", "coordenador").all()
+        "centro_custo", "cargo", "supervisor", "coordenador").prefetch_related(
+        "dependentes").all()
     serializer_class = DpColaboradorSerializer
     permission_classes = _PERM
 
@@ -173,6 +213,19 @@ class DpColaboradorViewSet(viewsets.ModelViewSet):
             qs = qs.filter(coordenador_id=request.query_params["coordenador"])
         if request.query_params.get("unidade"):
             qs = qs.filter(unidade=request.query_params["unidade"])
+
+        # Filtro por situação do salário-família (?sf=pendente|regular|…).
+        # A situação depende de idade e de datas de comprovação, que o ORM não
+        # resolve num filter — então avaliamos em Python. Pré-filtramos por
+        # "tem dependente ativo" no banco para não varrer o quadro inteiro.
+        sf = (request.query_params.get("sf") or "").strip()
+        if sf:
+            qs = qs.filter(dependentes__ativo=True).distinct()
+            ser = self.get_serializer()
+            ids = [c.id for c in qs.prefetch_related("dependentes")
+                   if ser.get_salario_familia(c)["situacao"] == sf]
+            qs = self.get_queryset().filter(id__in=ids)
+
         total = qs.count()
         try:
             limit = min(int(request.query_params.get("limit", 50)), 500)
@@ -237,6 +290,96 @@ class DpColaboradorViewSet(viewsets.ModelViewSet):
                                 autor=_quem(request))
         audit(request, "desligar", "dp_colaborador", obj.id, antes=antes, depois=_snap(obj))
         return Response(self.get_serializer(obj).data)
+
+    # ─────────────── dependentes (salário-família) ───────────────
+
+    @action(detail=True, methods=["get", "post"])
+    def dependentes(self, request, pk=None):
+        """GET lista; POST cadastra. O que decide a cota é a DATA DE NASCIMENTO
+        (a cota morre no mês em que o dependente faz 14 anos) e a validade das
+        comprovações — por isso nada aqui é uma contagem solta."""
+        colab = self.get_object()
+        if request.method == "GET":
+            return Response([_dependente_json(d, colab)
+                             for d in colab.dependentes.all()])
+
+        nome = (request.data.get("nome") or "").strip()
+        if not nome:
+            return Response({"detail": "Informe o nome do dependente."}, status=400)
+        nasc = _data_ou_none(request.data.get("data_nascimento"))
+        if not nasc:
+            return Response({"detail": "Informe a data de nascimento (AAAA-MM-DD). "
+                                       "É ela que define até quando a cota é devida."},
+                            status=400)
+        if nasc > date.today():
+            return Response({"detail": "Data de nascimento no futuro."}, status=400)
+
+        dep = DpDependente.objects.create(
+            colaborador=colab, nome=nome[:150], data_nascimento=nasc,
+            tipo=(request.data.get("tipo") or "filho"),
+            cpf=(request.data.get("cpf") or "")[:14],
+            invalido=bool(request.data.get("invalido")),
+            vacinacao_valida_ate=_data_ou_none(request.data.get("vacinacao_valida_ate")),
+            frequencia_escolar_valida_ate=_data_ou_none(
+                request.data.get("frequencia_escolar_valida_ate")),
+            observacao=(request.data.get("observacao") or "")[:250],
+        )
+        audit(request, "criar", "dp_dependente", dep.id, colaborador=colab,
+              depois={"colaborador": colab.nome, "dependente": dep.nome,
+                      "nascimento": f"{nasc:%d/%m/%Y}", "tipo": dep.get_tipo_display()})
+        return Response(_dependente_json(dep, colab), status=201)
+
+    @action(detail=True, methods=["patch", "delete"],
+            url_path=r"dependentes/(?P<dep_id>[^/.]+)")
+    def dependente(self, request, pk=None, dep_id=None):
+        """PATCH edita; DELETE inativa (não apaga: quem já recebeu cota precisa
+        continuar existindo no histórico da folha)."""
+        colab = self.get_object()
+        dep = colab.dependentes.filter(pk=dep_id).first()
+        if not dep:
+            return Response({"detail": "Dependente não encontrado."}, status=404)
+
+        if request.method == "DELETE":
+            dep.ativo = False
+            dep.save(update_fields=["ativo", "updated_at"])
+            audit(request, "excluir", "dp_dependente", dep.id, colaborador=colab,
+                  antes={"dependente": dep.nome, "situacao": "ativo"},
+                  depois={"colaborador": colab.nome, "dependente": dep.nome,
+                          "situacao": "inativado (histórico preservado)"})
+            return Response(_dependente_json(dep, colab))
+
+        antes = {"nome": dep.nome, "tipo": dep.get_tipo_display(),
+                 "vacinacao": str(dep.vacinacao_valida_ate or "—"),
+                 "frequencia": str(dep.frequencia_escolar_valida_ate or "—"),
+                 "situacao": "ativo" if dep.ativo else "inativo"}
+        if "nome" in request.data:
+            dep.nome = (request.data.get("nome") or dep.nome)[:150]
+        if "tipo" in request.data:
+            dep.tipo = request.data.get("tipo") or dep.tipo
+        if "cpf" in request.data:
+            dep.cpf = (request.data.get("cpf") or "")[:14]
+        if "invalido" in request.data:
+            dep.invalido = bool(request.data.get("invalido"))
+        if "ativo" in request.data:
+            dep.ativo = bool(request.data.get("ativo"))
+        if "observacao" in request.data:
+            dep.observacao = (request.data.get("observacao") or "")[:250]
+        for campo in ("data_nascimento", "vacinacao_valida_ate",
+                      "frequencia_escolar_valida_ate"):
+            if campo in request.data:
+                valor = _data_ou_none(request.data.get(campo))
+                if campo == "data_nascimento" and not valor:
+                    return Response({"detail": "Data de nascimento inválida."}, status=400)
+                setattr(dep, campo, valor)
+        dep.save()
+        audit(request, "editar", "dp_dependente", dep.id, colaborador=colab,
+              antes=antes,
+              depois={"colaborador": colab.nome, "nome": dep.nome,
+                      "tipo": dep.get_tipo_display(),
+                      "vacinacao": str(dep.vacinacao_valida_ate or "—"),
+                      "frequencia": str(dep.frequencia_escolar_valida_ate or "—"),
+                      "situacao": "ativo" if dep.ativo else "inativo"})
+        return Response(_dependente_json(dep, colab))
 
     # ─────────────── documentos do colaborador (contrato em PDF) ───────────────
 
@@ -553,6 +696,20 @@ def dp_importar(request):
                     continue
                 cargo_nome = _norm(row[11] if len(row) > 11 else None)
                 cargo = cargo_por_nome.get(cargo_nome)
+                if cargo is None and cargo_nome:
+                    # Cargo que existe no quadro mas não na TB_Cargos. Antes isso
+                    # gravava cargo=None EM SILÊNCIO — e como o cargo é quem
+                    # define dias_mes/carga_horária, a folha dessa pessoa passava
+                    # a calcular faltas pelo default (30/220) sem ninguém saber.
+                    # Cria com o mesmo critério já usado pro centro de custo e
+                    # avisa, pra o DP completar a TB_Cargos depois.
+                    cargo = DpCargo.objects.create(
+                        nome=cargo_nome, area=_norm(row[6] if len(row) > 6 else ""),
+                        salario_base=0, dias_mes=30, carga_horaria_mes=220)
+                    cargo_por_nome[cargo_nome] = cargo
+                    resumo["avisos"].append(
+                        f"Cargo criado fora da TB_Cargos: {cargo_nome} "
+                        f"(sem salário base — confira dias/carga com o DP)")
                 regime = _REGIME_MAP.get(_norm(row[13] if len(row) > 13 else "").lower(), "clt")
                 campos = {
                     "nome": nome, "sexo": _norm(row[3]), "cpf": _norm(row[4]),

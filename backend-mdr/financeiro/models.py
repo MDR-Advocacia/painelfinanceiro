@@ -390,6 +390,95 @@ class DpColaborador(models.Model):
         return f"{self.matricula} · {self.nome}"
 
 
+class DpDependente(models.Model):
+    """Dependente do colaborador — existe para o SALÁRIO-FAMÍLIA.
+
+    Guardamos a DATA DE NASCIMENTO, não uma contagem de dependentes, porque a
+    cota morre no mês em que o filho faz 14 anos. Com um número solto alguém
+    teria que lembrar de decrementar na mão todo mês — e vai esquecer. Com a
+    data, a folha para sozinha na competência certa.
+
+    A COMPROVAÇÃO tem validade e é o que mais gera passivo: caderneta de
+    vacinação até os 6 anos (anual) e frequência escolar dos 7 aos 14
+    (semestral). Sem comprovação em dia o benefício deve ser suspenso, e o que
+    foi pago indevidamente NÃO é compensável na GPS — vira custo de verdade.
+    Por isso as datas de validade ficam aqui, e a folha avisa quem está vencido.
+
+    Decisão de produto: vencimento AVISA, não bloqueia sozinho. Suspender
+    pagamento de benefício é decisão do DP, não efeito colateral de um campo
+    em branco — ainda mais na virada, quando ninguém preencheu nada ainda.
+    """
+    TIPOS = [
+        ("filho", "Filho(a)"),
+        ("enteado", "Enteado(a)"),
+        ("tutelado", "Menor sob tutela"),
+    ]
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    colaborador = models.ForeignKey("financeiro.DpColaborador", on_delete=models.CASCADE,
+                                    related_name="dependentes")
+    nome = models.CharField(max_length=150)
+    data_nascimento = models.DateField()
+    tipo = models.CharField(max_length=20, choices=TIPOS, default="filho")
+    cpf = models.CharField(max_length=14, blank=True, default="")
+    # inválido de QUALQUER idade tem direito: o corte dos 14 anos não se aplica
+    invalido = models.BooleanField(
+        default=False, help_text="Dependente inválido — sem limite de idade")
+    # validade das comprovações periódicas (nulo = nunca apresentada)
+    vacinacao_valida_ate = models.DateField(null=True, blank=True)
+    frequencia_escolar_valida_ate = models.DateField(null=True, blank=True)
+    # desligar sem apagar: histórico de quem já recebeu não pode sumir
+    ativo = models.BooleanField(default=True)
+    observacao = models.CharField(max_length=250, blank=True, default="")
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        db_table = 'dp_dependentes'
+        ordering = ['colaborador__nome', 'data_nascimento']
+
+    def __str__(self):
+        return f"{self.nome} ({self.get_tipo_display()})"
+
+    def faz_14_em(self):
+        """(ano, mês) em que completa 14 anos — a cota é devida ATÉ esse mês."""
+        d = self.data_nascimento
+        return (d.year + 14, d.month)
+
+    def elegivel_em(self, ano: int, mes: int) -> bool:
+        """Tem direito à cota nesta competência? (só idade/tipo — a renda do
+        colaborador é testada na folha, porque muda mês a mês)."""
+        if not self.ativo:
+            return False
+        if self.invalido:
+            return True
+        limite = self.faz_14_em()
+        return (ano, mes) <= limite
+
+    def comprovacao_pendente_em(self, referencia) -> str:
+        """Descreve a pendência de comprovação nesta data, ou "" se está em dia.
+
+        Qual documento é exigido depende da IDADE na data de referência: até 6
+        anos é vacinação; dos 7 aos 14, frequência escolar.
+        """
+        if self.invalido:
+            return ""
+        idade = (referencia.year - self.data_nascimento.year
+                 - ((referencia.month, referencia.day)
+                    < (self.data_nascimento.month, self.data_nascimento.day)))
+        if idade <= 6:
+            if not self.vacinacao_valida_ate:
+                return "vacinação nunca apresentada"
+            if self.vacinacao_valida_ate < referencia:
+                return f"vacinação vencida em {self.vacinacao_valida_ate:%d/%m/%Y}"
+        elif idade <= 14:
+            if not self.frequencia_escolar_valida_ate:
+                return "frequência escolar nunca apresentada"
+            if self.frequencia_escolar_valida_ate < referencia:
+                return (f"frequência escolar vencida em "
+                        f"{self.frequencia_escolar_valida_ate:%d/%m/%Y}")
+        return ""
+
+
 class DpEvento(models.Model):
     """Event log de RH: admissão, desligamento, transferência de CC, reajuste,
     edição cadastral. Headcount/turnover/histórico da ficha saem daqui."""
@@ -435,6 +524,13 @@ class DpTabelaFiscal(models.Model):
     provisao_base = models.CharField(max_length=20, default="bruto_menos_inss",
                                      choices=[("bruto_menos_inss", "Bruto − INSS (planilha)"),
                                               ("bruto", "Bruto (padrão contábil)")])
+    # Salário-família: valores oficiais, versionados junto com o resto — mudam
+    # todo ano e um mês fechado precisa continuar usando o valor da época.
+    # Padrões abaixo = vigência de 01/2026.
+    salario_familia_cota = models.FloatField(
+        default=67.54, help_text="Valor da cota por dependente elegível")
+    salario_familia_teto = models.FloatField(
+        default=1980.38, help_text="Remuneração mensal máxima para ter direito")
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 
@@ -556,7 +652,14 @@ class DpFolhaItem(models.Model):
     recesso_mensal = models.FloatField(default=0)
     inss_patronal = models.FloatField(default=0)
     custo_provisoes = models.FloatField(default=0)
-    custo_total = models.FloatField(default=0)  # total_pagar + provisões + patronal
+    # ATENÇÃO: custo_total NÃO inclui o salário-família. Ele entra no
+    # total_pagar (o colaborador recebe) mas é adiantamento compensável na GPS
+    # — quem paga é o INSS. Somá-lo aqui inflaria a folha e derrubaria a margem
+    # por cliente sem que nenhum centavo tenha saído do escritório.
+    custo_total = models.FloatField(default=0)  # total_pagar − sal.família + provisões + patronal
+    # salário-família da competência (benefício previdenciário, não remuneração)
+    salario_familia = models.FloatField(default=0)
+    salario_familia_cotas = models.IntegerField(default=0)
     # férias gozadas NESTE mês (o que efetivamente entra no pagamento)
     ferias_dias = models.IntegerField(default=0)
     ferias_valor = models.FloatField(default=0)          # remuneração dos dias de férias

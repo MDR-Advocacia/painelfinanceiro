@@ -361,6 +361,12 @@ function CompetenciaDetalhe({ comp, editar, onMudou }: {
                       <TituloAjuda titulo="Salário com descontos" ajuda="Salário depois das faltas, do INSS e do vale-transporte — antes de somar benefícios e prêmios." />
                     </TableHead>
                     <TableHead className="hidden text-right text-xs md:table-cell">Prêmios</TableHead>
+                    <TableHead className="hidden text-right text-xs lg:table-cell">
+                      <TituloAjuda
+                        titulo="Sal. família"
+                        ajuda="Cota por dependente elegível. O escritório adianta e compensa na guia do INSS — por isso entra no que a pessoa recebe, mas NÃO conta como custo do escritório."
+                      />
+                    </TableHead>
                     <TableHead className="text-right text-xs">
                       <TituloAjuda titulo="A pagar" ajuda="Valor líquido que a pessoa recebe no mês." />
                     </TableHead>
@@ -414,6 +420,14 @@ function CompetenciaDetalhe({ comp, editar, onMudou }: {
                       <TableCell className="hidden text-right font-mono text-xs md:table-cell">
                         {it.premiacoes ? <span className="text-emerald-700">{fmtBRL(it.premiacoes)}</span> : "—"}
                       </TableCell>
+                      <TableCell className="hidden text-right font-mono text-xs lg:table-cell">
+                        {it.salario_familia ? (
+                          <span className="text-sky-700"
+                                title={`${it.salario_familia_cotas} cota(s) — compensado na GPS, não é custo do escritório`}>
+                            {fmtBRL(it.salario_familia)}
+                          </span>
+                        ) : "—"}
+                      </TableCell>
                       <TableCell className="text-right font-mono text-xs font-semibold">{fmtBRL(it.total_pagar)}</TableCell>
                       <TableCell className="hidden text-right font-mono text-xs sm:table-cell">{fmtBRL(it.custo_total)}</TableCell>
                       {editar && aberta && (
@@ -458,7 +472,7 @@ function CompetenciaDetalhe({ comp, editar, onMudou }: {
                     </TableRow>
                   ))}
                   {!loading && items.length === 0 && (
-                    <TableRow><TableCell colSpan={10} className="py-8 text-center text-sm text-muted-foreground">
+                    <TableRow><TableCell colSpan={11} className="py-8 text-center text-sm text-muted-foreground">
                       Sem itens.
                     </TableCell></TableRow>
                   )}

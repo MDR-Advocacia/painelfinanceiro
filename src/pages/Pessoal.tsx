@@ -33,10 +33,11 @@ import SimulacoesTab from "@/components/dp/SimulacoesTab";
 import FolhaTab from "@/components/dp/FolhaTab";
 import { EquipePicker, CcPicker, ColaboradorPicker, LiderancaPicker, invalidarArvoreCc } from "@/components/dp/Pickers";
 import DocumentosColaborador from "@/components/dp/DocumentosColaborador";
+import DependentesColaborador from "@/components/dp/DependentesColaborador";
 import { usePermissions } from "@/hooks/usePermissions";
 import {
   type DpAuditFiltros, type DpCargo, type DpCentroCusto, type DpColaborador,
-  type DpEvento, type DpLideranca, type DpResumo,
+  type DpEvento, type DpLideranca, type DpResumo, type DpSalarioFamiliaStatus,
   REGIME_LABELS, dpApi, exportApi, fmtBRL, fmtData,
 } from "@/services/dp";
 import { PageHeader } from "@/components/Pagina";
@@ -165,6 +166,9 @@ function QuadroTab({ ccs, cargos, editar, onMudou, filtroExterno, rotuloFiltro, 
   const [cc, setCc] = useState(TODOS);
   const [unidade, setUnidade] = useState("");
   const [supervisor, setSupervisor] = useState<string | null>(null);
+  // filtro de salário-família: serve pro DP achar quem está irregular sem
+  // abrir ficha por ficha
+  const [sf, setSf] = useState(TODOS);
 
   // drill-down do painel: aplica o filtro que veio de lá
   useEffect(() => {
@@ -188,12 +192,13 @@ function QuadroTab({ ccs, cargos, editar, onMudou, filtroExterno, rotuloFiltro, 
     dpApi.listar({
       busca, regime: regime === TODOS ? "" : regime, status: status === TODOS ? "" : status,
       cc: cc === TODOS ? "" : cc, unidade, supervisor: supervisor ?? "",
+      sf: sf === TODOS ? "" : sf,
       limit: PAGE, offset: pagina * PAGE,
     })
       .then((r) => { setItems(r.items); setTotal(r.total); })
       .catch((e) => toast.error(e.message))
       .finally(() => setLoading(false));
-  }, [busca, regime, status, cc, unidade, supervisor, pagina]);
+  }, [busca, regime, status, cc, unidade, supervisor, sf, pagina]);
   useEffect(() => { carregar(); }, [carregar]);
 
   const totalPaginas = Math.max(1, Math.ceil(total / PAGE));
@@ -247,6 +252,19 @@ function QuadroTab({ ccs, cargos, editar, onMudou, filtroExterno, rotuloFiltro, 
           <LiderancaPicker papel="supervisor" valor={supervisor} permiteCriar={false}
                            rotuloVazio="Todos os supervisores" className="w-[200px] text-xs"
                            onChange={(id) => { setSupervisor(id); setPagina(0); }} />
+          {/* achar quem está irregular sem abrir ficha por ficha */}
+          <Select value={sf} onValueChange={(v) => { setSf(v); setPagina(0); }}>
+            <SelectTrigger className="w-[215px] text-xs">
+              <SelectValue placeholder="Salário-família" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value={TODOS}>Salário-família: todos</SelectItem>
+              <SelectItem value="pendente">Comprovação pendente</SelectItem>
+              <SelectItem value="regular">Em dia</SelectItem>
+              <SelectItem value="acima_teto">Acima do teto</SelectItem>
+              <SelectItem value="sem_cota">Cota encerrada (14 anos)</SelectItem>
+            </SelectContent>
+          </Select>
           <button onClick={carregar} className="ml-1 text-muted-foreground hover:text-foreground" title="Atualizar">
             <RefreshCw className={`h-4 w-4 ${loading ? "animate-spin" : ""}`} />
           </button>
@@ -284,6 +302,12 @@ function QuadroTab({ ccs, cargos, editar, onMudou, filtroExterno, rotuloFiltro, 
                 <TableHead className="text-right text-xs">
                   <TituloAjuda titulo="Salário bruto" ajuda="Valor do salário antes dos descontos (INSS, vale-transporte)." />
                 </TableHead>
+                <TableHead className="hidden text-center text-xs md:table-cell">
+                  <TituloAjuda
+                    titulo="Sal. família"
+                    ajuda="Situação do salário-família: se a pessoa tem dependente na idade, se a remuneração cabe no teto e se a comprovação (vacinação até 6 anos, frequência escolar dos 7 aos 14) está em dia. Valor pago sem comprovação não é compensável na guia do INSS."
+                  />
+                </TableHead>
                 <TableHead className="text-center text-xs">Situação</TableHead>
               </TableRow>
             </TableHeader>
@@ -301,6 +325,9 @@ function QuadroTab({ ccs, cargos, editar, onMudou, filtroExterno, rotuloFiltro, 
                   <TableCell className="hidden max-w-[180px] truncate text-xs lg:table-cell">{c.centro_custo_nome}</TableCell>
                   <TableCell className="hidden text-xs lg:table-cell">{c.unidade || "—"}</TableCell>
                   <TableCell className="text-right font-mono text-xs">{fmtBRL(c.salario_bruto)}</TableCell>
+                  <TableCell className="hidden text-center md:table-cell">
+                    <SalarioFamiliaBadge sf={c.salario_familia} />
+                  </TableCell>
                   <TableCell className="text-center">
                     {c.status === "ativo"
                       ? <Badge className="bg-emerald-100 text-[10px] text-emerald-700 hover:bg-emerald-100">Ativo</Badge>
@@ -309,7 +336,7 @@ function QuadroTab({ ccs, cargos, editar, onMudou, filtroExterno, rotuloFiltro, 
                 </TableRow>
               ))}
               {!loading && items.length === 0 && (
-                <TableRow><TableCell colSpan={8} className="py-8 text-center text-sm text-muted-foreground">
+                <TableRow><TableCell colSpan={9} className="py-8 text-center text-sm text-muted-foreground">
                   Nada encontrado com esses filtros.
                 </TableCell></TableRow>
               )}
@@ -343,6 +370,58 @@ function QuadroTab({ ccs, cargos, editar, onMudou, filtroExterno, rotuloFiltro, 
         />
       )}
     </Card>
+  );
+}
+
+/* ───────────────── SALÁRIO-FAMÍLIA: situação no cadastro ───────────────── */
+
+/**
+ * Resume os TRÊS requisitos numa marca só, porque na prática eles valem
+ * juntos: ter dependente na idade, a remuneração caber no teto e a
+ * comprovação estar em dia. Quem não tem dependente não vira ruído — some.
+ */
+const SF_ESTILO: Record<string, { rotulo: string; classe: string; ajuda: string }> = {
+  regular: {
+    rotulo: "em dia",
+    classe: "bg-emerald-100 text-emerald-700 hover:bg-emerald-100",
+    ajuda: "Requisitos cumpridos: dependente na idade, salário dentro do teto e comprovação válida.",
+  },
+  pendente: {
+    rotulo: "comprovação",
+    classe: "bg-amber-100 text-amber-800 hover:bg-amber-100",
+    ajuda: "Gera cota, mas a comprovação está vencida ou nunca foi apresentada. O valor continua sendo pago e NÃO é compensável na guia do INSS enquanto estiver assim.",
+  },
+  acima_teto: {
+    rotulo: "acima do teto",
+    classe: "bg-slate-100 text-slate-600 hover:bg-slate-100",
+    ajuda: "Tem dependente na idade, mas a remuneração passa do teto legal — sem direito à cota. Volta sozinho se a remuneração cair.",
+  },
+  sem_cota: {
+    rotulo: "cota encerrada",
+    classe: "bg-slate-100 text-slate-600 hover:bg-slate-100",
+    ajuda: "Os dependentes cadastrados já passaram dos 14 anos.",
+  },
+  nao_clt: {
+    rotulo: "não CLT",
+    classe: "bg-slate-100 text-slate-600 hover:bg-slate-100",
+    ajuda: "Salário-família é benefício do segurado empregado — não se aplica a este vínculo.",
+  },
+};
+
+function SalarioFamiliaBadge({ sf }: { sf?: DpSalarioFamiliaStatus }) {
+  if (!sf || sf.situacao === "sem_dependente") {
+    return <span className="text-xs text-muted-foreground">—</span>;
+  }
+  const e = SF_ESTILO[sf.situacao];
+  if (!e) return <span className="text-xs text-muted-foreground">—</span>;
+  const detalhe = sf.detalhe?.length
+    ? ` — ${sf.detalhe.map((d) => `${d.nome}: ${d.pendencia}`).join("; ")}`
+    : "";
+  return (
+    <Badge className={`text-[10px] ${e.classe}`}
+           title={`${e.ajuda}${detalhe}`}>
+      {sf.cotas > 0 && sf.situacao !== "sem_cota" ? `${sf.cotas}× ` : ""}{e.rotulo}
+    </Badge>
   );
 }
 
@@ -482,6 +561,9 @@ function FichaDialog({ colaborador, ccs, cargos, editar, onClose, onMudou }: {
             <span>Demissão: <b>{fmtData(c.data_demissao)}</b></span>
           </div>
         </div>
+
+        {/* Dependentes (salário-família) */}
+        <DependentesColaborador colaborador={c} editar={editar} />
 
         {/* Documentos (contrato em PDF) */}
         <DocumentosColaborador colaborador={c} editar={editar} />

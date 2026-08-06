@@ -57,7 +57,8 @@ def dp_dashboard(request):
         itens = filtrar_folha(comp.itens.all(), request.user)
         ag = itens.aggregate(pagar=Sum("total_pagar"), prov=Sum("custo_provisoes"),
                              pat=Sum("inss_patronal"), custo=Sum("custo_total"),
-                             fgts=Sum("fgts_mensal"), multa=Sum("multa_fgts_mensal"))
+                             fgts=Sum("fgts_mensal"), multa=Sum("multa_fgts_mensal"),
+                             sf=Sum("salario_familia"))
         ag_clt = itens.filter(regime="clt").aggregate(custo=Sum("custo_total"))
         hc = itens.count()
         chave = f"{comp.ano}-{comp.mes:02d}"
@@ -68,7 +69,12 @@ def dp_dashboard(request):
             "mes": chave, "status": comp.status, "headcount": hc,
             "admissoes": mov["admissoes"], "desligamentos": mov["desligamentos"],
             "turnover": round(mov["desligamentos"] / hc * 100, 2) if hc else 0.0,
-            "folha": round(ag["pagar"] or 0, 2), "provisoes": round(ag["prov"] or 0, 2),
+            # folha = parcela de CUSTO (pago menos o salário-família, que o INSS
+            # reembolsa) para que folha + provisoes + patronal feche com custo_total
+            "folha": round((ag["pagar"] or 0) - (ag["sf"] or 0), 2),
+            "a_pagar": round(ag["pagar"] or 0, 2),
+            "salario_familia": round(ag["sf"] or 0, 2),
+            "provisoes": round(ag["prov"] or 0, 2),
             "patronal": round(ag["pat"] or 0, 2), "custo_total": round(ag["custo"] or 0, 2),
             "custo_clt": round(ag_clt["custo"] or 0, 2),
             "fgts": round(ag["fgts"] or 0, 2), "multa_fgts": round(ag["multa"] or 0, 2),
@@ -104,12 +110,14 @@ def dp_dashboard(request):
                         .annotate(n=Count("id"), custo=Sum("custo_total")).order_by("-custo")]
         ag_ult = itens_ult.aggregate(pagar=Sum("total_pagar"), prov=Sum("custo_provisoes"),
                                      pat=Sum("inss_patronal"), custo=Sum("custo_total"),
-                                     n=Count("id"))
+                                     sf=Sum("salario_familia"), n=Count("id"))
         total_ult = ag_ult["custo"] or 0
         custo_medio_pessoa = round(total_ult / ag_ult["n"], 2) if ag_ult["n"] else 0
         if total_ult:
             participacao = {
-                "folha": round((ag_ult["pagar"] or 0) / total_ult * 100, 1),
+                # numerador SEM o salário-família: senão os três pedaços somariam
+                # mais de 100% do custo, porque o denominador não o inclui
+                "folha": round(((ag_ult["pagar"] or 0) - (ag_ult["sf"] or 0)) / total_ult * 100, 1),
                 "provisoes": round((ag_ult["prov"] or 0) / total_ult * 100, 1),
                 "patronal": round((ag_ult["pat"] or 0) / total_ult * 100, 1),
             }
@@ -382,10 +390,12 @@ def dp_relatorio_competencia(request, pk):
         ws.cell(row=1, column=12).number_format = "0.0%"
         wsn = wb.create_sheet("Por núcleo")
         _tabela(wsn, 1, ["Núcleo", "Centros de custo", "Colaboradores", "Folha (R$)",
-                         "Provisões (R$)", "INSS patronal (R$)", "Custo total (R$)", "% do custo"],
+                         "Provisões (R$)", "INSS patronal (R$)", "Custo total (R$)", "% do custo",
+                         "Sal. família (R$)"],
                 [[n["nucleo"], n["centros"], n["headcount"], n["folha"], n["provisoes"],
-                  n["patronal"], n["custo"], n["percentual"] / 100] for n in dados["nucleos"]],
-                larguras=[26, 17, 14, 16, 16, 18, 17, 11], money_cols={4, 5, 6, 7})
+                  n["patronal"], n["custo"], n["percentual"] / 100,
+                  n.get("salario_familia", 0)] for n in dados["nucleos"]],
+                larguras=[26, 17, 14, 16, 16, 18, 17, 11, 18], money_cols={4, 5, 6, 7, 9})
         return _resposta_excel(wb, f"resumo_cc_{comp.ano}_{comp.mes:02d}.xlsx")
 
     # folha analítica
@@ -981,11 +991,11 @@ def _pdf_ficha_financeira(colab, itens, rescisao, usuario: str) -> HttpResponse:
     # ── histórico mês a mês ──
     story.append(Paragraph("Histórico de recebimentos", st_sec))
     headers = ["Competência", "Salário", "Faltas", "Desc. faltas", "INSS", "Desc. VT",
-               "Vale-transp.", "Vale-alim.", "Saldo livre", "Prêmios", "Acertos",
-               "Líquido a pagar", "Custo total"]
+               "Vale-transp.", "Vale-alim.", "Saldo livre", "Prêmios", "Sal. família",
+               "Acertos", "Líquido a pagar", "Custo total"]
     linhas, tot = [], {k: 0.0 for k in
                        ("sal", "descf", "inss", "descvt", "vt", "va", "saldo", "prem",
-                        "acerto", "pagar", "custo")}
+                        "salfam", "acerto", "pagar", "custo")}
     for it in itens:
         comp = it.competencia
         faltas = []
@@ -998,7 +1008,8 @@ def _pdf_ficha_financeira(colab, itens, rescisao, usuario: str) -> HttpResponse:
             _brl(it.desc_faltas), _brl(it.desc_inss), _brl(it.desc_vt),
             _brl(getattr(it, "vt_com_faltas", None) or it.vt),
             _brl(getattr(it, "va_com_faltas", None) or it.va),
-            _brl(it.saldo_livre), _brl(it.premiacoes), _brl(it.acerto_contabil),
+            _brl(it.saldo_livre), _brl(it.premiacoes),
+            _brl(getattr(it, "salario_familia", 0) or 0), _brl(it.acerto_contabil),
             _brl(it.total_pagar), _brl(it.custo_total),
         ])
         tot["sal"] += it.salario_bruto or 0
@@ -1009,6 +1020,7 @@ def _pdf_ficha_financeira(colab, itens, rescisao, usuario: str) -> HttpResponse:
         tot["va"] += getattr(it, "va_com_faltas", None) or it.va or 0
         tot["saldo"] += it.saldo_livre or 0
         tot["prem"] += it.premiacoes or 0
+        tot["salfam"] += getattr(it, "salario_familia", 0) or 0
         tot["acerto"] += it.acerto_contabil or 0
         tot["pagar"] += it.total_pagar or 0
         tot["custo"] += it.custo_total or 0
@@ -1016,10 +1028,14 @@ def _pdf_ficha_financeira(colab, itens, rescisao, usuario: str) -> HttpResponse:
     if linhas:
         linhas.append(["TOTAL", _brl(tot["sal"]), "", _brl(tot["descf"]), _brl(tot["inss"]),
                        _brl(tot["descvt"]), _brl(tot["vt"]), _brl(tot["va"]), _brl(tot["saldo"]),
-                       _brl(tot["prem"]), _brl(tot["acerto"]), _brl(tot["pagar"]),
-                       _brl(tot["custo"])])
-        t = Table([headers] + linhas, colWidths=[22, 21, 14, 21, 20, 19, 21, 21, 21, 20, 20, 25, 22],
-                  repeatRows=1)
+                       _brl(tot["prem"]), _brl(tot["salfam"]), _brl(tot["acerto"]),
+                       _brl(tot["pagar"]), _brl(tot["custo"])])
+        # ATENÇÃO: as larguras são em MILÍMETROS e precisam do `* mm`. Sem ele o
+        # reportlab lê como pontos, a tabela encolhe pra ~1/3 da página e as
+        # colunas se sobrepõem (foi exatamente o bug reportado na ficha).
+        # Soma = 263mm; a paisagem A4 útil é 275mm (297 − 11 − 11 de margem).
+        larguras = [19, 20, 12, 19, 19, 18, 19, 19, 19, 18, 19, 18, 23, 21]
+        t = Table([headers] + linhas, colWidths=[w * mm for w in larguras], repeatRows=1)
         estilo = [
             ("BACKGROUND", (0, 0), (-1, 0), navy),
             ("TEXTCOLOR", (0, 0), (-1, 0), colors.white),
