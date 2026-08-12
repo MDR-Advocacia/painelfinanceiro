@@ -758,6 +758,17 @@ def dp_relatorio_projecao(request):
 
 @api_view(["GET"])
 @permission_classes(_PERM)
+def _pacote(c) -> float:
+    """Quanto a pessoa recebe no pacote CHEIO: salário + saldo livre + VT + VA.
+
+    É valor BRUTO — antes de INSS e do desconto do vale-transporte. Não é o
+    líquido da folha; existe pra responder "quanto essa pessoa ganha" sem
+    obrigar a somar quatro colunas na mão.
+    """
+    return round((c.salario_bruto or 0) + (c.saldo_livre or 0)
+                 + (c.vt or 0) + (c.va or 0), 2)
+
+
 def dp_relatorio_quadro(request):
     """Excel do Quadro de Pessoal (com filtro de status opcional)."""
     status_f = request.query_params.get("status", "")
@@ -766,18 +777,20 @@ def dp_relatorio_quadro(request):
     if status_f:
         qs = qs.filter(status=status_f)
     if request.query_params.get("formato") == "pdf":
-        rows = [[c.matricula, c.nome[:34], REG_LABEL.get(c.regime, c.regime), c.status,
-                 c.centro_custo.nome[:26] if c.centro_custo_id else "",
-                 (c.cargo.nome[:26] if c.cargo_id else ""), _brl(c.salario_bruto)] for c in qs]
+        rows = [[c.matricula, c.nome[:32], REG_LABEL.get(c.regime, c.regime), c.status,
+                 c.centro_custo.nome[:24] if c.centro_custo_id else "",
+                 (c.cargo.nome[:24] if c.cargo_id else ""), _brl(c.salario_bruto),
+                 _brl(c.saldo_livre), _brl(_pacote(c))] for c in qs]
         return _pdf_generico("Quadro de Pessoal",
                              f"{len(rows)} colaborador(es)" + (f" · {status_f}" if status_f else " · todos"),
-                             ["Mat.", "Nome", "Regime", "Status", "Centro de Custo", "Cargo", "Sal. bruto"],
-                             rows, [16, 68, 26, 18, 55, 55, 28], _quem(request),
-                             "quadro_pessoal.pdf", aligns_dir={6}, paisagem=True)
+                             ["Mat.", "Nome", "Regime", "Status", "Centro de Custo", "Cargo",
+                              "Sal. bruto", "Saldo livre", "Total"],
+                             rows, [15, 60, 24, 16, 46, 46, 26, 26, 27], _quem(request),
+                             "quadro_pessoal.pdf", aligns_dir={6, 7, 8}, paisagem=True)
 
     headers = ["Mat.", "Nome", "CPF", "Regime", "Status", "Unidade", "Área",
                "Centro de Custo", "Supervisor", "Equipe", "Cargo", "Admissão",
-               "Demissão", "Sal. Bruto", "Saldo Livre", "VT", "VA"]
+               "Demissão", "Sal. Bruto", "Saldo Livre", "VT", "VA", "Total"]
     rows = []
     for c in qs:
         rows.append([c.matricula, c.nome, c.cpf, c.get_regime_display(), c.status,
@@ -785,13 +798,13 @@ def dp_relatorio_quadro(request):
                      c.supervisor.nome if c.supervisor_id else "", c.equipe,
                      c.cargo.nome if c.cargo_id else "",
                      str(c.data_admissao or ""), str(c.data_demissao or ""),
-                     c.salario_bruto, c.saldo_livre, c.vt, c.va])
+                     c.salario_bruto, c.saldo_livre, c.vt, c.va, _pacote(c)])
     wb, ws = _wb_timbrado("Quadro de Pessoal",
                           f"{len(rows)} colaborador(es)" + (f" · filtro: {status_f}" if status_f else " · todos"),
                           _quem(request))
     _tabela(ws, 5, headers, rows,
-            larguras=[8, 32, 13, 13, 9, 13, 7, 24, 16, 18, 24, 11, 11, 12, 11, 9, 9],
-            money_cols={14, 15, 16, 17})
+            larguras=[8, 32, 13, 13, 9, 13, 7, 24, 16, 18, 24, 11, 11, 12, 11, 9, 9, 12],
+            money_cols={14, 15, 16, 17, 18})
     return _resposta_excel(wb, "quadro_pessoal.xlsx")
 
 

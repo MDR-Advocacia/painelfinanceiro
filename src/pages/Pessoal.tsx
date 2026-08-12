@@ -303,6 +303,15 @@ function QuadroTab({ ccs, cargos, editar, onMudou, filtroExterno, rotuloFiltro, 
                 <TableHead className="text-right text-xs">
                   <TituloAjuda titulo="Salário bruto" ajuda="Valor do salário antes dos descontos (INSS, vale-transporte)." />
                 </TableHead>
+                <TableHead className="hidden text-right text-xs lg:table-cell">
+                  <TituloAjuda titulo="Saldo livre" ajuda="Parcela paga fora do salário base, sem incidência de INSS." />
+                </TableHead>
+                <TableHead className="text-right text-xs">
+                  <TituloAjuda
+                    titulo="Total"
+                    ajuda="Quanto a pessoa recebe no pacote cheio: salário bruto + saldo livre + vale-transporte + vale-alimentação. É o valor BRUTO, antes de INSS e do desconto do VT — não confunda com o líquido da folha."
+                  />
+                </TableHead>
                 <TableHead className="hidden text-center text-xs md:table-cell">
                   <TituloAjuda
                     titulo="Sal. família"
@@ -326,6 +335,12 @@ function QuadroTab({ ccs, cargos, editar, onMudou, filtroExterno, rotuloFiltro, 
                   <TableCell className="hidden max-w-[180px] truncate text-xs lg:table-cell">{c.centro_custo_nome}</TableCell>
                   <TableCell className="hidden text-xs lg:table-cell">{c.unidade || "—"}</TableCell>
                   <TableCell className="text-right font-mono text-xs">{fmtBRL(c.salario_bruto)}</TableCell>
+                  <TableCell className="hidden text-right font-mono text-xs lg:table-cell">
+                    {c.saldo_livre ? fmtBRL(c.saldo_livre) : "—"}
+                  </TableCell>
+                  <TableCell className="text-right font-mono text-xs font-semibold">
+                    {fmtBRL((c.salario_bruto || 0) + (c.saldo_livre || 0) + (c.vt || 0) + (c.va || 0))}
+                  </TableCell>
                   <TableCell className="hidden text-center md:table-cell">
                     <SalarioFamiliaBadge sf={c.salario_familia} />
                   </TableCell>
@@ -337,7 +352,7 @@ function QuadroTab({ ccs, cargos, editar, onMudou, filtroExterno, rotuloFiltro, 
                 </TableRow>
               ))}
               {!loading && items.length === 0 && (
-                <TableRow><TableCell colSpan={9} className="py-8 text-center text-sm text-muted-foreground">
+                <TableRow><TableCell colSpan={11} className="py-8 text-center text-sm text-muted-foreground">
                   Nada encontrado com esses filtros.
                 </TableCell></TableRow>
               )}

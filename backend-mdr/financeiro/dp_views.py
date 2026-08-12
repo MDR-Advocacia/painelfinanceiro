@@ -756,7 +756,10 @@ def dp_importar(request):
         return Response({"detail": "Arquivo inválido — envie o .xlsx do Controle de Pessoal."}, status=400)
 
     resumo = {"ccs": 0, "cargos": 0, "colaboradores_novos": 0,
-              "colaboradores_atualizados": 0, "desligados_marcados": 0, "avisos": []}
+              "colaboradores_atualizados": 0, "desligados_marcados": 0,
+              # eventos de saída criados — contados à parte de "marcados",
+              # porque o cadastro pode já estar certo e o evento faltar
+              "desligamentos_registrados": 0, "avisos": []}
 
     with transaction.atomic():
         # 1) CONFIG → Centros de Custo (colunas B=CCs, C=Cód)
@@ -862,15 +865,26 @@ def dp_importar(request):
                 if not mat.isdigit() or not data_dem:
                     continue
                 obj = DpColaborador.objects.filter(matricula=int(mat)).first()
-                if obj and (obj.status != "inativo" or obj.data_demissao != data_dem):
+                if not obj:
+                    continue
+                # 1) o CADASTRO: só grava se estiver diferente
+                if obj.status != "inativo" or obj.data_demissao != data_dem:
                     obj.status = "inativo"
                     obj.data_demissao = data_dem
                     obj.save()
-                    if not obj.eventos.filter(tipo="desligamento").exists():
-                        DpEvento.objects.create(colaborador=obj, tipo="desligamento",
-                                                data_efeito=data_dem,
-                                                payload={"origem": "planilha"}, autor=_quem(request))
                     resumo["desligados_marcados"] += 1
+                # 2) o EVENTO: garantido SEMPRE, fora do if acima.
+                # Antes ele vivia dentro daquele bloco e por isso quase nunca
+                # nascia: a aba TB_Colaboradores já traz status "Inativo" e a
+                # data de demissão, então quando a aba Desligados era lida o
+                # cadastro JÁ estava correto, o if dava falso e o evento não
+                # era criado. Resultado: o desligamento não existia na trilha e
+                # a evolução mensal mostrava admissões sem nenhuma saída.
+                if not obj.eventos.filter(tipo="desligamento").exists():
+                    DpEvento.objects.create(colaborador=obj, tipo="desligamento",
+                                            data_efeito=data_dem,
+                                            payload={"origem": "planilha"}, autor=_quem(request))
+                    resumo["desligamentos_registrados"] += 1
 
     wb.close()
     audit(request, "importar", "dp_importacao", "", depois=resumo)
