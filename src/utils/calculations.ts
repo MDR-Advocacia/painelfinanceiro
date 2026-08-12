@@ -93,7 +93,16 @@ export function getVpdValor(configs: VpdConfig[], periodo: string): number {
  * Integra o rateio por número de funcionários (VPD) e o Lucro Líquido (ROF)
  */
 export function calcResumo(data: PeriodoData, vpdValor: number = 2472.85): ResumoSetor {
-  const { custosPorCargo, total: estimativaPessoal } = calcTotalPessoal(data.pessoal as any);
+  // BLINDAGEM: um período pode existir só com custoPessoalReal (o espelho da
+  // folha cria a entrada quando o setor não tinha nada lançado no mês). Sem
+  // esses defaults, data.pessoal indefinido derrubava o React inteiro — foi a
+  // tela branca de 12/08/2026 em produção.
+  const pessoalSeguro = data.pessoal ?? {};
+  const fatSeguro: Faturamento = data.faturamento ?? {
+    bruto: 0, descontos: 0, aliquotaLucroPresumido: 0.32, aliquotaISS: 0.02,
+    modoISS: "sociedade", profissionaisISS: 0, premiacaoTotal: 0, diversosTotal: 0,
+  };
+  const { custosPorCargo, total: estimativaPessoal } = calcTotalPessoal(pessoalSeguro as any);
   // `custoPessoalReal` vem da FOLHA fechada do DP, espelhada no setor quando a
   // competência é calculada. Quando existe, ele manda: o bloco `pessoal` é uma
   // ESTIMATIVA por cargo (quantidade × salário × multiplicador de encargos) e
@@ -101,16 +110,16 @@ export function calcResumo(data: PeriodoData, vpdValor: number = 2472.85): Resum
   // R$ 478.122 reais, e o operador via dois números pra mesma coisa.
   const real = (data as any).custoPessoalReal as number | undefined;
   const totalCustoPessoal = real && real > 0 ? real : estimativaPessoal;
-  const headcount = getTotalProfissionais(data.pessoal as any);
+  const headcount = getTotalProfissionais(pessoalSeguro as any);
 
   const totalDespesasEventuais = (data.despesasEventuais || []).reduce((sum, item) => sum + item.valor, 0);
 
-  const fb = data.faturamento.bruto;
-  const descontos = data.faturamento.descontos ?? 0;
-  const premiacaoTotal = data.faturamento.premiacaoTotal ?? 0;
-  const diversosTotal = data.faturamento.diversosTotal ?? 0;
+  const fb = fatSeguro.bruto;
+  const descontos = fatSeguro.descontos ?? 0;
+  const premiacaoTotal = fatSeguro.premiacaoTotal ?? 0;
+  const diversosTotal = fatSeguro.diversosTotal ?? 0;
   const totalVariaveis = premiacaoTotal + diversosTotal;
-  const impostos = calcImpostos(data.faturamento);
+  const impostos = calcImpostos(fatSeguro);
   
   // carga tributária medida contra a receita que de fato foi tributada (líquida),
   // e não contra o bruto — senão a glosa faria a carga parecer menor do que é

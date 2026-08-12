@@ -1136,9 +1136,18 @@ def espelhar_custo_pessoal(comp) -> dict:
         por_setor[l.setor_legado_id] = round(por_setor.get(l.setor_legado_id, 0.0) + v, 2)
 
     gravados = 0
+    # entrada NOVA nasce com a estrutura completa que o painel legado espera:
+    # gravar só custoPessoalReal criava período sem `pessoal`/`faturamento` e o
+    # front quebrava em data.pessoal indefinido (tela branca de 12/08/2026)
+    FATURAMENTO_VAZIO = {"bruto": 0, "descontos": 0, "aliquotaLucroPresumido": 0.32,
+                         "aliquotaISS": 0.02, "modoISS": "sociedade",
+                         "profissionaisISS": 0, "premiacaoTotal": 0, "diversosTotal": 0}
     for setor in Setor.objects.filter(id__in=por_setor.keys()):
         periodos = setor.periodos or {}
         p = dict(periodos.get(periodo) or {})
+        p.setdefault("pessoal", {})
+        p.setdefault("faturamento", dict(FATURAMENTO_VAZIO))
+        p.setdefault("despesasEventuais", [])
         p["custoPessoalReal"] = por_setor[setor.id]
         periodos[periodo] = p
         setor.periodos = periodos
