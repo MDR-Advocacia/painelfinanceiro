@@ -35,6 +35,7 @@ import { EquipePicker, CcPicker, ColaboradorPicker, LiderancaPicker, invalidarAr
 import DocumentosColaborador from "@/components/dp/DocumentosColaborador";
 import DependentesColaborador from "@/components/dp/DependentesColaborador";
 import TransferenciaContrato from "@/components/dp/TransferenciaContrato";
+import AfastamentosColaborador from "@/components/dp/AfastamentosColaborador";
 import { usePermissions } from "@/hooks/usePermissions";
 import {
   type DpAuditFiltros, type DpCargo, type DpCentroCusto, type DpColaborador,
@@ -580,6 +581,9 @@ function FichaDialog({ colaborador, ccs, cargos, editar, onClose, onMudou }: {
 
         {/* Transferência de contrato (mesma pessoa, matrícula nova) */}
         <TransferenciaContrato colaborador={c} editar={editar} onMudou={onMudou} />
+
+        {/* Afastamentos e suspensões */}
+        <AfastamentosColaborador colaborador={c} editar={editar} />
 
         {/* Dependentes (salário-família) */}
         <DependentesColaborador colaborador={c} editar={editar} />

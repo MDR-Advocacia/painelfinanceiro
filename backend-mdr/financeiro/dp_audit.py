@@ -88,6 +88,7 @@ ACOES = {
     "reabrir_competencia": ("reabriu a competência", "reabrir"),
     "congelar_retroativo": ("congelou retroativamente a competência", "fechar"),
     "gerar_relatorio_exercicio": ("emitiu o relatório técnico-contábil", "criar"),
+    "afastamento": ("registrou afastamento de", "criar"),
     "transferencia_contrato": ("registrou transferência de contrato de", "criar"),
     "desfazer_transferencia": ("desfez a transferência de contrato de", "reabrir"),
     "desfazer_revisao": ("desfez o envio para revisão", "reabrir"),
@@ -110,6 +111,7 @@ ENTIDADES = {
     "dp_documento": "documento",
     "dp_dependente": "dependente",
     "dp_transferencia": "transferência de contrato",
+    "dp_afastamento": "afastamento",
     "ef_relatorio_exercicio": "relatório do exercício",
 }
 

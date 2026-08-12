@@ -1,4 +1,6 @@
 import uuid
+from datetime import date, timedelta
+
 from django.conf import settings
 from django.db import models
 
@@ -546,6 +548,112 @@ def ids_em_transferencia():
     return saidas, entradas
 
 
+class DpAfastamento(models.Model):
+    """Afastamento ou suspensão — dias em que a pessoa não trabalha.
+
+    NÃO é falta. Falta é desconto puro; aqui quem paga o quê depende do TIPO e
+    de QUANTOS dias já se passaram, e o FGTS segue regra própria. Regras
+    confirmadas com o DP em 12/08/2026 e válidas só para CLT:
+
+      • atestado/doença: 1º ao 15º dia a EMPRESA paga tudo, com FGTS;
+        do 16º em diante quem paga é o INSS e o FGTS não é devido;
+      • acidente de trabalho: mesma divisão de pagamento, mas o FGTS
+        continua devido SEMPRE — e o vale-alimentação não pode ser cortado;
+      • maternidade: a empresa paga os 120 dias e COMPENSA na guia, igual ao
+        salário-família — ou seja, não é custo do escritório. O escritório não
+        aderiu ao Empresa Cidadã, então não há prorrogação para 180;
+      • suspensão disciplinar: a empresa não paga nada, nem os primeiros dias,
+        e não há FGTS — o contrato fica suspenso.
+
+    A contagem dos 15 dias é do AFASTAMENTO, não do mês: quem afasta dia 20/07
+    tem 12 dias pagos pela empresa em julho e ainda 3 em agosto.
+    """
+    TIPOS = [
+        ("doenca", "Atestado / auxílio-doença"),
+        ("acidente", "Acidente de trabalho"),
+        ("maternidade", "Licença-maternidade"),
+        ("paternidade", "Licença-paternidade"),
+        ("suspensao", "Suspensão disciplinar"),
+        ("outro", "Outro afastamento"),
+    ]
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    colaborador = models.ForeignKey("financeiro.DpColaborador", on_delete=models.CASCADE,
+                                    related_name="afastamentos")
+    tipo = models.CharField(max_length=20, choices=TIPOS)
+    data_inicio = models.DateField()
+    data_prevista_retorno = models.DateField(null=True, blank=True)
+    data_retorno = models.DateField(null=True, blank=True,
+                                    help_text="Vazio = ainda afastado")
+    # estabilidade: acidente dá 12 meses após o retorno; maternidade, 5 meses
+    # após o parto. Fica gravada pra tela poder AVISAR antes de um desligamento.
+    estabilidade_ate = models.DateField(null=True, blank=True)
+    observacao = models.CharField(max_length=250, blank=True, default="")
+    registrado_por = models.CharField(max_length=150, blank=True, default="")
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        db_table = "dp_afastamentos"
+        ordering = ["-data_inicio"]
+
+    def __str__(self):
+        return f"{self.get_tipo_display()} de {self.colaborador_id} em {self.data_inicio}"
+
+    @property
+    def regra(self) -> dict:
+        return REGRAS_AFASTAMENTO.get(self.tipo, REGRAS_AFASTAMENTO["outro"])
+
+    def dias_no_mes(self, ano: int, mes: int) -> tuple:
+        """(dias pagos pela EMPRESA, dias pagos pelo INSS) dentro deste mês.
+
+        A janela dos 15 primeiros dias é contada desde o início do afastamento,
+        então um mesmo afastamento pode ter dias das duas naturezas no mesmo mês.
+        """
+        from calendar import monthrange
+        ini_mes = date(ano, mes, 1)
+        fim_mes = date(ano, mes, monthrange(ano, mes)[1])
+        ini = max(self.data_inicio, ini_mes)
+        fim = min(self.data_retorno or self.data_prevista_retorno or fim_mes, fim_mes)
+        if ini > fim:
+            return 0, 0
+        r = self.regra
+        limite = r["dias_empresa"]          # None = a empresa paga o período todo
+        empresa = inss = 0
+        d = ini
+        while d <= fim:
+            ordem = (d - self.data_inicio).days + 1
+            if limite is None or ordem <= limite:
+                empresa += 1
+            else:
+                inss += 1
+            d += timedelta(days=1)
+        return empresa, inss
+
+
+# Como cada tipo se comporta na folha. Deixar em tabela (e não espalhado em
+# `if`) é o que permite conferir a regra de bater o olho e mudar sem caçar
+# condicional pelo motor.
+REGRAS_AFASTAMENTO = {
+    # dias_empresa: quantos dias a EMPRESA custeia (None = todos)
+    # fgts: "sempre" | "dias_empresa" | "nunca"
+    # corta_va: o vale-alimentação é proporcionalizado?
+    # compensa_na_guia: a empresa paga e o INSS devolve (não é custo)
+    # estabilidade_meses: a partir do retorno
+    "doenca":      {"dias_empresa": 15,   "fgts": "dias_empresa", "corta_va": True,
+                    "compensa_na_guia": False, "estabilidade_meses": None},
+    "acidente":    {"dias_empresa": 15,   "fgts": "sempre",       "corta_va": False,
+                    "compensa_na_guia": False, "estabilidade_meses": 12},
+    "maternidade": {"dias_empresa": None, "fgts": "sempre",       "corta_va": True,
+                    "compensa_na_guia": True,  "estabilidade_meses": 5},
+    "paternidade": {"dias_empresa": None, "fgts": "sempre",       "corta_va": True,
+                    "compensa_na_guia": False, "estabilidade_meses": None},
+    "suspensao":   {"dias_empresa": 0,    "fgts": "nunca",        "corta_va": True,
+                    "compensa_na_guia": False, "estabilidade_meses": None},
+    "outro":       {"dias_empresa": 15,   "fgts": "dias_empresa", "corta_va": True,
+                    "compensa_na_guia": False, "estabilidade_meses": None},
+}
+
+
 class DpEvento(models.Model):
     """Event log de RH: admissão, desligamento, transferência de CC, reajuste,
     edição cadastral. Headcount/turnover/histórico da ficha saem daqui."""
@@ -652,6 +760,11 @@ class DpLancamento(models.Model):
                                     related_name="lancamentos")
     faltas_dias = models.FloatField(default=0)
     faltas_horas = models.FloatField(default=0)
+    # SUBCONJUNTO de faltas_dias: quantas foram INJUSTIFICADAS. Só essas fazem
+    # perder o DSR — falta com atestado ou abonada não gera esse desconto.
+    # Histórico carregado da planilha fica em 0, que é o conservador: não
+    # descontamos DSR retroativo de algo que não sabemos se era injustificado.
+    faltas_injustificadas_dias = models.FloatField(default=0)
     premiacoes = models.FloatField(default=0)
     acerto_contabil = models.FloatField(default=0)
     obs = models.TextField(blank=True, default="")
@@ -717,6 +830,15 @@ class DpFolhaItem(models.Model):
     fgts_mensal = models.FloatField(default=0)
     multa_fgts_mensal = models.FloatField(default=0)
     recesso_mensal = models.FloatField(default=0)
+    # faltas injustificadas e o DSR que elas fazem perder
+    faltas_injustificadas_dias = models.FloatField(default=0)
+    desc_dsr = models.FloatField(default=0)
+    # afastamento do mês (dias que a empresa custeia x dias do INSS)
+    afastamento_tipo = models.CharField(max_length=20, blank=True, default="")
+    afastamento_dias_empresa = models.IntegerField(default=0)
+    afastamento_dias_inss = models.IntegerField(default=0)
+    desc_afastamento = models.FloatField(
+        default=0, help_text="Dias custeados pelo INSS, descontados do salário")
     inss_patronal = models.FloatField(default=0)
     custo_provisoes = models.FloatField(default=0)
     # ATENÇÃO: custo_total NÃO inclui o salário-família. Ele entra no

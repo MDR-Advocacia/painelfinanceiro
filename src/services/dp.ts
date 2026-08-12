@@ -125,6 +125,26 @@ export interface DpDependente {
   comprovacao_pendente: string;
 }
 
+/** Afastamento ou suspensão — dias em que a pessoa não trabalha. */
+export interface DpAfastamento {
+  id: string;
+  tipo: string; tipo_label: string;
+  data_inicio: string; inicio_br: string;
+  data_prevista_retorno: string | null;
+  data_retorno: string | null; retorno_br: string;
+  estabilidade_ate: string | null; estabilidade_br: string;
+  em_estabilidade: boolean;
+  em_curso: boolean;
+  observacao: string;
+  /** o que a regra do tipo faz na folha */
+  regra: {
+    dias_empresa: number | null;
+    fgts: "sempre" | "dias_empresa" | "nunca";
+    corta_va: boolean;
+    compensa_na_guia: boolean;
+  };
+}
+
 export const dpApi = {
   resumo: () => fetch(`${API_URL}/dp/colaboradores/resumo/`, { headers: authHeaders() }).then((r) => j<DpResumo>(r)),
 
@@ -156,6 +176,26 @@ export const dpApi = {
   documentos: (id: string) =>
     fetch(`${API_URL}/dp/colaboradores/${id}/documentos/`, { headers: authHeaders() })
       .then((r) => j<DpDocumento[]>(r)),
+
+  // ── afastamentos e suspensões ──
+  afastamentos: (id: string) =>
+    fetch(`${API_URL}/dp/colaboradores/${id}/afastamentos/`, { headers: authHeaders() })
+      .then((r) => j<DpAfastamento[]>(r)),
+
+  criarAfastamento: (id: string, dados: Record<string, unknown>) =>
+    fetch(`${API_URL}/dp/colaboradores/${id}/afastamentos/`, {
+      method: "POST", headers: H(), body: JSON.stringify(dados),
+    }).then((r) => j<DpAfastamento>(r)),
+
+  editarAfastamento: (id: string, afId: string, dados: Record<string, unknown>) =>
+    fetch(`${API_URL}/dp/colaboradores/${id}/afastamentos/${afId}/`, {
+      method: "PATCH", headers: H(), body: JSON.stringify(dados),
+    }).then((r) => j<DpAfastamento>(r)),
+
+  removerAfastamento: (id: string, afId: string) =>
+    fetch(`${API_URL}/dp/colaboradores/${id}/afastamentos/${afId}/`, {
+      method: "DELETE", headers: authHeaders(),
+    }).then((r) => j<{ detail: string }>(r)),
 
   // ── transferência de contrato (mesma pessoa, matrícula nova) ──
   transferencia: (id: string) =>
@@ -293,6 +333,14 @@ export interface DpFolhaItem {
   ferias_dias?: number; ferias_valor?: number; ferias_terco?: number; ferias_abono?: number;
   ferias_inicio?: string | null; ferias_fim?: string | null;
   faltas_dias: number; faltas_horas: number; desc_faltas: number;
+  /** subconjunto das faltas que foi injustificada — só essas tiram o DSR */
+  faltas_injustificadas_dias?: number;
+  /** descanso semanal perdido pelas faltas injustificadas */
+  desc_dsr?: number;
+  afastamento_tipo?: string;
+  afastamento_dias_empresa?: number;
+  afastamento_dias_inss?: number;
+  desc_afastamento?: number;
   desc_inss: number; desc_vt: number; vt_com_faltas: number; va_com_faltas: number;
   saldo_livre: number; premiacoes: number; acerto_contabil: number;
   /** benefício previdenciário: entra no total_pagar, mas NÃO no custo_total */
@@ -356,6 +404,7 @@ export const folhaApi = {
       method: "POST", headers: H(), body: JSON.stringify({ dias_mes, dias_uteis }),
     }).then((r) => j<DpCompetencia>(r)),
   lancar: (id: string, dados: { colaborador_id: string; faltas_dias?: number; faltas_horas?: number;
+                               faltas_injustificadas_dias?: number;
                                premiacoes?: number; acerto_contabil?: number; obs?: string;
                                ferias_inicio?: string; ferias_dias?: number; ferias_abono_dias?: number }) =>
     fetch(`${API_URL}/dp/competencias/${id}/lancar/`, { method: "POST", headers: H(), body: JSON.stringify(dados) })

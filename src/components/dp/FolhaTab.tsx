@@ -611,6 +611,7 @@ function LancarDialog({ comp, item, onClose, onLancou }: {
   const soExtras = item._aba === "extras";
   const [faltasDias, setFaltasDias] = useState(item.faltas_dias);
   const [faltasHoras, setFaltasHoras] = useState(item.faltas_horas);
+  const [faltasInjust, setFaltasInjust] = useState(item.faltas_injustificadas_dias ?? 0);
   const [premios, setPremios] = useState(item.premiacoes);
   const [acerto, setAcerto] = useState(item.acerto_contabil);
   const [obs, setObs] = useState("");
@@ -621,6 +622,7 @@ function LancarDialog({ comp, item, onClose, onLancou }: {
     try {
       const novo = await folhaApi.lancar(comp.id, {
         colaborador_id: item.colaborador_id, faltas_dias: faltasDias, faltas_horas: faltasHoras,
+        faltas_injustificadas_dias: Math.min(faltasInjust, faltasDias),
         premiacoes: premios, acerto_contabil: acerto, obs,
       });
       toast.success(`Linha recalculada — a pagar: ${fmtBRL(novo.total_pagar)}.`);
@@ -665,6 +667,24 @@ function LancarDialog({ comp, item, onClose, onLancou }: {
                        onChange={(e) => setFaltasHoras(Number(e.target.value))} className="font-mono" />
               </div>
             </div>
+            {faltasDias > 0 && (
+              <div>
+                <Label className="flex items-center gap-1 text-xs text-muted-foreground">
+                  Dessas faltas, quantas foram INJUSTIFICADAS
+                  <Ajuda titulo="Falta injustificada"
+                         texto="Falta sem atestado nem abono faz perder o descanso semanal remunerado (DSR) da semana. Informe aqui quantos dos dias acima foram injustificados — o restante não gera esse desconto." />
+                </Label>
+                <Input type="number" step="0.5" min={0} max={faltasDias} value={faltasInjust}
+                       onChange={(e) => setFaltasInjust(Math.min(Number(e.target.value), faltasDias))}
+                       className="font-mono" />
+                {faltasInjust > 0 && (
+                  <p className="mt-1 text-[0.7rem] text-amber-700">
+                    Perde {(comp.dias_mes - comp.dias_uteis)} DSR do mês na proporção —
+                    some ao desconto abaixo.
+                  </p>
+                )}
+              </div>
+            )}
             {(faltasDias > 0 || faltasHoras > 0) && (
               <div className="rounded-md border border-amber-300 bg-amber-50 p-2 text-xs text-amber-900">
                 <div className="font-medium">Prévia do desconto</div>

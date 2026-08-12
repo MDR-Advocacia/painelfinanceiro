@@ -14,8 +14,9 @@ from rest_framework.response import Response
 
 from .models import (
     DP_MATRICULA_BASE, DpAuditLog, DpCargo, DpCentroCusto, DpColaborador, DpDependente,
-    DpDocumento, DpEvento, DpLideranca, DpTransferenciaContrato,
+    DpAfastamento, DpDocumento, DpEvento, DpLideranca, DpTransferenciaContrato,
 )
+from .models import REGRAS_AFASTAMENTO
 from .dp_audit import humanizar
 from .dp_escopo import filtrar_colaboradores
 from .serializers import (
@@ -80,6 +81,33 @@ def _dependente_json(d: DpDependente, colab=None) -> dict:
         "elegivel_hoje": d.elegivel_em(hoje.year, hoje.month),
         "cota_ate": (None if d.invalido else f"{mes14:02d}/{ano14}"),
         "comprovacao_pendente": d.comprovacao_pendente_em(hoje),
+    }
+
+
+def _afastamento_json(a: DpAfastamento) -> dict:
+    r = a.regra
+    hoje = date.today()
+    em_curso = not a.data_retorno and a.data_inicio <= hoje
+    return {
+        "id": str(a.id), "tipo": a.tipo, "tipo_label": a.get_tipo_display(),
+        "data_inicio": a.data_inicio.isoformat(),
+        "inicio_br": f"{a.data_inicio:%d/%m/%Y}",
+        "data_prevista_retorno": (a.data_prevista_retorno.isoformat()
+                                  if a.data_prevista_retorno else None),
+        "data_retorno": a.data_retorno.isoformat() if a.data_retorno else None,
+        "retorno_br": f"{a.data_retorno:%d/%m/%Y}" if a.data_retorno else "",
+        "estabilidade_ate": a.estabilidade_ate.isoformat() if a.estabilidade_ate else None,
+        "estabilidade_br": f"{a.estabilidade_ate:%d/%m/%Y}" if a.estabilidade_ate else "",
+        "em_estabilidade": bool(a.estabilidade_ate and a.estabilidade_ate >= hoje),
+        "observacao": a.observacao,
+        "em_curso": em_curso,
+        # o que a regra faz na folha, em português, pra tela poder explicar
+        "regra": {
+            "dias_empresa": r["dias_empresa"],
+            "fgts": r["fgts"],
+            "corta_va": r["corta_va"],
+            "compensa_na_guia": r["compensa_na_guia"],
+        },
     }
 
 
@@ -293,6 +321,82 @@ class DpColaboradorViewSet(viewsets.ModelViewSet):
                                 autor=_quem(request))
         audit(request, "desligar", "dp_colaborador", obj.id, antes=antes, depois=_snap(obj))
         return Response(self.get_serializer(obj).data)
+
+    # ─────────────── afastamentos e suspensões ───────────────
+
+    @action(detail=True, methods=["get", "post"])
+    def afastamentos(self, request, pk=None):
+        """GET lista; POST registra. Só CLT tem efeito na folha — para os demais
+        regimes o registro fica como histórico, sem mexer no cálculo."""
+        colab = self.get_object()
+        if request.method == "GET":
+            return Response([_afastamento_json(a) for a in colab.afastamentos.all()])
+
+        tipo = request.data.get("tipo")
+        if tipo not in dict(DpAfastamento.TIPOS):
+            return Response({"detail": "Tipo de afastamento inválido."}, status=400)
+        inicio = _data_ou_none(request.data.get("data_inicio"))
+        if not inicio:
+            return Response({"detail": "Informe a data de início."}, status=400)
+        retorno = _data_ou_none(request.data.get("data_retorno"))
+        prevista = _data_ou_none(request.data.get("data_prevista_retorno"))
+        if retorno and retorno < inicio:
+            return Response({"detail": "O retorno não pode ser antes do início."}, status=400)
+
+        # estabilidade: acidente conta do RETORNO; maternidade, do início
+        meses = REGRAS_AFASTAMENTO.get(tipo, {}).get("estabilidade_meses")
+        estab = _data_ou_none(request.data.get("estabilidade_ate"))
+        if not estab and meses:
+            base = retorno or prevista or inicio
+            ano_e, mes_e = base.year, base.month + meses
+            while mes_e > 12:
+                mes_e -= 12
+                ano_e += 1
+            from calendar import monthrange
+            estab = date(ano_e, mes_e, min(base.day, monthrange(ano_e, mes_e)[1]))
+
+        a = DpAfastamento.objects.create(
+            colaborador=colab, tipo=tipo, data_inicio=inicio,
+            data_prevista_retorno=prevista, data_retorno=retorno,
+            estabilidade_ate=estab,
+            observacao=(request.data.get("observacao") or "")[:250],
+            registrado_por=_quem(request))
+        audit(request, "afastamento", "dp_afastamento", a.id, colaborador=colab,
+              depois={"colaborador": colab.nome, "tipo": a.get_tipo_display(),
+                      "inicio": f"{inicio:%d/%m/%Y}",
+                      "retorno": f"{retorno:%d/%m/%Y}" if retorno else "em curso",
+                      "estabilidade": f"{estab:%d/%m/%Y}" if estab else "—"})
+        return Response(_afastamento_json(a), status=201)
+
+    @action(detail=True, methods=["patch", "delete"],
+            url_path=r"afastamentos/(?P<af_id>[^/.]+)")
+    def afastamento(self, request, pk=None, af_id=None):
+        """PATCH registra o retorno (ou corrige); DELETE remove."""
+        colab = self.get_object()
+        a = colab.afastamentos.filter(pk=af_id).first()
+        if not a:
+            return Response({"detail": "Afastamento não encontrado."}, status=404)
+
+        if request.method == "DELETE":
+            audit(request, "excluir", "dp_afastamento", a.id, colaborador=colab,
+                  antes={"tipo": a.get_tipo_display(), "inicio": f"{a.data_inicio:%d/%m/%Y}"},
+                  depois={"colaborador": colab.nome, "situacao": "removido"})
+            a.delete()
+            return Response({"detail": "Afastamento removido."})
+
+        antes = {"retorno": str(a.data_retorno or "em curso")}
+        for campo in ("data_retorno", "data_prevista_retorno", "estabilidade_ate"):
+            if campo in request.data:
+                setattr(a, campo, _data_ou_none(request.data.get(campo)))
+        if "observacao" in request.data:
+            a.observacao = (request.data.get("observacao") or "")[:250]
+        if a.data_retorno and a.data_retorno < a.data_inicio:
+            return Response({"detail": "O retorno não pode ser antes do início."}, status=400)
+        a.save()
+        audit(request, "afastamento", "dp_afastamento", a.id, colaborador=colab, antes=antes,
+              depois={"colaborador": colab.nome, "tipo": a.get_tipo_display(),
+                      "retorno": str(a.data_retorno or "em curso")})
+        return Response(_afastamento_json(a))
 
     # ─────────────── transferência de contrato ───────────────
 

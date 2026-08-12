@@ -130,6 +130,11 @@ def calcular_item(colab: DpColaborador, lanc, comp: DpCompetencia, fiscal: DpTab
     fer_inicio = (lanc.ferias_inicio if lanc else None)
     f_dias = (lanc.faltas_dias if lanc else 0.0) or 0.0
     f_horas = (lanc.faltas_horas if lanc else 0.0) or 0.0
+    # subconjunto das faltas que foi INJUSTIFICADA — só essas tiram o DSR
+    # getattr defensivo, igual ao resto da função: lançamento antigo (ou
+    # qualquer objeto que não conheça o campo novo) não pode derrubar a folha
+    f_injust = min((getattr(lanc, "faltas_injustificadas_dias", 0.0) or 0.0) if lanc else 0.0,
+                   f_dias)
     premio = (lanc.premiacoes if lanc else 0.0) or 0.0
     acerto = (lanc.acerto_contabil if lanc else 0.0) or 0.0
     clt = colab.regime == "clt"
@@ -144,19 +149,82 @@ def calcular_item(colab: DpColaborador, lanc, comp: DpCompetencia, fiscal: DpTab
         mem["desc_faltas"] = f"({bruto}/{dias_ref})×{f_dias} + ({bruto}/{horas_ref})×{f_horas}"
     sal_faltas = round(bruto - desc_faltas, 2)
 
-    # VT e VA proporcionais às faltas DA competência: o benefício é diário, então
-    # cada dia de falta desconta 1/dias_úteis do valor cheio (horas viram fração
-    # de dia pela carga do cargo).
-    dias_equiv = f_dias + (f_horas / (horas_ref / dias_ref) if horas_ref else 0)
-    # dia de férias não gera vale: entra no mesmo rateio das faltas
-    dias_equiv += fer_dias * (comp.dias_uteis / 30)
-    fator_falta = min(dias_equiv / max(comp.dias_uteis, 1), 1.0) if dias_equiv else 0.0
-    vt_faltas = round(vt * (1 - fator_falta), 2) if vt else 0.0
-    va_faltas = round(va * (1 - fator_falta), 2) if va else 0.0
-    if fator_falta:
+    # ── AFASTAMENTOS E SUSPENSÕES DO MÊS (só CLT) ──────────────────────────
+    # Regras confirmadas com o DP em 12/08/2026 e tabeladas em
+    # REGRAS_AFASTAMENTO: quem custeia cada faixa de dias, se o FGTS é devido e
+    # se o vale-alimentação pode ser cortado mudam conforme o TIPO.
+    afast_empresa = afast_inss = 0
+    afast_tipo = ""
+    afast_corta_va = True
+    afast_fgts = "dias_empresa"
+    afast_compensavel = False
+    if clt:
+        for af in colab.afastamentos.all():
+            de, di = af.dias_no_mes(comp.ano, comp.mes)
+            if not (de or di):
+                continue
+            afast_empresa += de
+            afast_inss += di
+            r = af.regra
+            afast_tipo = afast_tipo or af.tipo
+            # entre tipos concorrentes no mesmo mês, vale a regra mais protetiva
+            afast_corta_va = afast_corta_va and r["corta_va"]
+            if r["fgts"] == "sempre":
+                afast_fgts = "sempre"
+            elif r["fgts"] == "nunca" and afast_fgts != "sempre":
+                afast_fgts = "nunca"
+            afast_compensavel = afast_compensavel or r["compensa_na_guia"]
+
+    diaria_bruto = bruto / 30
+    # os dias custeados pelo INSS saem do salário: quem paga não é a empresa
+    desc_afast = round(diaria_bruto * afast_inss, 2) if afast_inss else 0.0
+    if desc_afast:
+        desc_faltas = round(desc_faltas + desc_afast, 2)
+        sal_faltas = round(bruto - desc_faltas, 2)
+        mem["afastamento"] = (
+            f"{afast_empresa} dia(s) pagos pela empresa e {afast_inss} pelo INSS "
+            f"({afast_inss} × {bruto:.2f}/30 = {desc_afast:.2f} descontados)")
+    elif afast_empresa:
+        mem["afastamento"] = (f"{afast_empresa} dia(s) de afastamento, todos "
+                              f"custeados pela empresa — sem desconto")
+
+    # ── DSR PERDIDO POR FALTA INJUSTIFICADA ────────────────────────────────
+    # Falta com atestado ou abonada não tira o descanso semanal; injustificada
+    # tira. Fórmula usada: faltas × valor do dia × (DSRs do mês ÷ dias úteis),
+    # com DSRs = dias do mês − dias úteis. CONFERIR COM O DP.
+    desc_dsr = 0.0
+    if clt and f_injust > 0:
+        dsr_mes = max(comp.dias_mes - comp.dias_uteis, 0)
+        if dsr_mes and comp.dias_uteis:
+            desc_dsr = round(diaria_bruto * f_injust * (dsr_mes / comp.dias_uteis), 2)
+            desc_faltas = round(desc_faltas + desc_dsr, 2)
+            sal_faltas = round(bruto - desc_faltas, 2)
+            mem["dsr"] = (f"{f_injust:g} falta(s) injustificada(s) × {diaria_bruto:.2f} × "
+                          f"({dsr_mes} DSR ÷ {comp.dias_uteis} dias úteis) = {desc_dsr:.2f}")
+
+    # ── VT E VA PROPORCIONAIS ──────────────────────────────────────────────
+    # Bases DIFERENTES, por regra da casa: o vale-transporte vale por dia ÚTIL
+    # (VT ÷ dias úteis) e o vale-alimentação por dia CORRIDO (VA ÷ 30). Antes os
+    # dois usavam dias úteis, o que descontava VA a mais.
+    dias_falta = f_dias + (f_horas / (horas_ref / dias_ref) if horas_ref else 0)
+    dias_corridos_fora = fer_dias + afast_empresa + afast_inss
+
+    # VT: converte os dias corridos ausentes em dias úteis equivalentes
+    ausencia_vt = dias_falta + dias_corridos_fora * (comp.dias_uteis / 30)
+    fator_vt = min(ausencia_vt / max(comp.dias_uteis, 1), 1.0) if ausencia_vt else 0.0
+
+    # VA: dia corrido direto. Em ACIDENTE de trabalho o vale-alimentação NÃO
+    # pode ser cortado, então os dias de afastamento saem da conta.
+    dias_va = dias_falta + fer_dias + ((afast_empresa + afast_inss) if afast_corta_va else 0)
+    fator_va = min(dias_va / 30, 1.0) if dias_va else 0.0
+
+    vt_faltas = round(vt * (1 - fator_vt), 2) if vt else 0.0
+    va_faltas = round(va * (1 - fator_va), 2) if va else 0.0
+    if fator_vt or fator_va:
         mem["beneficios_proporcionais"] = (
-            f"{dias_equiv:.2f} dia(s) de falta ÷ {comp.dias_uteis} dias úteis = "
-            f"{fator_falta:.1%} de desconto no VT e no VA")
+            f"VT: {ausencia_vt:.2f} dia(s) ÷ {comp.dias_uteis} úteis = {fator_vt:.1%} "
+            f"de corte · VA: {dias_va:.2f} dia(s) ÷ 30 = {fator_va:.1%} de corte"
+            + ("" if afast_corta_va else " (VA preservado: acidente de trabalho)"))
 
     # ── FÉRIAS DO MÊS ──────────────────────────────────────────────────────
     # Os dias de férias saem do salário (não se trabalha) e voltam como
@@ -227,6 +295,16 @@ def calcular_item(colab: DpColaborador, lanc, comp: DpCompetencia, fiscal: DpTab
 
     sal_desc = round(sal_faltas - desc_inss - desc_vt, 2)
 
+    # MATERNIDADE: a empresa paga e o INSS devolve na guia, igual ao
+    # salário-família. Logo o salário desses dias NÃO é custo do escritório —
+    # sem isso a margem do cliente pioraria por uma despesa que volta.
+    sal_compensavel = 0.0
+    if clt and afast_compensavel and afast_empresa:
+        sal_compensavel = round(diaria_bruto * afast_empresa, 2)
+        mem["compensavel_na_guia"] = (
+            f"{afast_empresa} dia(s) de licença pagos pela empresa "
+            f"({sal_compensavel:.2f}) são reembolsados na guia — não entram no custo")
+
     # SALÁRIO-FAMÍLIA — o teto se afere pela remuneração DO MÊS, que é a mesma
     # base do INSS (salário + férias + 1/3). Benefício previdenciário: não entra
     # em base de INSS nem de FGTS, por isso é calculado depois delas.
@@ -245,8 +323,22 @@ def calcular_item(colab: DpColaborador, lanc, comp: DpCompetencia, fiscal: DpTab
         decimo = round(base_prov / 12, 2)
         ferias = round(base_prov / 12, 2)
         terco = round(ferias / 3, 2)
-        fgts = round(bruto * fiscal.fgts_percent, 2)
+        # FGTS segue a regra do TIPO de afastamento:
+        #   "sempre"        → acidente e maternidade: incide sobre o salário
+        #                     INTEIRO, mesmo nos dias que a empresa não paga;
+        #   "dias_empresa"  → doença: só sobre o que a empresa custeia;
+        #   "nunca"         → suspensão: não há FGTS nos dias suspensos.
+        if afast_inss and afast_fgts == "dias_empresa":
+            base_fgts = round(bruto - desc_afast, 2)
+        elif afast_fgts == "nunca":
+            base_fgts = round(bruto - desc_afast, 2)
+        else:
+            base_fgts = bruto
+        fgts = round(base_fgts * fiscal.fgts_percent, 2)
         multa = round(fgts * fiscal.multa_fgts_percent, 2)
+        if base_fgts != bruto:
+            mem["fgts_base"] = (f"FGTS sobre {base_fgts:.2f} (e não {bruto:.2f}): "
+                                f"regra '{afast_fgts}' do afastamento")
         recesso = 0.0
         patronal = round(bruto * fiscal.inss_patronal_percent, 2)
         mem["provisoes"] = {"base": fiscal.provisao_base, "valor_base": round(base_prov, 2),
@@ -276,12 +368,16 @@ def calcular_item(colab: DpColaborador, lanc, comp: DpCompetencia, fiscal: DpTab
         "ferias_dias": fer_dias, "ferias_valor": fer_valor, "ferias_terco": fer_terco,
         "ferias_abono": fer_abono_valor, "ferias_inicio": fer_inicio, "ferias_fim": fer_fim,
         "salario_familia": sal_familia, "salario_familia_cotas": sf_cotas,
+        "faltas_injustificadas_dias": f_injust, "desc_dsr": desc_dsr,
+        "afastamento_tipo": afast_tipo, "afastamento_dias_empresa": afast_empresa,
+        "afastamento_dias_inss": afast_inss, "desc_afastamento": desc_afast,
         "inss_patronal": patronal, "custo_provisoes": provisoes,
         # o salário-família SAI do custo: entrou no total_pagar porque o
         # colaborador recebe, mas quem arca é o INSS — o escritório só adianta
         # e compensa na guia. Mantê-lo aqui inflaria a folha e derrubaria a
         # margem por cliente sem que um centavo tivesse saído do caixa.
-        "custo_total": round(total_pagar - sal_familia + provisoes + patronal, 2),
+        "custo_total": round(total_pagar - sal_familia - sal_compensavel
+                             + provisoes + patronal, 2),
         "memoria": mem,
         "ajuste_manual": ajustada,
         "ajuste_motivo": (lanc.ajuste_motivo if lanc else "") or "",
@@ -299,7 +395,7 @@ def elegiveis(comp: DpCompetencia):
     # prefetch dos dependentes: o salário-família lê a lista de cada um, e sem
     # isso o recálculo da folha vira uma query por colaborador
     return DpColaborador.objects.select_related("centro_custo", "cargo").prefetch_related(
-        "dependentes"
+        "dependentes", "afastamentos"
     ).filter(
         Q(status="ativo") | Q(data_demissao__gte=inicio)
     ).exclude(data_admissao__gt=date(comp.ano, comp.mes, 28))
@@ -446,7 +542,8 @@ class DpCompetenciaViewSet(viewsets.ViewSet):
         # lançar férias não apagar as faltas já registradas (e vice-versa)
         lanc, _ = DpLancamento.objects.get_or_create(competencia=comp, colaborador=colab)
         campos = {"faltas_dias": num, "faltas_horas": num, "premiacoes": num,
-                  "acerto_contabil": num, "ferias_dias": inteiro,
+                  "acerto_contabil": num, "faltas_injustificadas_dias": num,
+                  "ferias_dias": inteiro,
                   "ferias_abono_dias": inteiro, "ferias_inicio": data}
         for campo, conv in campos.items():
             if campo in request.data:
