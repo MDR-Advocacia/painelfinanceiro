@@ -341,6 +341,11 @@ export interface DpFolhaItem {
   afastamento_dias_empresa?: number;
   afastamento_dias_inss?: number;
   desc_afastamento?: number;
+  /** IRRF retido — zero enquanto a tabela não for preenchida em Parâmetros */
+  desc_irrf?: number;
+  /** parcela do 13º paga neste mês (entra no a-pagar, não soma custo) */
+  decimo_terceiro_pago?: number;
+  media_variaveis_ferias?: number;
   desc_inss: number; desc_vt: number; vt_com_faltas: number; va_com_faltas: number;
   saldo_livre: number; premiacoes: number; acerto_contabil: number;
   /** benefício previdenciário: entra no total_pagar, mas NÃO no custo_total */
@@ -388,7 +393,10 @@ export const folhaApi = {
       .then((r) => j<DpCompetencia>(r)),
   recalcular: (id: string) =>
     fetch(`${API_URL}/dp/competencias/${id}/recalcular/`, { method: "POST", headers: H() }).then((r) => j<{ itens: number }>(r)),
-  itens: (id: string, p: { busca?: string; regime?: string; cc?: string; limit?: number; offset?: number }) => {
+  itens: (id: string, p: { busca?: string; regime?: string; cc?: string;
+                           /** campo de ordenação; prefixo "-" = decrescente */
+                           ordem?: string;
+                           limit?: number; offset?: number }) => {
     const qs = new URLSearchParams();
     Object.entries(p).forEach(([k, v]) => { if (v !== undefined && v !== "") qs.set(k, String(v)); });
     return fetch(`${API_URL}/dp/competencias/${id}/itens/?${qs}`, { headers: authHeaders() })

@@ -1093,6 +1093,61 @@ def linha_faturamento(request, pk):
     return Response({"periodo": periodo, "faturamento": novo})
 
 
+def espelhar_custo_pessoal(comp) -> dict:
+    """Leva o custo REAL da folha para o Setor legado, por período.
+
+    O Dashboard, Projeções e Rentabilidade ainda leem do Setor, e lá o custo de
+    pessoal é uma ESTIMATIVA do painel antigo: por cargo, quantidade × salário ×
+    multiplicador de encargos. Isso nunca conversou com a folha do DP — em
+    06/2026 a estimativa dava R$ 358.455 contra R$ 478.122 de folha real, 25%
+    a menos, e o operador via dois números diferentes pra mesma coisa.
+
+    Aqui o custo da competência desce pelo mesmo caminho da tela da Estrutura
+    (folha da pessoa → equipe → alocação → linha) e é gravado como
+    `custoPessoalReal` no período do setor de origem. O detalhe por cargo
+    continua onde está: quem manda no total passa a ser a folha, e a estimativa
+    vira só o desenho de quadro que ela sempre foi.
+    """
+    from .models import Setor
+    periodo = f"{comp.ano}-{comp.mes:02d}"
+    custo_eq = _custo_por_equipe(comp)
+    soma_eq = _soma_percentual_por_equipe(comp)
+
+    # custo rateado por LINHA, mesma conta da Estrutura
+    por_linha = {}
+    for a in Alocacao.objects.select_related("linha").all():
+        base = custo_eq.get(str(a.equipe_id))
+        if not base or not a.linha_id:
+            continue
+        soma = soma_eq.get(a.equipe_id) or 0
+        if not soma:
+            continue
+        parcela = round(base["custo_total"] * ((a.percentual or 0) / soma), 2)
+        por_linha[a.linha_id] = round(por_linha.get(a.linha_id, 0.0) + parcela, 2)
+
+    # linha → setor legado (1:1 hoje; a soma cobre 1:N sem quebrar)
+    por_setor = {}
+    for l in LinhaFaturamento.objects.select_related("setor_legado"):
+        if not l.setor_legado_id:
+            continue
+        v = por_linha.get(l.id)
+        if not v:
+            continue
+        por_setor[l.setor_legado_id] = round(por_setor.get(l.setor_legado_id, 0.0) + v, 2)
+
+    gravados = 0
+    for setor in Setor.objects.filter(id__in=por_setor.keys()):
+        periodos = setor.periodos or {}
+        p = dict(periodos.get(periodo) or {})
+        p["custoPessoalReal"] = por_setor[setor.id]
+        periodos[periodo] = p
+        setor.periodos = periodos
+        setor.save(update_fields=["periodos", "updated_at"])
+        gravados += 1
+    return {"periodo": periodo, "setores": gravados,
+            "total": round(sum(por_setor.values()), 2)}
+
+
 def _espelhar_no_setor_legado(linha, periodo):
     """Mantém o Setor legado alimentado a partir das LINHAS.
 

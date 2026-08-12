@@ -488,6 +488,14 @@ def recalcular(comp: DpCompetencia) -> int:
         d = calcular_item(colab, lancs.get(colab.id), comp, fiscal)
         itens.append(DpFolhaItem(competencia=comp, colaborador=colab, **d))
     DpFolhaItem.objects.bulk_create(itens, batch_size=500)
+    # leva o custo real pro Setor legado, que é de onde Dashboard, Projeções e
+    # Rentabilidade ainda leem — senão eles seguem mostrando a estimativa antiga
+    try:
+        from .estrutura_views import espelhar_custo_pessoal
+        espelhar_custo_pessoal(comp)
+    except Exception:
+        # espelho é conveniência: se falhar, a folha continua correta
+        pass
     return len(itens)
 
 
@@ -659,6 +667,19 @@ class DpCompetenciaViewSet(viewsets.ViewSet):
                 qs = qs.filter(centro_custo_nome__in=nomes)
             else:
                 qs = qs.filter(centro_custo_nome=request.query_params["cc"])
+        # ordenação clicável da tabela. ALLOWLIST: campo vindo da query nunca
+        # entra cru no order_by — seria injection de campo e quebraria com 500.
+        ORDENAVEIS = {
+            "matricula", "nome", "centro_custo_nome", "salario_bruto",
+            "faltas_dias", "desc_inss", "desc_vt", "desc_irrf", "vt_com_faltas",
+            "va_com_faltas", "salario_com_descontos", "saldo_livre",
+            "ferias_valor", "acerto_contabil", "premiacoes", "salario_familia",
+            "decimo_terceiro_pago", "total_pagar", "custo_total",
+        }
+        ordem = (request.query_params.get("ordem") or "").strip()
+        campo_ordem = ordem.lstrip("-")
+        if campo_ordem in ORDENAVEIS:
+            qs = qs.order_by(ordem, "nome")  # desempate estável pelo nome
         total = qs.count()
         from django.db.models import Sum
         ag = qs.aggregate(pagar=Sum("total_pagar"), prov=Sum("custo_provisoes"),
@@ -677,7 +698,10 @@ class DpCompetenciaViewSet(viewsets.ViewSet):
                   "em_rescisao", "salario_com_faltas", "salario_com_descontos",
                   "ferias_dias", "ferias_valor", "ferias_terco", "ferias_abono",
                   "ferias_inicio", "ferias_fim",
-                  "salario_familia", "salario_familia_cotas"]
+                  "salario_familia", "salario_familia_cotas",
+                  "desc_irrf", "decimo_terceiro_pago", "faltas_injustificadas_dias",
+                  "desc_dsr", "afastamento_tipo", "afastamento_dias_empresa",
+                  "afastamento_dias_inss", "desc_afastamento"]
         items = []
         for it in qs[offset:offset + limit]:
             row = {k: getattr(it, k) for k in campos}

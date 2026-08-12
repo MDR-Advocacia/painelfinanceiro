@@ -93,7 +93,14 @@ export function getVpdValor(configs: VpdConfig[], periodo: string): number {
  * Integra o rateio por número de funcionários (VPD) e o Lucro Líquido (ROF)
  */
 export function calcResumo(data: PeriodoData, vpdValor: number = 2472.85): ResumoSetor {
-  const { custosPorCargo, total: totalCustoPessoal } = calcTotalPessoal(data.pessoal as any);
+  const { custosPorCargo, total: estimativaPessoal } = calcTotalPessoal(data.pessoal as any);
+  // `custoPessoalReal` vem da FOLHA fechada do DP, espelhada no setor quando a
+  // competência é calculada. Quando existe, ele manda: o bloco `pessoal` é uma
+  // ESTIMATIVA por cargo (quantidade × salário × multiplicador de encargos) e
+  // ficava 25% abaixo da folha de verdade — em 06/2026 dava R$ 358.455 contra
+  // R$ 478.122 reais, e o operador via dois números pra mesma coisa.
+  const real = (data as any).custoPessoalReal as number | undefined;
+  const totalCustoPessoal = real && real > 0 ? real : estimativaPessoal;
   const headcount = getTotalProfissionais(data.pessoal as any);
 
   const totalDespesasEventuais = (data.despesasEventuais || []).reduce((sum, item) => sum + item.valor, 0);

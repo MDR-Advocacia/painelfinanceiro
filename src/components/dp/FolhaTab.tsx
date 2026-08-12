@@ -168,6 +168,38 @@ function CompetenciaDetalhe({ comp, editar, onMudou }: {
   const [ferias, setFerias] = useState<DpFolhaItem | null>(null);
   const [reabrindo, setReabrindo] = useState(false);
   const [justificativa, setJustificativa] = useState("");
+  // ordenação clicável: "" = ordem natural; "-campo" = decrescente.
+  // Vai pro SERVIDOR porque a tabela é paginada — ordenar só a página visível
+  // enganaria (o "maior valor" poderia estar em outra página).
+  const [ordem, setOrdem] = useState("");
+
+  const ordenarPor = (campo: string, numerica: boolean) => {
+    setPagina(0);
+    setOrdem((atual) => {
+      // numérica começa pelo MAIOR (é o que se procura); texto começa pelo A
+      const primeira = numerica ? `-${campo}` : campo;
+      const segunda = numerica ? campo : `-${campo}`;
+      if (atual === primeira) return segunda;
+      if (atual === segunda) return "";
+      return primeira;
+    });
+  };
+
+  const TH = ({ campo, numerica = true, children, className = "" }: {
+    campo: string; numerica?: boolean; children: React.ReactNode; className?: string;
+  }) => (
+    <TableHead
+      className={`cursor-pointer select-none hover:text-foreground ${className}`}
+      onClick={() => ordenarPor(campo, numerica)}
+      title="Clique para ordenar"
+    >
+      <span className="inline-flex items-center gap-0.5">
+        {children}
+        {ordem === campo && <span aria-hidden>▲</span>}
+        {ordem === `-${campo}` && <span aria-hidden>▼</span>}
+      </span>
+    </TableHead>
+  );
 
   const fechada = comp.status === "fechada";
   const aberta = comp.status === "aberta";
@@ -176,13 +208,14 @@ function CompetenciaDetalhe({ comp, editar, onMudou }: {
     setLoading(true);
     folhaApi.itens(comp.id, {
       busca, regime: regime === TODOS ? "" : regime,
-      cc: ccFiltro === TODOS ? "" : ccFiltro, limit: PAGE, offset: pagina * PAGE,
+      cc: ccFiltro === TODOS ? "" : ccFiltro, ordem: ordem || undefined,
+      limit: PAGE, offset: pagina * PAGE,
     })
       .then((r) => { setItems(r.items); setTotal(r.total); setTotais(r.totais); })
       .catch((e) => toast.error(e.message))
       .finally(() => setLoading(false));
     folhaApi.rateio(comp.id).then(setRateio).catch(() => undefined);
-  }, [comp.id, busca, regime, ccFiltro, pagina]);
+  }, [comp.id, busca, regime, ccFiltro, ordem, pagina]);
 
   useEffect(() => { carregarItens(); }, [carregarItens]);
 
@@ -360,19 +393,20 @@ function CompetenciaDetalhe({ comp, editar, onMudou }: {
                     <TableHead className="hidden text-right text-xs xl:table-cell">
                       <TituloAjuda titulo="Salário com descontos" ajuda="Salário depois das faltas, do INSS e do vale-transporte — antes de somar benefícios e prêmios." />
                     </TableHead>
+                    <TableHead className="text-right text-xs">
+                      <TituloAjuda titulo="Saldo livre" ajuda="Parcela paga fora do salário base, sem incidência de INSS. Em junho eram 63 pessoas e R$ 80,5 mil — some no total sem aparecer se esta coluna não existir." />
+                    </TableHead>
+                    <TH campo="ferias_valor" numerica className="text-right text-xs"><TituloAjuda titulo="Férias" ajuda="Remuneração dos dias de férias + 1/3 constitucional + abono pecuniário, quando houver." /></TH>
+                    <TH campo="acerto_contabil" numerica className="hidden text-right text-xs xl:table-cell"><TituloAjuda titulo="Acerto" ajuda="Acerto contábil do mês: pode ser positivo ou negativo." /></TH>
                     <TableHead className="hidden text-right text-xs md:table-cell">Prêmios</TableHead>
-                    <TableHead className="hidden text-right text-xs lg:table-cell">
-                      <TituloAjuda
+                    <TH campo="salario_familia" numerica className="hidden text-right text-xs lg:table-cell"><TituloAjuda
                         titulo="Sal. família"
                         ajuda="Cota por dependente elegível. O escritório adianta e compensa na guia do INSS — por isso entra no que a pessoa recebe, mas NÃO conta como custo do escritório."
-                      />
-                    </TableHead>
-                    <TableHead className="text-right text-xs">
-                      <TituloAjuda titulo="A pagar" ajuda="Valor líquido que a pessoa recebe no mês." />
-                    </TableHead>
-                    <TableHead className="hidden text-right text-xs sm:table-cell">
-                      <TituloAjuda titulo="Custo total" ajuda="Quanto essa pessoa custa ao escritório no mês, somando pagamento, provisões e encargos." />
-                    </TableHead>
+                      /></TH>
+                    <TH campo="desc_irrf" numerica className="hidden text-right text-xs xl:table-cell"><TituloAjuda titulo="IRRF" ajuda="Imposto de renda retido. Fica zero enquanto a tabela não for preenchida em Parâmetros." /></TH>
+                    <TH campo="decimo_terceiro_pago" numerica className="hidden text-right text-xs xl:table-cell"><TituloAjuda titulo="13º pago" ajuda="Parcela do 13º paga neste mês. Entra no que a pessoa recebe mas NÃO soma custo — a despesa já foi provisionada 1/12 por mês." /></TH>
+                    <TH campo="total_pagar" numerica className="text-right text-xs"><TituloAjuda titulo="A pagar" ajuda="Soma de tudo que a pessoa recebe: salário com descontos + benefícios + saldo livre + férias + acerto + prêmios + salário-família + 13º." /></TH>
+                    <TH campo="custo_total" numerica className="hidden text-right text-xs sm:table-cell"><TituloAjuda titulo="Custo total" ajuda="Quanto essa pessoa custa ao escritório no mês, somando pagamento, provisões e encargos." /></TH>
                     {editar && aberta && <TableHead className="w-16 text-center text-xs">Ações</TableHead>}
                   </TableRow>
                 </TableHeader>
@@ -417,6 +451,26 @@ function CompetenciaDetalhe({ comp, editar, onMudou }: {
                       <TableCell className="hidden text-right font-mono text-xs xl:table-cell">{fmtBRL(it.vt_com_faltas)}</TableCell>
                       <TableCell className="hidden text-right font-mono text-xs xl:table-cell">{fmtBRL(it.va_com_faltas)}</TableCell>
                       <TableCell className="hidden text-right font-mono text-xs xl:table-cell">{fmtBRL(it.salario_com_descontos ?? 0)}</TableCell>
+                      <TableCell className="text-right font-mono text-xs">
+                        {it.saldo_livre ? fmtBRL(it.saldo_livre) : "—"}
+                      </TableCell>
+                      <TableCell className="text-right font-mono text-xs">
+                        {(() => {
+                          const fer = (it.ferias_valor ?? 0) + (it.ferias_terco ?? 0) + (it.ferias_abono ?? 0);
+                          return fer ? (
+                            <span className="text-sky-700"
+                                  title={`Férias ${fmtBRL(it.ferias_valor ?? 0)} + 1/3 ${fmtBRL(it.ferias_terco ?? 0)}`
+                                         + ((it.ferias_abono ?? 0) ? ` + abono ${fmtBRL(it.ferias_abono ?? 0)}` : "")}>
+                              {fmtBRL(fer)}
+                            </span>
+                          ) : "—";
+                        })()}
+                      </TableCell>
+                      <TableCell className="hidden text-right font-mono text-xs xl:table-cell">
+                        {it.acerto_contabil
+                          ? <span className={it.acerto_contabil < 0 ? "text-rose-600" : ""}>{fmtBRL(it.acerto_contabil)}</span>
+                          : "—"}
+                      </TableCell>
                       <TableCell className="hidden text-right font-mono text-xs md:table-cell">
                         {it.premiacoes ? <span className="text-emerald-700">{fmtBRL(it.premiacoes)}</span> : "—"}
                       </TableCell>
@@ -427,6 +481,12 @@ function CompetenciaDetalhe({ comp, editar, onMudou }: {
                             {fmtBRL(it.salario_familia)}
                           </span>
                         ) : "—"}
+                      </TableCell>
+                      <TableCell className="hidden text-right font-mono text-xs xl:table-cell">
+                        {it.desc_irrf ? <span className="text-rose-600">{fmtBRL(it.desc_irrf)}</span> : "—"}
+                      </TableCell>
+                      <TableCell className="hidden text-right font-mono text-xs xl:table-cell">
+                        {it.decimo_terceiro_pago ? fmtBRL(it.decimo_terceiro_pago) : "—"}
                       </TableCell>
                       <TableCell className="text-right font-mono text-xs font-semibold">{fmtBRL(it.total_pagar)}</TableCell>
                       <TableCell className="hidden text-right font-mono text-xs sm:table-cell">{fmtBRL(it.custo_total)}</TableCell>
@@ -472,7 +532,7 @@ function CompetenciaDetalhe({ comp, editar, onMudou }: {
                     </TableRow>
                   ))}
                   {!loading && items.length === 0 && (
-                    <TableRow><TableCell colSpan={11} className="py-8 text-center text-sm text-muted-foreground">
+                    <TableRow><TableCell colSpan={16} className="py-8 text-center text-sm text-muted-foreground">
                       Sem itens.
                     </TableCell></TableRow>
                   )}

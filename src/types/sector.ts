@@ -34,6 +34,11 @@ export interface Faturamento {
 }
 
 export interface PeriodoData {
+  /**
+   * Custo de pessoal REAL, vindo da folha fechada do DP (espelhado no setor).
+   * Quando presente, substitui a estimativa por cargo do bloco `pessoal`.
+   */
+  custoPessoalReal?: number;
   pessoal: Pessoal;
   faturamento: Faturamento;
   despesasEventuais?: CustoItem[];
