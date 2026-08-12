@@ -82,6 +82,42 @@ class DpColaboradorSerializer(serializers.ModelSerializer):
     equipe_id = serializers.PrimaryKeyRelatedField(
         source='equipe_ref', queryset=Equipe.objects.all(), allow_null=True, required=False)
     salario_familia = serializers.SerializerMethodField()
+    transferencia = serializers.SerializerMethodField()
+
+    def get_transferencia(self, obj):
+        """Liga esta ficha à matrícula anterior e/ou seguinte da MESMA pessoa.
+
+        Efetivar alguém obriga a abrir cadastro novo (a matrícula é numerada por
+        regime), então sem isto o histórico da pessoa fica partido em duas
+        fichas que não se conhecem.
+        """
+        saida = getattr(obj, "transferencia_saida", None)     # esta virou outra
+        entrada = getattr(obj, "transferencia_entrada", None)  # esta veio de outra
+        if not saida and not entrada:
+            return None
+        d = {}
+        if entrada:
+            d["veio_de"] = {
+                "id": str(entrada.origem_id),
+                "matricula": entrada.origem.matricula,
+                "nome": entrada.origem.nome,
+                "regime": entrada.origem.regime,
+                "data": entrada.data_efeito.isoformat(),
+                "data_br": f"{entrada.data_efeito:%d/%m/%Y}",
+                "motivo": entrada.motivo,
+            }
+        if saida:
+            d["continuou_como"] = {
+                "id": str(saida.destino_id),
+                "matricula": saida.destino.matricula,
+                "nome": saida.destino.nome,
+                "regime": saida.destino.regime,
+                "data": saida.data_efeito.isoformat(),
+                "data_br": f"{saida.data_efeito:%d/%m/%Y}",
+                "motivo": saida.motivo,
+            }
+        return d
+
 
     def _teto_salario_familia(self) -> float:
         """Teto vigente, buscado UMA vez por requisição.
@@ -148,7 +184,7 @@ class DpColaboradorSerializer(serializers.ModelSerializer):
             'cargo_id', 'cargo_nome', 'regime', 'regime_label', 'status',
             'data_entrada', 'data_admissao', 'data_demissao',
             'salario_bruto', 'saldo_livre', 'vt', 'opta_vt', 'va',
-            'conta_bb', 'pix', 'conta_caixa', 'salario_familia',
+            'conta_bb', 'pix', 'conta_caixa', 'salario_familia', 'transferencia',
             'created_at', 'updated_at',
         ]
         read_only_fields = ['matricula']

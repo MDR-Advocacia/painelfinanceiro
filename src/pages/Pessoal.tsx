@@ -34,6 +34,7 @@ import FolhaTab from "@/components/dp/FolhaTab";
 import { EquipePicker, CcPicker, ColaboradorPicker, LiderancaPicker, invalidarArvoreCc } from "@/components/dp/Pickers";
 import DocumentosColaborador from "@/components/dp/DocumentosColaborador";
 import DependentesColaborador from "@/components/dp/DependentesColaborador";
+import TransferenciaContrato from "@/components/dp/TransferenciaContrato";
 import { usePermissions } from "@/hooks/usePermissions";
 import {
   type DpAuditFiltros, type DpCargo, type DpCentroCusto, type DpColaborador,
@@ -561,6 +562,9 @@ function FichaDialog({ colaborador, ccs, cargos, editar, onClose, onMudou }: {
             <span>Demissão: <b>{fmtData(c.data_demissao)}</b></span>
           </div>
         </div>
+
+        {/* Transferência de contrato (mesma pessoa, matrícula nova) */}
+        <TransferenciaContrato colaborador={c} editar={editar} onMudou={onMudou} />
 
         {/* Dependentes (salário-família) */}
         <DependentesColaborador colaborador={c} editar={editar} />

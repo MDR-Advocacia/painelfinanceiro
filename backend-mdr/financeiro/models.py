@@ -479,6 +479,73 @@ class DpDependente(models.Model):
         return ""
 
 
+class DpTransferenciaContrato(models.Model):
+    """A MESMA pessoa mudando de vínculo: sai numa matrícula e entra em outra.
+
+    A casa numera matrícula por regime (10xx estagiário, 20xx CLT, 30xx
+    associado, 40xx PJ), então efetivar alguém obriga a abrir um cadastro novo
+    e encerrar o antigo. Sem registrar esse vínculo, o painel lê os dois
+    movimentos como um desligamento e uma admissão de pessoas diferentes — e
+    como efetivação não é evento raro, o turnover vai inchando mês a mês com
+    gente que nunca saiu do escritório.
+
+    Registrar a transferência faz três coisas:
+      • liga as duas fichas, para o histórico da pessoa não ficar partido;
+      • tira o par do cálculo de admissões e desligamentos (movimento INTERNO);
+      • leva os dependentes junto — senão o salário-família some no dia da
+        efetivação, sem ninguém perceber, porque a matrícula nova nasce sem
+        dependente nenhum.
+
+    `OneToOne` nos dois lados: uma matrícula não entra em duas transferências,
+    mas CADEIAS funcionam (estágio → CLT → associado), porque nelas cada ficha
+    é destino de uma e origem de outra.
+    """
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    origem = models.OneToOneField(
+        "financeiro.DpColaborador", on_delete=models.CASCADE,
+        related_name="transferencia_saida",
+        help_text="Matrícula encerrada (o contrato anterior)")
+    destino = models.OneToOneField(
+        "financeiro.DpColaborador", on_delete=models.CASCADE,
+        related_name="transferencia_entrada",
+        help_text="Matrícula nova (o contrato atual)")
+    data_efeito = models.DateField()
+    motivo = models.CharField(max_length=200, blank=True, default="")
+    # quantos dependentes vieram junto — fica registrado porque mexe em benefício
+    dependentes_movidos = models.IntegerField(default=0)
+    # QUAIS vieram: sem isso, desfazer a transferência deixaria os dependentes
+    # presos na matrícula nova, e o salário-família passaria a ser pago pela
+    # ficha errada
+    dependentes_ids = models.JSONField(default=list, blank=True)
+    registrado_por = models.CharField(max_length=150, blank=True, default="")
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        db_table = 'dp_transferencias_contrato'
+        ordering = ['-data_efeito']
+        constraints = [
+            models.CheckConstraint(check=~models.Q(origem=models.F("destino")),
+                                   name="ck_transf_origem_diferente_destino"),
+        ]
+
+    def __str__(self):
+        return f"{self.origem_id} → {self.destino_id} em {self.data_efeito}"
+
+
+def ids_em_transferencia():
+    """(ids de saída, ids de entrada) — o que NÃO conta como movimentação.
+
+    Usado pelo turnover: o desligamento da origem e a admissão do destino são
+    as duas pontas do mesmo evento interno e não podem ser contados.
+    """
+    pares = DpTransferenciaContrato.objects.values_list("origem_id", "destino_id")
+    saidas, entradas = set(), set()
+    for o, d in pares:
+        saidas.add(o)
+        entradas.add(d)
+    return saidas, entradas
+
+
 class DpEvento(models.Model):
     """Event log de RH: admissão, desligamento, transferência de CC, reajuste,
     edição cadastral. Headcount/turnover/histórico da ficha saem daqui."""

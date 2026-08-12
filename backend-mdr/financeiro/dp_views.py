@@ -14,7 +14,7 @@ from rest_framework.response import Response
 
 from .models import (
     DP_MATRICULA_BASE, DpAuditLog, DpCargo, DpCentroCusto, DpColaborador, DpDependente,
-    DpDocumento, DpEvento, DpLideranca,
+    DpDocumento, DpEvento, DpLideranca, DpTransferenciaContrato,
 )
 from .dp_audit import humanizar
 from .dp_escopo import filtrar_colaboradores
@@ -186,8 +186,11 @@ class DpColaboradorViewSet(viewsets.ModelViewSet):
     # prefetch dos dependentes: o serializer resume a situação do salário-família
     # em cada linha do quadro — sem isso seria uma query por colaborador
     queryset = DpColaborador.objects.select_related(
-        "centro_custo", "cargo", "supervisor", "coordenador").prefetch_related(
-        "dependentes").all()
+        "centro_custo", "cargo", "supervisor", "coordenador",
+        # o vínculo de transferência é OneToOne nos dois sentidos: sem
+        # select_related seriam 2 queries por linha do quadro
+        "transferencia_saida__destino", "transferencia_entrada__origem",
+    ).prefetch_related("dependentes").all()
     serializer_class = DpColaboradorSerializer
     permission_classes = _PERM
 
@@ -290,6 +293,112 @@ class DpColaboradorViewSet(viewsets.ModelViewSet):
                                 autor=_quem(request))
         audit(request, "desligar", "dp_colaborador", obj.id, antes=antes, depois=_snap(obj))
         return Response(self.get_serializer(obj).data)
+
+    # ─────────────── transferência de contrato ───────────────
+
+    @action(detail=True, methods=["get", "post", "delete"])
+    def transferencia(self, request, pk=None):
+        """Registra que ESTA ficha é a continuação de outra matrícula.
+
+        A casa numera matrícula por regime, então efetivar alguém obriga a
+        abrir cadastro novo e encerrar o antigo. Sem registrar o vínculo, o
+        painel lê os dois movimentos como um desligamento e uma admissão de
+        pessoas diferentes, e o turnover incha com gente que nunca saiu.
+
+        POST no DESTINO (a matrícula nova), informando a de origem.
+        """
+        destino = self.get_object()
+
+        if request.method == "GET":
+            return Response(self.get_serializer(destino).data.get("transferencia"))
+
+        if request.method == "DELETE":
+            t = getattr(destino, "transferencia_entrada", None)
+            if not t:
+                return Response({"detail": "Esta ficha não tem transferência registrada."},
+                                status=404)
+            origem = t.origem
+            # devolve os dependentes que vieram nesta transferência — sem isso
+            # o salário-família passaria a ser pago pela ficha errada
+            devolvidos = 0
+            if t.dependentes_ids:
+                devolvidos = DpDependente.objects.filter(
+                    id__in=t.dependentes_ids, colaborador=destino).update(colaborador=origem)
+            t.delete()
+            audit(request, "desfazer_transferencia", "dp_transferencia", destino.id,
+                  colaborador=destino,
+                  depois={"colaborador": destino.nome,
+                          "matricula_origem": origem.matricula,
+                          "matricula_destino": destino.matricula,
+                          "dependentes_devolvidos": devolvidos})
+            return Response({"detail": "Transferência desfeita.",
+                             "dependentes_devolvidos": devolvidos})
+
+        # ── POST ──
+        origem = None
+        if request.data.get("origem_id"):
+            origem = DpColaborador.objects.filter(pk=request.data["origem_id"]).first()
+        elif request.data.get("origem_matricula"):
+            try:
+                origem = DpColaborador.objects.filter(
+                    matricula=int(request.data["origem_matricula"])).first()
+            except (TypeError, ValueError):
+                origem = None
+        if not origem:
+            return Response({"detail": "Informe a matrícula de origem (o contrato anterior)."},
+                            status=400)
+        if origem.pk == destino.pk:
+            return Response({"detail": "A matrícula de origem não pode ser a mesma."}, status=400)
+        if getattr(origem, "transferencia_saida", None):
+            return Response({"detail": f"A matrícula {origem.matricula} já foi transferida "
+                                       "para outra ficha."}, status=409)
+        if getattr(destino, "transferencia_entrada", None):
+            return Response({"detail": "Esta ficha já tem um contrato anterior vinculado."},
+                            status=409)
+        if origem.status == "ativo":
+            # se as duas ficarem ativas a pessoa conta DUAS vezes no quadro
+            return Response(
+                {"detail": f"A matrícula {origem.matricula} ainda está ATIVA. Registre o "
+                           "desligamento dela primeiro — senão a pessoa passa a contar duas "
+                           "vezes no quadro de pessoal."}, status=409)
+
+        data_efeito = (_data_ou_none(request.data.get("data_efeito"))
+                       or destino.data_admissao or origem.data_demissao or date.today())
+        mover = request.data.get("mover_dependentes")
+        mover = True if mover is None else bool(mover)
+
+        with transaction.atomic():
+            movidos = []
+            if mover:
+                # não duplica: só vem quem ainda não existe na ficha nova
+                ja_la = {(d.nome.strip().lower(), d.data_nascimento)
+                         for d in destino.dependentes.all()}
+                for d in origem.dependentes.filter(ativo=True):
+                    if (d.nome.strip().lower(), d.data_nascimento) in ja_la:
+                        continue
+                    d.colaborador = destino
+                    d.save(update_fields=["colaborador", "updated_at"])
+                    movidos.append(str(d.id))
+
+            t = DpTransferenciaContrato.objects.create(
+                origem=origem, destino=destino, data_efeito=data_efeito,
+                motivo=(request.data.get("motivo") or "")[:200],
+                dependentes_movidos=len(movidos), dependentes_ids=movidos,
+                registrado_por=_quem(request))
+            audit(request, "transferencia_contrato", "dp_transferencia", t.id,
+                  colaborador=destino,
+                  depois={"colaborador": destino.nome,
+                          "de": f"matrícula {origem.matricula} ({origem.get_regime_display()})",
+                          "para": f"matrícula {destino.matricula} ({destino.get_regime_display()})",
+                          "data": f"{data_efeito:%d/%m/%Y}",
+                          "motivo": t.motivo or "—",
+                          "dependentes_movidos": len(movidos)})
+
+        destino.refresh_from_db()
+        return Response({
+            "transferencia": self.get_serializer(destino).data.get("transferencia"),
+            "dependentes_movidos": len(movidos),
+        }, status=201)
 
     # ─────────────── dependentes (salário-família) ───────────────
 

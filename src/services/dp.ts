@@ -29,6 +29,19 @@ export interface DpColaborador {
   conta_bb: string; pix: string; conta_caixa: string;
   /** Situação do salário-família desta pessoa, resumida para o cadastro. */
   salario_familia?: DpSalarioFamiliaStatus;
+  /** Liga esta ficha à matrícula anterior/seguinte da MESMA pessoa. */
+  transferencia?: DpTransferencia | null;
+}
+/** Ponta de uma transferência de contrato (a outra ficha da mesma pessoa). */
+export interface DpTransferenciaPonta {
+  id: string; matricula: number; nome: string; regime: string;
+  data: string; data_br: string; motivo: string;
+}
+export interface DpTransferencia {
+  /** esta ficha é a continuação da matrícula abaixo */
+  veio_de?: DpTransferenciaPonta;
+  /** esta ficha foi encerrada e continuou na matrícula abaixo */
+  continuou_como?: DpTransferenciaPonta;
 }
 /** Os três requisitos do salário-família avaliados juntos, como valem na prática. */
 export interface DpSalarioFamiliaStatus {
@@ -143,6 +156,24 @@ export const dpApi = {
   documentos: (id: string) =>
     fetch(`${API_URL}/dp/colaboradores/${id}/documentos/`, { headers: authHeaders() })
       .then((r) => j<DpDocumento[]>(r)),
+
+  // ── transferência de contrato (mesma pessoa, matrícula nova) ──
+  transferencia: (id: string) =>
+    fetch(`${API_URL}/dp/colaboradores/${id}/transferencia/`, { headers: authHeaders() })
+      .then((r) => j<DpTransferencia | null>(r)),
+
+  registrarTransferencia: (id: string, dados: {
+    origem_id?: string; origem_matricula?: number; data_efeito?: string;
+    motivo?: string; mover_dependentes?: boolean;
+  }) =>
+    fetch(`${API_URL}/dp/colaboradores/${id}/transferencia/`, {
+      method: "POST", headers: H(), body: JSON.stringify(dados),
+    }).then((r) => j<{ transferencia: DpTransferencia; dependentes_movidos: number }>(r)),
+
+  desfazerTransferencia: (id: string) =>
+    fetch(`${API_URL}/dp/colaboradores/${id}/transferencia/`, {
+      method: "DELETE", headers: authHeaders(),
+    }).then((r) => j<{ detail: string; dependentes_devolvidos: number }>(r)),
 
   dependentes: (id: string) =>
     fetch(`${API_URL}/dp/colaboradores/${id}/dependentes/`, { headers: authHeaders() })

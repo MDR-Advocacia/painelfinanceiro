@@ -88,6 +88,8 @@ ACOES = {
     "reabrir_competencia": ("reabriu a competência", "reabrir"),
     "congelar_retroativo": ("congelou retroativamente a competência", "fechar"),
     "gerar_relatorio_exercicio": ("emitiu o relatório técnico-contábil", "criar"),
+    "transferencia_contrato": ("registrou transferência de contrato de", "criar"),
+    "desfazer_transferencia": ("desfez a transferência de contrato de", "reabrir"),
     "desfazer_revisao": ("desfez o envio para revisão", "reabrir"),
     "ajuste_pontual": ("fez um ajuste pontual em", "ajuste"),
     "excluir": ("excluiu", "sair"),
@@ -107,6 +109,7 @@ ENTIDADES = {
     "dp_lideranca": "liderança",
     "dp_documento": "documento",
     "dp_dependente": "dependente",
+    "dp_transferencia": "transferência de contrato",
     "ef_relatorio_exercicio": "relatório do exercício",
 }
 
@@ -242,6 +245,19 @@ def humanizar(log) -> dict:
     elif log.acao == "fechar_competencia":
         titulo = f"Fechou a competência (aprovada por {depois.get('fechada_por', '')})"
         mudancas = []
+    elif log.acao == "transferencia_contrato":
+        titulo = (f"{depois.get('colaborador', '')} mudou de vínculo — mesma pessoa, "
+                  f"matrícula nova")
+        mudancas = [{"campo": "Contrato anterior", "de": None, "para": depois.get("de", "—")},
+                    {"campo": "Contrato atual", "de": None, "para": depois.get("para", "—")},
+                    {"campo": "A partir de", "de": None, "para": depois.get("data", "—")},
+                    {"campo": "Motivo", "de": None, "para": depois.get("motivo", "—")},
+                    {"campo": "Dependentes levados junto", "de": None,
+                     "para": str(depois.get("dependentes_movidos", 0))}]
+    elif log.acao == "desfazer_transferencia":
+        titulo = f"Desfez a transferência de contrato de {depois.get('colaborador', '')}"
+        mudancas = [{"campo": "Dependentes devolvidos", "de": None,
+                     "para": str(depois.get("dependentes_devolvidos", 0))}]
     elif log.acao == "gerar_relatorio_exercicio":
         titulo = (f"Emitiu o relatório técnico-contábil do exercício "
                   f"{depois.get('exercicio', '')} (versão {depois.get('versao', '')})")

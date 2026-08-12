@@ -189,10 +189,16 @@ def _dados_exercicio(ano: int) -> dict:
 
     # movimentação de pessoal do exercício
     ini, fim = date(ano, 1, 1), date(ano + 1, 1, 1)
-    admissoes = DpEvento.objects.filter(tipo__in=["admissao", "importacao"],
-                                        data_efeito__gte=ini, data_efeito__lt=fim).count()
-    desligamentos = DpEvento.objects.filter(tipo="desligamento",
-                                            data_efeito__gte=ini, data_efeito__lt=fim).count()
+    # transferência de contrato (efetivação) não é entrada nem saída: é a mesma
+    # pessoa trocando de matrícula, e contá-la distorceria a movimentação do ano
+    from .models import ids_em_transferencia
+    saidas_transf, entradas_transf = ids_em_transferencia()
+    admissoes = (DpEvento.objects.filter(tipo__in=["admissao", "importacao"],
+                                         data_efeito__gte=ini, data_efeito__lt=fim)
+                 .exclude(colaborador_id__in=entradas_transf).count())
+    desligamentos = (DpEvento.objects.filter(tipo="desligamento",
+                                             data_efeito__gte=ini, data_efeito__lt=fim)
+                     .exclude(colaborador_id__in=saidas_transf).count())
     com_folha = [m for m in meses if m["pessoas"]]
     pessoal = {
         "admissoes": admissoes, "desligamentos": desligamentos,

@@ -35,7 +35,13 @@ def dp_dashboard(request):
     headcount = ativos.count()
     por_regime = dict(ativos.values_list("regime").annotate(n=Count("id")))
 
-    # admissões/desligamentos por mês (últimos 12 meses, via eventos)
+    # admissões/desligamentos por mês (últimos 12 meses, via eventos).
+    # TRANSFERÊNCIA DE CONTRATO fica de fora: quando alguém é efetivado, a casa
+    # encerra a matrícula antiga e abre uma nova (a numeração é por regime), o
+    # que gera um desligamento e uma admissão da MESMA pessoa. Contar isso
+    # inflaria o turnover com quem nunca saiu do escritório.
+    from .models import ids_em_transferencia
+    saidas_transf, entradas_transf = ids_em_transferencia()
     serie_mov = []
     for i in range(11, -1, -1):
         a, m = hoje.year, hoje.month - i
@@ -43,10 +49,12 @@ def dp_dashboard(request):
             m += 12
             a -= 1
         ini, fim = date(a, m, 1), date(a + (m == 12), (m % 12) + 1, 1)
-        adm = DpEvento.objects.filter(tipo__in=["admissao", "importacao"],
-                                      data_efeito__gte=ini, data_efeito__lt=fim).count()
-        des = DpEvento.objects.filter(tipo="desligamento",
-                                      data_efeito__gte=ini, data_efeito__lt=fim).count()
+        adm = (DpEvento.objects.filter(tipo__in=["admissao", "importacao"],
+                                       data_efeito__gte=ini, data_efeito__lt=fim)
+               .exclude(colaborador_id__in=entradas_transf).count())
+        des = (DpEvento.objects.filter(tipo="desligamento",
+                                       data_efeito__gte=ini, data_efeito__lt=fim)
+               .exclude(colaborador_id__in=saidas_transf).count())
         serie_mov.append({"mes": f"{a}-{m:02d}", "admissoes": adm, "desligamentos": des})
 
     # série mensal COMPLETA por competência (espelha a aba de evolução da planilha)
