@@ -112,6 +112,34 @@ def calcular_salario_familia(colab, comp, fiscal, remuneracao: float) -> tuple:
     return valor, len(deps), mem
 
 
+def calcular_irrf(base: float, dependentes: int, fiscal) -> tuple:
+    """IRRF progressivo com parcela a deduzir — mesma mecânica do INSS.
+
+    Tabela VAZIA devolve zero, que é o estado de hoje: ninguém no escritório
+    atinge a alíquota. Preencher em Parâmetros passa a valer da vigência em
+    diante, sem tocar em mês fechado.
+
+    A base já vem líquida de INSS; aqui só se abate a dedução por dependente.
+    """
+    faixas = getattr(fiscal, "irrf_faixas", None) or []
+    if base <= 0 or not faixas:
+        return 0.0, {"regra": "sem tabela de IRRF cadastrada" if not faixas else "base zero"}
+    ded = round(dependentes * float(getattr(fiscal, "irrf_deducao_dependente", 0) or 0), 2)
+    base_calc = round(base - ded, 2)
+    if base_calc <= 0:
+        return 0.0, {"regra": f"dedução de {dependentes} dependente(s) zerou a base"}
+    for fx in faixas:
+        if base_calc <= fx["ate"]:
+            v = round(base_calc * fx["aliquota"] - fx.get("deducao", 0), 2)
+            return max(v, 0.0), {
+                "base": base_calc, "deducao_dependentes": ded,
+                "regra": f"{base_calc} × {fx['aliquota']:.1%} − {fx.get('deducao', 0)}"}
+    fx = faixas[-1]
+    v = round(base_calc * fx["aliquota"] - fx.get("deducao", 0), 2)
+    return max(v, 0.0), {"base": base_calc, "deducao_dependentes": ded,
+                         "regra": "última faixa"}
+
+
 def calcular_item(colab: DpColaborador, lanc, comp: DpCompetencia, fiscal: DpTabelaFiscal) -> dict:
     """Pipeline por colaborador — as colunas da planilha, com memória de cálculo."""
     # ajuste pontual do mês tem precedência sobre a ficha (não altera o cadastro)
@@ -135,6 +163,8 @@ def calcular_item(colab: DpColaborador, lanc, comp: DpCompetencia, fiscal: DpTab
     # qualquer objeto que não conheça o campo novo) não pode derrubar a folha
     f_injust = min((getattr(lanc, "faltas_injustificadas_dias", 0.0) or 0.0) if lanc else 0.0,
                    f_dias)
+    media_var = (getattr(lanc, "media_variaveis_ferias", 0.0) or 0.0) if lanc else 0.0
+    decimo_pago = (getattr(lanc, "decimo_terceiro_pago", 0.0) or 0.0) if lanc else 0.0
     premio = (lanc.premiacoes if lanc else 0.0) or 0.0
     acerto = (lanc.acerto_contabil if lanc else 0.0) or 0.0
     clt = colab.regime == "clt"
@@ -240,16 +270,28 @@ def calcular_item(colab: DpColaborador, lanc, comp: DpCompetencia, fiscal: DpTab
         if fer_inicio:
             fer_fim = fer_inicio + timedelta(days=fer_dias - 1)
         if clt:
-            fer_valor = round(diaria * fer_dias, 2)
+            # a lei manda somar a MÉDIA de horas extras, adicionais e comissões
+            # do período aquisitivo à base das férias. Hoje fica zero porque o
+            # escritório não paga variável nesse formato — o campo existe pra
+            # quando pagar, e aí o cálculo já está pronto.
+            diaria_ferias = diaria + (media_var / 30 if media_var else 0)
+            fer_valor = round(diaria_ferias * fer_dias, 2)
             fer_terco = round(fer_valor / 3, 2)
+            if media_var:
+                mem["ferias_media"] = (f"média de variáveis {media_var:.2f} somada à base "
+                                       f"(diária {diaria:.2f} → {diaria_ferias:.2f})")
             # os dias de férias saem do salário do mês
             desc_faltas = round(desc_faltas + diaria * fer_dias, 2)
             sal_faltas = round(bruto - desc_faltas, 2)
             mem["ferias"] = (f"{fer_dias} dia(s) × ({bruto}/30) = {fer_valor} "
                              f"+ 1/3 constitucional = {fer_terco}")
             if fer_abono > 0:
-                fer_abono = min(fer_abono, 10)   # teto legal: 1/3 do período
-                base_abono = round(diaria * fer_abono, 2)
+                # teto legal: 1/3 do DIREITO adquirido, não 10 dias fixos. Quem
+                # fechou o período com 24 dias por faltas pode vender 8 e gozar
+                # 16 — o direito é o que ele goza mais o que vende.
+                direito = fer_dias + fer_abono
+                fer_abono = min(fer_abono, direito // 3)
+                base_abono = round(diaria_ferias * fer_abono, 2)
                 fer_abono_valor = round(base_abono + base_abono / 3, 2)
                 mem["ferias_abono"] = (f"abono pecuniário: {fer_abono} dia(s) vendido(s) × "
                                        f"({bruto}/30) + 1/3 = {fer_abono_valor} (sem INSS)")
@@ -288,12 +330,39 @@ def calcular_item(colab: DpColaborador, lanc, comp: DpCompetencia, fiscal: DpTab
         desc_inss = 0.0
         base_inss = 0.0
 
-    # VT 6% (só CLT que opta)
-    desc_vt = round(sal_faltas * fiscal.vt_percent, 2) if (clt and colab.opta_vt and vt > 0) else 0.0
-    if desc_vt:
-        mem["desc_vt"] = f"{sal_faltas}×{fiscal.vt_percent:.0%}"
+    # VT: a lei manda descontar o MENOR entre 6% do salário e o custo real das
+    # passagens. Se o vale custa menos que 6%, a empresa desconta só o que ele
+    # custa; se custa mais, ela desconta 6% e arca com o restante.
+    # Hoje ninguém no quadro está nessa situação (conferido em 12/08/2026: os 33
+    # CLT com VT têm passagem acima de 6%), mas um reajuste de salário ou uma
+    # mudança de itinerário cria o caso sem avisar — por isso a trava fica.
+    desc_vt = 0.0
+    if clt and colab.opta_vt and vt > 0:
+        seis_por_cento = round(sal_faltas * fiscal.vt_percent, 2)
+        desc_vt = min(seis_por_cento, vt_faltas)
+        if desc_vt < seis_por_cento - 0.001:
+            mem["desc_vt"] = (f"vale custa {vt_faltas:.2f}, menos que os "
+                              f"{fiscal.vt_percent:.0%} ({seis_por_cento:.2f}) — "
+                              f"desconta só o valor do vale")
+        else:
+            mem["desc_vt"] = f"{sal_faltas}×{fiscal.vt_percent:.0%}"
 
-    sal_desc = round(sal_faltas - desc_inss - desc_vt, 2)
+    # IRRF: base é o salário do mês MENOS o INSS, com dedução por dependente.
+    # Férias se apuram SEPARADAS no imposto (o oposto do INSS, onde a base é
+    # única) — por isso duas contas aqui e uma só lá em cima.
+    desc_irrf = 0.0
+    if clt:
+        n_dep_irrf = sum(1 for d in colab.dependentes.all() if d.ativo
+                         and getattr(d, "conta_irrf", True))
+        irrf_sal, mem_irrf = calcular_irrf(round(sal_faltas - desc_inss, 2), n_dep_irrf, fiscal)
+        desc_irrf = irrf_sal
+        if fer_valor:
+            irrf_fer, _ = calcular_irrf(round(fer_valor + fer_terco, 2), 0, fiscal)
+            desc_irrf = round(desc_irrf + irrf_fer, 2)
+        if desc_irrf:
+            mem["irrf"] = mem_irrf
+
+    sal_desc = round(sal_faltas - desc_inss - desc_vt - desc_irrf, 2)
 
     # MATERNIDADE: a empresa paga e o INSS devolve na guia, igual ao
     # salário-família. Logo o salário desses dias NÃO é custo do escritório —
@@ -315,7 +384,12 @@ def calcular_item(colab: DpColaborador, lanc, comp: DpCompetencia, fiscal: DpTab
     # TOTAL a pagar = salário c/ descontos + VT + VA + saldo livre + acerto +
     # prêmios + férias + salário-família
     total_pagar = round(sal_desc + vt_faltas + va_faltas + saldo + acerto + premio
-                        + fer_valor + fer_terco + fer_abono_valor + sal_familia, 2)
+                        + fer_valor + fer_terco + fer_abono_valor + sal_familia
+                        + decimo_pago, 2)
+    if decimo_pago:
+        mem["decimo_terceiro"] = (
+            f"13º pago neste mês: {decimo_pago:.2f}. NÃO soma custo — a despesa "
+            f"já foi provisionada 1/12 por mês ao longo do ano.")
 
     # Provisões
     if clt:
@@ -361,7 +435,8 @@ def calcular_item(colab: DpColaborador, lanc, comp: DpCompetencia, fiscal: DpTab
         "premiacoes": premio, "acerto_contabil": acerto,
         "desc_faltas": desc_faltas, "salario_com_faltas": sal_faltas,
         "vt_com_faltas": vt_faltas, "va_com_faltas": va_faltas,
-        "desc_inss": desc_inss, "desc_vt": desc_vt,
+        "desc_inss": desc_inss, "desc_vt": desc_vt, "desc_irrf": desc_irrf,
+        "decimo_terceiro_pago": decimo_pago, "media_variaveis_ferias": media_var,
         "salario_com_descontos": sal_desc, "total_pagar": total_pagar,
         "decimo_mensal": decimo, "ferias_mensal": ferias, "terco_ferias_mensal": terco,
         "fgts_mensal": fgts, "multa_fgts_mensal": multa, "recesso_mensal": recesso,
@@ -376,7 +451,9 @@ def calcular_item(colab: DpColaborador, lanc, comp: DpCompetencia, fiscal: DpTab
         # colaborador recebe, mas quem arca é o INSS — o escritório só adianta
         # e compensa na guia. Mantê-lo aqui inflaria a folha e derrubaria a
         # margem por cliente sem que um centavo tivesse saído do caixa.
-        "custo_total": round(total_pagar - sal_familia - sal_compensavel
+        # saem do custo: salário-família e maternidade (voltam pela guia) e o
+        # 13º pago (já provisionado mês a mês — contar de novo seria duplicar)
+        "custo_total": round(total_pagar - sal_familia - sal_compensavel - decimo_pago
                              + provisoes + patronal, 2),
         "memoria": mem,
         "ajuste_manual": ajustada,
@@ -543,6 +620,7 @@ class DpCompetenciaViewSet(viewsets.ViewSet):
         lanc, _ = DpLancamento.objects.get_or_create(competencia=comp, colaborador=colab)
         campos = {"faltas_dias": num, "faltas_horas": num, "premiacoes": num,
                   "acerto_contabil": num, "faltas_injustificadas_dias": num,
+                  "media_variaveis_ferias": num, "decimo_terceiro_pago": num,
                   "ferias_dias": inteiro,
                   "ferias_abono_dias": inteiro, "ferias_inicio": data}
         for campo, conv in campos.items():

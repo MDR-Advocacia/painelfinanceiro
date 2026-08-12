@@ -428,6 +428,11 @@ class DpDependente(models.Model):
     # validade das comprovações periódicas (nulo = nunca apresentada)
     vacinacao_valida_ate = models.DateField(null=True, blank=True)
     frequencia_escolar_valida_ate = models.DateField(null=True, blank=True)
+    # O dependente do IRRF NÃO é o mesmo do salário-família: lá o corte é aos
+    # 14 anos, no imposto vai até 21 (ou 24 estudando) e inclui cônjuge. Por
+    # isso a marcação é separada, em vez de deduzir do mesmo cadastro.
+    conta_irrf = models.BooleanField(
+        default=True, help_text="Entra na dedução por dependente do IRRF")
     # desligar sem apagar: histórico de quem já recebeu não pode sumir
     ativo = models.BooleanField(default=True)
     observacao = models.CharField(max_length=250, blank=True, default="")
@@ -706,6 +711,16 @@ class DpTabelaFiscal(models.Model):
         default=67.54, help_text="Valor da cota por dependente elegível")
     salario_familia_teto = models.FloatField(
         default=1980.38, help_text="Remuneração mensal máxima para ter direito")
+    # IRRF — mesma mecânica do INSS (faixa + parcela a deduzir), versionado.
+    # Nasce VAZIO de propósito: hoje ninguém no escritório atinge a alíquota, e
+    # tabela chutada seria pior que tabela ausente. Com a lista vazia o cálculo
+    # devolve zero; quando precisar, o DP preenche em Parâmetros e passa a valer
+    # a partir daquela vigência, sem tocar nos meses já fechados.
+    irrf_faixas = models.JSONField(
+        default=list, blank=True,
+        help_text='[{"ate": 2259.20, "aliquota": 0.075, "deducao": 169.44}, ...]')
+    irrf_deducao_dependente = models.FloatField(
+        default=0, help_text="Dedução por dependente na base do IRRF")
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 
@@ -765,6 +780,13 @@ class DpLancamento(models.Model):
     # Histórico carregado da planilha fica em 0, que é o conservador: não
     # descontamos DSR retroativo de algo que não sabemos se era injustificado.
     faltas_injustificadas_dias = models.FloatField(default=0)
+    # Média de horas extras, adicionais e comissões do período aquisitivo, que a
+    # lei manda somar à base das FÉRIAS. Hoje o escritório não paga variável
+    # nesse formato, então fica zero — o campo existe para quando pagar.
+    media_variaveis_ferias = models.FloatField(default=0)
+    # 13º pago NESTE mês (1ª ou 2ª parcela). Entra no que a pessoa recebe, mas
+    # NÃO soma custo: a despesa já foi provisionada 1/12 por mês.
+    decimo_terceiro_pago = models.FloatField(default=0)
     premiacoes = models.FloatField(default=0)
     acerto_contabil = models.FloatField(default=0)
     obs = models.TextField(blank=True, default="")
@@ -830,6 +852,9 @@ class DpFolhaItem(models.Model):
     fgts_mensal = models.FloatField(default=0)
     multa_fgts_mensal = models.FloatField(default=0)
     recesso_mensal = models.FloatField(default=0)
+    desc_irrf = models.FloatField(default=0)
+    decimo_terceiro_pago = models.FloatField(default=0)
+    media_variaveis_ferias = models.FloatField(default=0)
     # faltas injustificadas e o DSR que elas fazem perder
     faltas_injustificadas_dias = models.FloatField(default=0)
     desc_dsr = models.FloatField(default=0)
