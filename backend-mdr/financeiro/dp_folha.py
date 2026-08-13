@@ -430,7 +430,13 @@ def calcular_item(colab: DpColaborador, lanc, comp: DpCompetencia, fiscal: DpTab
                 # teto legal: 1/3 do DIREITO adquirido, não 10 dias fixos. Quem
                 # fechou o período com 24 dias por faltas pode vender 8 e gozar
                 # 16 — o direito é o que ele goza mais o que vende.
-                direito = fer_dias + fer_abono
+                # TETO EM 30: o direito adquirido de um periodo completo e' de 30
+                # dias. Inferir o direito so' de gozo+abono deixava passar valor
+                # impossivel — quem digitasse 20 de gozo e 15 de venda produzia
+                # um "direito" de 35 dias e o teto virava 11, quando a lei da'
+                # 10. Conferido contra o recibo real do PEDRO (20 gozo + 10
+                # venda sobre periodo cheio).
+                direito = min(fer_dias + fer_abono, 30)
                 fer_abono = min(fer_abono, direito // 3)
                 base_abono = round(diaria_ferias * fer_abono, 2)
                 fer_abono_valor = round(base_abono + base_abono / 3, 2)
