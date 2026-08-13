@@ -342,6 +342,10 @@ export interface DpFolhaItem {
   afastamento_dias_inss?: number;
   desc_afastamento?: number;
   /** IRRF retido — zero enquanto a tabela não for preenchida em Parâmetros */
+  /** calendário de faltas: [{data:"YYYY-MM-DD", justificada:bool}] */
+  faltas_datas?: { data: string; justificada?: boolean; motivo?: string }[];
+  /** quantas SEMANAS tiveram falta injustificada — dita o DSR (1 por semana) */
+  dsr_semanas?: number;
   desc_irrf?: number;
   /** parcela do 13º paga neste mês (entra no a-pagar, não soma custo) */
   decimo_terceiro_pago?: number;
@@ -413,6 +417,8 @@ export const folhaApi = {
     }).then((r) => j<DpCompetencia>(r)),
   lancar: (id: string, dados: { colaborador_id: string; faltas_dias?: number; faltas_horas?: number;
                                faltas_injustificadas_dias?: number;
+                               faltas_datas?: { data: string; justificada?: boolean;
+                                                motivo?: string }[];
                                premiacoes?: number; acerto_contabil?: number; obs?: string;
                                ferias_inicio?: string; ferias_dias?: number; ferias_abono_dias?: number }) =>
     fetch(`${API_URL}/dp/competencias/${id}/lancar/`, { method: "POST", headers: H(), body: JSON.stringify(dados) })

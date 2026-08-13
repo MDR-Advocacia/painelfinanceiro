@@ -140,6 +140,69 @@ def calcular_irrf(base: float, dependentes: int, fiscal) -> tuple:
                          "regra": "última faixa"}
 
 
+def ler_faltas(lanc, comp) -> dict:
+    """Lê as faltas do lançamento e devolve o que a folha precisa saber.
+
+    Preferimos SEMPRE o calendário (`faltas_datas`). O DSR é UM por SEMANA:
+    três faltas na mesma semana custam 3 dias + 1 DSR, três faltas em semanas
+    diferentes custam 3 dias + 3 DSR. Um contador solto não distingue os dois,
+    por isso a data é obrigatória para o DSR sair certo.
+
+    Datas fora da competência são ignoradas — dedo errado no calendário não
+    pode descontar salário de outro mês.
+
+    Devolve: dias (todos), injustificados, justificados, semanas (ISO distintas
+    com falta injustificada) e `por_data` (se veio do calendário).
+    """
+    from datetime import date as _date
+
+    vazio = {"dias": 0.0, "injustificados": 0.0, "justificados": 0.0,
+             "semanas": 0, "por_data": False, "datas": []}
+    if not lanc:
+        return vazio
+
+    brutas = getattr(lanc, "faltas_datas", None) or []
+    itens, semanas = [], set()
+    for e in brutas:
+        # aceita {"data": "...", "justificada": bool} e a forma crua "YYYY-MM-DD"
+        txt = (e.get("data") if isinstance(e, dict) else e) or ""
+        try:
+            d = _date.fromisoformat(str(txt)[:10])
+        except ValueError:
+            continue
+        if d.year != comp.ano or d.month != comp.mes:
+            continue
+        just = bool(e.get("justificada")) if isinstance(e, dict) else False
+        itens.append({"data": d, "justificada": just,
+                      "motivo": (e.get("motivo") or "") if isinstance(e, dict) else ""})
+        if not just:
+            # (ano ISO, semana ISO) — semana de segunda a domingo, que é
+            # exatamente o par "dias trabalhados → descanso no domingo"
+            semanas.add(d.isocalendar()[:2])
+
+    if itens:
+        # dedupe: a mesma data lançada duas vezes é um dia só
+        vistos, unicos = set(), []
+        for i in sorted(itens, key=lambda x: x["data"]):
+            if i["data"] in vistos:
+                continue
+            vistos.add(i["data"])
+            unicos.append(i)
+        injust = sum(1 for i in unicos if not i["justificada"])
+        return {"dias": float(len(unicos)), "injustificados": float(injust),
+                "justificados": float(len(unicos) - injust), "semanas": len(semanas),
+                "por_data": True, "datas": unicos}
+
+    # ── LEGADO: sem calendário, só os contadores ──
+    # Vale para o histórico carregado da planilha do DP, que não tinha as datas.
+    # Aqui NÃO calculamos DSR: sem saber em que semanas as faltas caíram, todo
+    # número seria chute. O motor avisa na memória de cálculo.
+    dias = float((getattr(lanc, "faltas_dias", 0.0) or 0.0))
+    injust = min(float(getattr(lanc, "faltas_injustificadas_dias", 0.0) or 0.0), dias)
+    return {"dias": dias, "injustificados": injust, "justificados": dias - injust,
+            "semanas": 0, "por_data": False, "datas": []}
+
+
 def calcular_item(colab: DpColaborador, lanc, comp: DpCompetencia, fiscal: DpTabelaFiscal) -> dict:
     """Pipeline por colaborador — as colunas da planilha, com memória de cálculo."""
     # ajuste pontual do mês tem precedência sobre a ficha (não altera o cadastro)
@@ -156,13 +219,10 @@ def calcular_item(colab: DpColaborador, lanc, comp: DpCompetencia, fiscal: DpTab
     fer_dias = int((lanc.ferias_dias if lanc else 0) or 0)
     fer_abono = int((lanc.ferias_abono_dias if lanc else 0) or 0)
     fer_inicio = (lanc.ferias_inicio if lanc else None)
-    f_dias = (lanc.faltas_dias if lanc else 0.0) or 0.0
+    faltas = ler_faltas(lanc, comp)
+    f_dias = faltas["dias"]
+    f_injust = faltas["injustificados"]
     f_horas = (lanc.faltas_horas if lanc else 0.0) or 0.0
-    # subconjunto das faltas que foi INJUSTIFICADA — só essas tiram o DSR
-    # getattr defensivo, igual ao resto da função: lançamento antigo (ou
-    # qualquer objeto que não conheça o campo novo) não pode derrubar a folha
-    f_injust = min((getattr(lanc, "faltas_injustificadas_dias", 0.0) or 0.0) if lanc else 0.0,
-                   f_dias)
     media_var = (getattr(lanc, "media_variaveis_ferias", 0.0) or 0.0) if lanc else 0.0
     decimo_pago = (getattr(lanc, "decimo_terceiro_pago", 0.0) or 0.0) if lanc else 0.0
     premio = (lanc.premiacoes if lanc else 0.0) or 0.0
@@ -171,12 +231,38 @@ def calcular_item(colab: DpColaborador, lanc, comp: DpCompetencia, fiscal: DpTab
     estagiario = colab.regime == "estagiario"
     mem = {}
 
-    # Faltas: (salário/30)·dias + (salário/220)·horas — regra da planilha
+    # Faltas: (salário/dias)·dias + (salário/horas)·horas — regra da planilha.
+    #
+    # QUEM DESCONTA: falta JUSTIFICADA (atestado, abonada) não tira salário nem
+    # DSR — a pessoa recebe o dia. Só a INJUSTIFICADA desconta. Isso vale
+    # quando há calendário; no histórico numérico da planilha não sabemos quais
+    # eram justificadas, então mantemos o comportamento antigo (tudo desconta)
+    # para não reescrever o passado que já bateu com a planilha do DP.
     dias_ref = colab.cargo.dias_mes if colab.cargo_id else 30
     horas_ref = colab.cargo.carga_horaria_mes if colab.cargo_id else 220
-    desc_faltas = round((bruto / dias_ref) * f_dias + (bruto / horas_ref) * f_horas, 2)
+    dias_desconto = f_injust if faltas["por_data"] else f_dias
+    valor_dia = bruto / dias_ref
+    valor_hora = bruto / horas_ref
+    desc_dias = round(valor_dia * dias_desconto, 2)
+    desc_horas = round(valor_hora * f_horas, 2)
+    desc_faltas = round(desc_dias + desc_horas, 2)
     if desc_faltas:
-        mem["desc_faltas"] = f"({bruto}/{dias_ref})×{f_dias} + ({bruto}/{horas_ref})×{f_horas}"
+        # memória EXPLÍCITA: dia e hora em parcelas separadas, com o valor
+        # unitário à vista — o operador precisa saber o que está sendo tirado
+        partes = []
+        if dias_desconto:
+            partes.append(f"{dias_desconto:g} dia(s) × R$ {valor_dia:.2f} "
+                          f"(salário ÷ {dias_ref}) = R$ {desc_dias:.2f}")
+        if f_horas:
+            partes.append(f"{f_horas:g} hora(s) × R$ {valor_hora:.2f} "
+                          f"(salário ÷ {horas_ref}h) = R$ {desc_horas:.2f}")
+        if faltas["por_data"] and faltas["justificados"]:
+            partes.append(f"{faltas['justificados']:g} falta(s) justificada(s) "
+                          f"NÃO descontada(s)")
+        mem["desc_faltas"] = " + ".join(partes) + f" → R$ {desc_faltas:.2f}"
+    elif faltas["por_data"] and faltas["justificados"]:
+        mem["desc_faltas"] = (f"{faltas['justificados']:g} falta(s) justificada(s) — "
+                              f"sem desconto de salário nem de DSR")
     sal_faltas = round(bruto - desc_faltas, 2)
 
     # ── AFASTAMENTOS E SUSPENSÕES DO MÊS (só CLT) ──────────────────────────
@@ -219,18 +305,37 @@ def calcular_item(colab: DpColaborador, lanc, comp: DpCompetencia, fiscal: DpTab
                               f"custeados pela empresa — sem desconto")
 
     # ── DSR PERDIDO POR FALTA INJUSTIFICADA ────────────────────────────────
-    # Falta com atestado ou abonada não tira o descanso semanal; injustificada
-    # tira. Fórmula usada: faltas × valor do dia × (DSRs do mês ÷ dias úteis),
-    # com DSRs = dias do mês − dias úteis. CONFERIR COM O DP.
+    # Regra do DP (12/08/2026): o descanso semanal remunerado é UM POR SEMANA e
+    # cai no DOMINGO. Faltou injustificadamente na semana, perde o DSR daquela
+    # semana — UMA vez, não uma por falta. Três faltas na mesma semana custam
+    # três dias + 1 DSR; três faltas em três semanas custam três dias + 3 DSR.
+    #
+    # A fórmula antiga rateava (dias do mês − dias úteis) ÷ dias úteis, o que
+    # tratava sábado E domingo como descanso e multiplicava pelo número de
+    # faltas — inflava o desconto e não tinha relação com a semana.
+    #
+    # Só CLT: estagiário não tem DSR.
     desc_dsr = 0.0
+    dsr_semanas = 0
     if clt and f_injust > 0:
-        dsr_mes = max(comp.dias_mes - comp.dias_uteis, 0)
-        if dsr_mes and comp.dias_uteis:
-            desc_dsr = round(diaria_bruto * f_injust * (dsr_mes / comp.dias_uteis), 2)
-            desc_faltas = round(desc_faltas + desc_dsr, 2)
-            sal_faltas = round(bruto - desc_faltas, 2)
-            mem["dsr"] = (f"{f_injust:g} falta(s) injustificada(s) × {diaria_bruto:.2f} × "
-                          f"({dsr_mes} DSR ÷ {comp.dias_uteis} dias úteis) = {desc_dsr:.2f}")
+        if faltas["por_data"]:
+            dsr_semanas = faltas["semanas"]
+            desc_dsr = round(diaria_bruto * dsr_semanas, 2)
+            if desc_dsr:
+                desc_faltas = round(desc_faltas + desc_dsr, 2)
+                sal_faltas = round(bruto - desc_faltas, 2)
+                mem["dsr"] = (
+                    f"{f_injust:g} falta(s) injustificada(s) em {dsr_semanas} semana(s) "
+                    f"→ {dsr_semanas} DSR × R$ {diaria_bruto:.2f} = R$ {desc_dsr:.2f} "
+                    f"(1 DSR por semana, não por falta)")
+        else:
+            # sem as datas não dá para saber em quantas semanas as faltas caíram
+            mem["dsr"] = ("faltas injustificadas lançadas sem data — DSR não calculado. "
+                          "Relance pelo calendário para o desconto sair.")
+    elif clt and faltas["por_data"] and faltas["justificados"]:
+        mem["dsr"] = "faltas justificadas não fazem perder o DSR"
+    elif estagiario and f_injust > 0:
+        mem["dsr"] = "estagiário não tem DSR — sem esse desconto"
 
     # ── VT E VA PROPORCIONAIS ──────────────────────────────────────────────
     # Bases DIFERENTES, por regra da casa: o vale-transporte vale por dia ÚTIL
@@ -444,6 +549,10 @@ def calcular_item(colab: DpColaborador, lanc, comp: DpCompetencia, fiscal: DpTab
         "ferias_abono": fer_abono_valor, "ferias_inicio": fer_inicio, "ferias_fim": fer_fim,
         "salario_familia": sal_familia, "salario_familia_cotas": sf_cotas,
         "faltas_injustificadas_dias": f_injust, "desc_dsr": desc_dsr,
+        "dsr_semanas": dsr_semanas,
+        "faltas_datas": [{"data": i["data"].isoformat(),
+                          "justificada": i["justificada"],
+                          "motivo": i.get("motivo", "")} for i in faltas["datas"]],
         "afastamento_tipo": afast_tipo, "afastamento_dias_empresa": afast_empresa,
         "afastamento_dias_inss": afast_inss, "desc_afastamento": desc_afast,
         "inss_patronal": patronal, "custo_provisoes": provisoes,
@@ -614,6 +723,30 @@ class DpCompetenciaViewSet(viewsets.ViewSet):
             except (TypeError, ValueError):
                 return 0
 
+        def faltas_datas(k):
+            """Normaliza o calendário de faltas: só datas válidas DESTA
+            competência, sem repetição, ordenadas. O que o operador clica na
+            tela vira dado limpo aqui — nada de confiar no corpo do request."""
+            bruto = request.data.get(k) or []
+            if not isinstance(bruto, list):
+                return []
+            vistos, saida = set(), []
+            for e in bruto:
+                txt = (e.get("data") if isinstance(e, dict) else e) or ""
+                try:
+                    d = datetime.strptime(str(txt)[:10], "%Y-%m-%d").date()
+                except (TypeError, ValueError):
+                    continue
+                if d.year != comp.ano or d.month != comp.mes or d in vistos:
+                    continue
+                vistos.add(d)
+                saida.append({
+                    "data": d.isoformat(),
+                    "justificada": bool(e.get("justificada")) if isinstance(e, dict) else False,
+                    "motivo": (str(e.get("motivo") or "")[:120]) if isinstance(e, dict) else "",
+                })
+            return sorted(saida, key=lambda x: x["data"])
+
         def data(k):
             v = (request.data.get(k) or "").strip()
             if not v:
@@ -626,7 +759,8 @@ class DpCompetenciaViewSet(viewsets.ViewSet):
         # o lançamento é UM por pessoa/mês: só mexe no que veio no corpo, pra
         # lançar férias não apagar as faltas já registradas (e vice-versa)
         lanc, _ = DpLancamento.objects.get_or_create(competencia=comp, colaborador=colab)
-        campos = {"faltas_dias": num, "faltas_horas": num, "premiacoes": num,
+        campos = {"faltas_datas": faltas_datas,
+                  "faltas_dias": num, "faltas_horas": num, "premiacoes": num,
                   "acerto_contabil": num, "faltas_injustificadas_dias": num,
                   "media_variaveis_ferias": num, "decimo_terceiro_pago": num,
                   "ferias_dias": inteiro,
@@ -641,7 +775,11 @@ class DpCompetenciaViewSet(viewsets.ViewSet):
         d = calcular_item(colab, lanc, comp, fiscal)
         DpFolhaItem.objects.update_or_create(competencia=comp, colaborador=colab, defaults=d)
         audit(request, "lancar", "dp_lancamento", lanc.id, colaborador=colab,
-              depois={"colaborador": colab.nome, "faltas_dias": lanc.faltas_dias,
+              depois={"colaborador": colab.nome,
+                      "faltas_datas": ", ".join(
+                          f"{e['data']}{'(just.)' if e.get('justificada') else ''}"
+                          for e in (lanc.faltas_datas or [])) or "—",
+                      "faltas_dias": lanc.faltas_dias,
                       "faltas_horas": lanc.faltas_horas, "premiacoes": lanc.premiacoes,
                       "acerto": lanc.acerto_contabil, "ferias_dias": lanc.ferias_dias,
                       "ferias_inicio": str(lanc.ferias_inicio or ""),
@@ -700,7 +838,7 @@ class DpCompetenciaViewSet(viewsets.ViewSet):
                   "ferias_inicio", "ferias_fim",
                   "salario_familia", "salario_familia_cotas",
                   "desc_irrf", "decimo_terceiro_pago", "faltas_injustificadas_dias",
-                  "desc_dsr", "afastamento_tipo", "afastamento_dias_empresa",
+                  "desc_dsr", "dsr_semanas", "faltas_datas", "afastamento_tipo", "afastamento_dias_empresa",
                   "afastamento_dias_inss", "desc_afastamento"]
         items = []
         for it in qs[offset:offset + limit]:

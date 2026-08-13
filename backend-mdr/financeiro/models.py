@@ -773,12 +773,25 @@ class DpLancamento(models.Model):
                                     related_name="lancamentos")
     colaborador = models.ForeignKey(DpColaborador, on_delete=models.CASCADE,
                                     related_name="lancamentos")
+    # ── FALTAS ────────────────────────────────────────────────────────────
+    # A fonte da verdade é `faltas_datas`: uma lista de DIAS DO CALENDÁRIO,
+    #   [{"data": "2026-08-12", "justificada": false, "motivo": "..."}, ...]
+    #
+    # Precisa ser por data, e não um número, por causa do DSR: o descanso
+    # semanal é UM por SEMANA. Três faltas na mesma semana custam três dias
+    # mais UM DSR; três faltas em semanas diferentes custam três dias mais TRÊS
+    # DSR. Um contador solto ("3 faltas") não distingue os dois casos.
+    #
+    # Os campos numéricos abaixo continuam existindo para o histórico carregado
+    # da planilha do DP (que não tinha as datas) e para faltas em HORAS, que
+    # não são um dia de calendário. Quando `faltas_datas` está preenchido, ele
+    # manda no total de dias.
+    faltas_datas = models.JSONField(default=list, blank=True)
     faltas_dias = models.FloatField(default=0)
     faltas_horas = models.FloatField(default=0)
-    # SUBCONJUNTO de faltas_dias: quantas foram INJUSTIFICADAS. Só essas fazem
-    # perder o DSR — falta com atestado ou abonada não gera esse desconto.
-    # Histórico carregado da planilha fica em 0, que é o conservador: não
-    # descontamos DSR retroativo de algo que não sabemos se era injustificado.
+    # Legado: contador de injustificadas de quando não havia calendário.
+    # Histórico da planilha fica em 0, que é o conservador — não descontamos
+    # DSR retroativo de algo que não sabemos se era injustificado.
     faltas_injustificadas_dias = models.FloatField(default=0)
     # Média de horas extras, adicionais e comissões do período aquisitivo, que a
     # lei manda somar à base das FÉRIAS. Hoje o escritório não paga variável
@@ -857,6 +870,13 @@ class DpFolhaItem(models.Model):
     media_variaveis_ferias = models.FloatField(default=0)
     # faltas injustificadas e o DSR que elas fazem perder
     faltas_injustificadas_dias = models.FloatField(default=0)
+    # quantas SEMANAS tiveram falta injustificada — é isso que dita o DSR
+    # (1 por semana), não a quantidade de faltas
+    dsr_semanas = models.IntegerField(default=0)
+    # cópia do calendário de faltas do lançamento. Fica aqui para (a) o diálogo
+    # reabrir com os dias já marcados e (b) a foto do mês fechado guardar a
+    # justificativa do desconto sem depender do lançamento.
+    faltas_datas = models.JSONField(default=list, blank=True)
     desc_dsr = models.FloatField(default=0)
     # afastamento do mês (dias que a empresa custeia x dias do INSS)
     afastamento_tipo = models.CharField(max_length=20, blank=True, default="")

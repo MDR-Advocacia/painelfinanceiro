@@ -30,6 +30,7 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { Ajuda, TituloAjuda } from "@/components/dp/Ajuda";
 import { CcPicker } from "@/components/dp/Pickers";
+import CalendarioFaltas, { type FaltaDia } from "@/components/dp/CalendarioFaltas";
 import FeriasDialog from "@/components/dp/FeriasDialog";
 import { TabelaRolavel } from "@/components/TabelaRolavel";
 import ResumoCentroCusto from "@/components/dp/ResumoCentroCusto";
@@ -669,9 +670,8 @@ function LancarDialog({ comp, item, onClose, onLancou }: {
   // o menu diz qual bloco abrir: "faltas" (padrão) ou "extras"
   const soFaltas = item._aba !== "extras";
   const soExtras = item._aba === "extras";
-  const [faltasDias, setFaltasDias] = useState(item.faltas_dias);
+  const [faltasDatas, setFaltasDatas] = useState<FaltaDia[]>(item.faltas_datas ?? []);
   const [faltasHoras, setFaltasHoras] = useState(item.faltas_horas);
-  const [faltasInjust, setFaltasInjust] = useState(item.faltas_injustificadas_dias ?? 0);
   const [premios, setPremios] = useState(item.premiacoes);
   const [acerto, setAcerto] = useState(item.acerto_contabil);
   const [obs, setObs] = useState("");
@@ -681,8 +681,12 @@ function LancarDialog({ comp, item, onClose, onLancou }: {
     setSalvando(true);
     try {
       const novo = await folhaApi.lancar(comp.id, {
-        colaborador_id: item.colaborador_id, faltas_dias: faltasDias, faltas_horas: faltasHoras,
-        faltas_injustificadas_dias: Math.min(faltasInjust, faltasDias),
+        colaborador_id: item.colaborador_id,
+        // o calendário é a fonte da verdade; faltas_dias vai junto só para as
+        // telas e relatórios que ainda leem o contador
+        faltas_datas: faltasDatas,
+        faltas_dias: faltasDatas.length,
+        faltas_horas: faltasHoras,
         premiacoes: premios, acerto_contabil: acerto, obs,
       });
       toast.success(`Linha recalculada — a pagar: ${fmtBRL(novo.total_pagar)}.`);
@@ -709,53 +713,30 @@ function LancarDialog({ comp, item, onClose, onLancou }: {
 
         {soFaltas && (
           <div className="space-y-3">
-            <div className="grid grid-cols-2 gap-3">
-              <div>
-                <Label className="flex items-center gap-1 text-xs text-muted-foreground">
-                  Faltas em dias
-                  <Ajuda titulo="Faltas em dias" texto="Cada dia desconta 1/30 do salário e 1 dia de vale-transporte e vale-alimentação." />
-                </Label>
-                <Input type="number" step="0.5" min={0} value={faltasDias}
-                       onChange={(e) => setFaltasDias(Number(e.target.value))} className="font-mono" />
-              </div>
-              <div>
-                <Label className="flex items-center gap-1 text-xs text-muted-foreground">
-                  Faltas em horas
-                  <Ajuda titulo="Faltas em horas" texto="Atrasos e saídas. Cada hora desconta 1/220 do salário (carga do cargo) e vira fração de dia nos benefícios." />
-                </Label>
-                <Input type="number" step="0.5" min={0} value={faltasHoras}
-                       onChange={(e) => setFaltasHoras(Number(e.target.value))} className="font-mono" />
-              </div>
+            <CalendarioFaltas
+              ano={comp.ano}
+              mes={comp.mes}
+              valor={faltasDatas}
+              onChange={setFaltasDatas}
+              diaria={item.salario_bruto / 30}
+              temDsr={item.regime === "clt"}
+            />
+            <div>
+              <Label className="flex items-center gap-1 text-xs text-muted-foreground">
+                Faltas em horas (atrasos e saídas)
+                <Ajuda titulo="Faltas em horas"
+                       texto="Atraso e saída antecipada não são um dia de calendário, então continuam em horas. Cada hora desconta o salário dividido pela carga mensal do cargo (220h no padrão) e vira fração de dia nos benefícios. Não gera perda de DSR." />
+              </Label>
+              <Input type="number" step="0.5" min={0} value={faltasHoras}
+                     onChange={(e) => setFaltasHoras(Number(e.target.value))}
+                     className="font-mono" />
+              {faltasHoras > 0 && (
+                <p className="mt-1 text-[0.7rem] text-muted-foreground">
+                  {faltasHoras}h × {fmtBRL(item.salario_bruto / 220)} (salário ÷ 220h) ={" "}
+                  <b>{fmtBRL((item.salario_bruto / 220) * faltasHoras)}</b>
+                </p>
+              )}
             </div>
-            {faltasDias > 0 && (
-              <div>
-                <Label className="flex items-center gap-1 text-xs text-muted-foreground">
-                  Dessas faltas, quantas foram INJUSTIFICADAS
-                  <Ajuda titulo="Falta injustificada"
-                         texto="Falta sem atestado nem abono faz perder o descanso semanal remunerado (DSR) da semana. Informe aqui quantos dos dias acima foram injustificados — o restante não gera esse desconto." />
-                </Label>
-                <Input type="number" step="0.5" min={0} max={faltasDias} value={faltasInjust}
-                       onChange={(e) => setFaltasInjust(Math.min(Number(e.target.value), faltasDias))}
-                       className="font-mono" />
-                {faltasInjust > 0 && (
-                  <p className="mt-1 text-[0.7rem] text-amber-700">
-                    Perde {(comp.dias_mes - comp.dias_uteis)} DSR do mês na proporção —
-                    some ao desconto abaixo.
-                  </p>
-                )}
-              </div>
-            )}
-            {(faltasDias > 0 || faltasHoras > 0) && (
-              <div className="rounded-md border border-amber-300 bg-amber-50 p-2 text-xs text-amber-900">
-                <div className="font-medium">Prévia do desconto</div>
-                <div>
-                  Salário: −{fmtBRL((item.salario_bruto / 30) * faltasDias + (item.salario_bruto / 220) * faltasHoras)}
-                  {" · "}
-                  Benefícios: −{(Math.min(((faltasDias + faltasHoras / (220 / 30)) / Math.max(comp.dias_uteis, 1)), 1) * 100).toFixed(1)}%
-                  {" do VT e do VA"}
-                </div>
-              </div>
-            )}
           </div>
         )}
 
