@@ -336,10 +336,10 @@ export default function DashboardDpTab({ onAbrirQuadro }: {
 
       {/* Custo médio por cargo */}
       {d.custo_por_cargo?.length > 0 && (
-        <Painel titulo="Custo médio por cargo"
-                ajuda="Quanto custa, em média, cada pessoa de cada cargo — já incluindo benefícios, provisões e encargos. Útil para dimensionar contratações.">
+        <Painel titulo="Custo por cargo"
+                ajuda="Custo MÉDIO é quanto custa cada pessoa daquele cargo — serve pra dimensionar uma contratação. Custo TOTAL é quanto o cargo inteiro pesa no mês (média × pessoas) — é ele que mostra onde o dinheiro está de fato. Um cargo caro com uma pessoa pesa menos que um cargo barato com vinte. Os dois já incluem benefícios, provisões e encargos.">
           <div className="max-h-80 overflow-y-auto">
-            <table className="w-full min-w-[520px] text-sm">
+            <table className="w-full min-w-[640px] text-sm">
               <thead className="sticky top-0 bg-card">
                 <tr className="border-b text-xs text-muted-foreground">
                   <th className="py-1.5 text-left font-medium">Cargo</th>
@@ -347,19 +347,48 @@ export default function DashboardDpTab({ onAbrirQuadro }: {
                   <th className="py-1.5 text-right font-medium">Pessoas</th>
                   <th className="py-1.5 text-right font-medium">Salário médio</th>
                   <th className="py-1.5 text-right font-medium">Custo médio</th>
+                  <th className="py-1.5 text-right font-medium">Custo total</th>
+                  <th className="py-1.5 text-right font-medium">% da folha</th>
                 </tr>
               </thead>
               <tbody>
-                {d.custo_por_cargo.map((c, i) => (
-                  <tr key={i} className="border-b last:border-0 hover:bg-muted/50">
-                    <td className="max-w-[220px] truncate py-1.5">{c.cargo}</td>
-                    <td className="py-1.5 text-xs text-muted-foreground">{REGIME_LABELS[c.regime] || c.regime}</td>
-                    <td className="py-1.5 text-right font-mono text-xs">{c.quantidade}</td>
-                    <td className="py-1.5 text-right font-mono text-xs">{fmtBRL(c.salario_medio)}</td>
-                    <td className="py-1.5 text-right font-mono text-xs font-semibold">{fmtBRL(c.custo_medio)}</td>
-                  </tr>
-                ))}
+                {(() => {
+                  // ordenado pelo TOTAL: a pergunta que a tabela responde é "onde
+                  // está o dinheiro", e não "qual cargo é o mais caro por cabeça"
+                  const linhas = [...d.custo_por_cargo].sort((a, b) => (b.custo ?? 0) - (a.custo ?? 0));
+                  const somaFolha = linhas.reduce((t, c) => t + (c.custo ?? 0), 0);
+                  return linhas.map((c, i) => {
+                    const fatia = somaFolha > 0 ? ((c.custo ?? 0) / somaFolha) * 100 : 0;
+                    return (
+                      <tr key={i} className="border-b last:border-0 hover:bg-muted/50">
+                        <td className="max-w-[220px] truncate py-1.5">{c.cargo}</td>
+                        <td className="py-1.5 text-xs text-muted-foreground">{REGIME_LABELS[c.regime] || c.regime}</td>
+                        <td className="py-1.5 text-right font-mono text-xs">{c.quantidade}</td>
+                        <td className="py-1.5 text-right font-mono text-xs">{fmtBRL(c.salario_medio)}</td>
+                        <td className="py-1.5 text-right font-mono text-xs">{fmtBRL(c.custo_medio)}</td>
+                        <td className="py-1.5 text-right font-mono text-xs font-semibold">{fmtBRL(c.custo ?? 0)}</td>
+                        <td className="py-1.5 text-right font-mono text-xs text-muted-foreground">
+                          {fatia.toFixed(1)}%
+                        </td>
+                      </tr>
+                    );
+                  });
+                })()}
               </tbody>
+              <tfoot className="sticky bottom-0 bg-card">
+                <tr className="border-t-2 text-xs font-semibold">
+                  <td className="py-1.5" colSpan={2}>Total</td>
+                  <td className="py-1.5 text-right font-mono">
+                    {d.custo_por_cargo.reduce((t, c) => t + (c.quantidade ?? 0), 0)}
+                  </td>
+                  <td />
+                  <td />
+                  <td className="py-1.5 text-right font-mono">
+                    {fmtBRL(d.custo_por_cargo.reduce((t, c) => t + (c.custo ?? 0), 0))}
+                  </td>
+                  <td className="py-1.5 text-right font-mono text-muted-foreground">100%</td>
+                </tr>
+              </tfoot>
             </table>
           </div>
         </Painel>
