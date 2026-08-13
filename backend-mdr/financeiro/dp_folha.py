@@ -274,6 +274,9 @@ def calcular_item(colab: DpColaborador, lanc, comp: DpCompetencia, fiscal: DpTab
     afast_corta_va = True
     afast_fgts = "dias_empresa"
     afast_compensavel = False
+    # dias parados de quem NAO e CLT — tratados separadamente logo abaixo
+    afast_dias_nao_clt = 0
+    afast_tipo_nao_clt = ""
     if clt:
         for af in colab.afastamentos.all():
             de, di = af.dias_no_mes(comp.ano, comp.mes)
@@ -290,8 +293,33 @@ def calcular_item(colab: DpColaborador, lanc, comp: DpCompetencia, fiscal: DpTab
             elif r["fgts"] == "nunca" and afast_fgts != "sempre":
                 afast_fgts = "nunca"
             afast_compensavel = afast_compensavel or r["compensa_na_guia"]
+    else:
+        # ── AFASTAMENTO DE QUEM NAO E CLT ──────────────────────────────────
+        # Regra do DP (13/08/2026): associado, PJ e estagiario nao tem os
+        # institutos da CLT. A empresa NAO custeia os 15 primeiros dias, nao ha
+        # faixa do INSS, nao ha FGTS nem estabilidade — simplesmente NAO HA
+        # REPASSE nos dias parados. Registrar o afastamento de um advogado tem
+        # que aparecer como repasse proporcionalmente zerado no mes, e era
+        # justamente isso que faltava: o bloco inteiro era pulado e o
+        # afastamento nao tinha efeito nenhum na folha dessa gente.
+        for af in colab.afastamentos.all():
+            de, di = af.dias_no_mes(comp.ano, comp.mes)
+            if de or di:
+                afast_dias_nao_clt += de + di
+                afast_tipo_nao_clt = afast_tipo_nao_clt or af.tipo
 
     diaria_bruto = bruto / 30
+    if afast_dias_nao_clt:
+        # teto em 30: afastamento do mes inteiro zera o repasse, nao vira negativo
+        dias_parado = min(afast_dias_nao_clt, 30)
+        desc_nao_clt = round(diaria_bruto * dias_parado, 2)
+        desc_faltas = round(desc_faltas + desc_nao_clt, 2)
+        sal_faltas = round(max(bruto - desc_faltas, 0.0), 2)
+        mem["afastamento"] = (
+            f"{dias_parado} dia(s) de afastamento em vinculo {colab.regime} — "
+            f"sem repasse no periodo ({dias_parado} x R$ {diaria_bruto:.2f} = "
+            f"R$ {desc_nao_clt:.2f} a menos)"
+            + (" · repasse zerado no mes" if dias_parado >= 30 else ""))
     # os dias custeados pelo INSS saem do salário: quem paga não é a empresa
     desc_afast = round(diaria_bruto * afast_inss, 2) if afast_inss else 0.0
     if desc_afast:
@@ -388,8 +416,16 @@ def calcular_item(colab: DpColaborador, lanc, comp: DpCompetencia, fiscal: DpTab
             # os dias de férias saem do salário do mês
             desc_faltas = round(desc_faltas + diaria * fer_dias, 2)
             sal_faltas = round(bruto - desc_faltas, 2)
-            mem["ferias"] = (f"{fer_dias} dia(s) × ({bruto}/30) = {fer_valor} "
-                             f"+ 1/3 constitucional = {fer_terco}")
+            mem["ferias"] = (
+                f"{fer_dias} dia(s) de férias × R$ {diaria_ferias:.2f} (diária = "
+                f"salário {bruto:.2f} ÷ 30) = R$ {fer_valor:.2f}; "
+                f"1/3 constitucional = 1/3 DESSES R$ {fer_valor:.2f} (só sobre os "
+                f"{fer_dias} dias gozados, NÃO sobre o salário do mês) = "
+                f"R$ {fer_terco:.2f}; total das férias = R$ {fer_valor + fer_terco:.2f}")
+            mem["ferias_desconto"] = (
+                f"os mesmos {fer_dias} dia(s) saem do salário do mês "
+                f"({fer_dias} × R$ {diaria:.2f} = R$ {diaria * fer_dias:.2f}) — "
+                f"a pessoa não recebe salário e férias pelo mesmo dia")
             if fer_abono > 0:
                 # teto legal: 1/3 do DIREITO adquirido, não 10 dias fixos. Quem
                 # fechou o período com 24 dias por faltas pode vender 8 e gozar
@@ -429,8 +465,18 @@ def calcular_item(colab: DpColaborador, lanc, comp: DpCompetencia, fiscal: DpTab
         desc_inss, mem_inss = calcular_inss(base_inss, fiscal.inss_faixas)
         mem["inss"] = mem_inss
         if fer_valor:
-            mem["inss_base"] = (f"base única da competência: salário {sal_faltas} "
-                                f"+ férias {fer_valor} + 1/3 {fer_terco} = {base_inss}")
+            mem["inss_base"] = (
+                f"BASE ÚNICA da competência: salário do mês R$ {sal_faltas:.2f} "
+                f"+ férias R$ {fer_valor:.2f} + 1/3 R$ {fer_terco:.2f} "
+                f"= R$ {base_inss:.2f}. As férias NÃO têm INSS calculado à parte: "
+                f"a lei manda somar tudo numa base só e aplicar a tabela progressiva "
+                f"UMA vez — calcular separado cobraria a alíquota inicial duas vezes "
+                f"e desconta a menos. Fora da base: abono (indenizatório) e "
+                f"salário-família (benefício). O teto do INSS também vale sobre "
+                f"essa soma, não sobre cada parcela.")
+        else:
+            mem["inss_base"] = (f"base do INSS: salário do mês R$ {sal_faltas:.2f} "
+                                f"(sem férias nesta competência)")
     else:
         desc_inss = 0.0
         base_inss = 0.0
@@ -553,7 +599,7 @@ def calcular_item(colab: DpColaborador, lanc, comp: DpCompetencia, fiscal: DpTab
         "faltas_datas": [{"data": i["data"].isoformat(),
                           "justificada": i["justificada"],
                           "motivo": i.get("motivo", "")} for i in faltas["datas"]],
-        "afastamento_tipo": afast_tipo, "afastamento_dias_empresa": afast_empresa,
+        "afastamento_tipo": afast_tipo or afast_tipo_nao_clt, "afastamento_dias_empresa": afast_empresa,
         "afastamento_dias_inss": afast_inss, "desc_afastamento": desc_afast,
         "inss_patronal": patronal, "custo_provisoes": provisoes,
         # o salário-família SAI do custo: entrou no total_pagar porque o

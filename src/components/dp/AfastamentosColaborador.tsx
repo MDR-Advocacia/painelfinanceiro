@@ -112,9 +112,11 @@ export default function AfastamentosColaborador({ colaborador, editar }: {
       </div>
 
       {naoClt && (
-        <p className="mb-2 rounded bg-muted px-2 py-1.5 text-[0.7rem] text-muted-foreground">
-          Este colaborador é <b>{colaborador.regime}</b>. As regras de custeio e FGTS valem
-          para CLT — aqui o registro fica só como histórico, sem efeito na folha.
+        <p className="mb-2 rounded border border-sky-200 bg-sky-50 px-2 py-1.5 text-[0.7rem] text-sky-900">
+          Vínculo <b>{colaborador.regime_label || colaborador.regime}</b>: não valem os
+          institutos da CLT — a empresa não custeia os 15 primeiros dias, não há faixa do
+          INSS, FGTS nem estabilidade. O efeito na folha é direto: <b>não há repasse nos
+          dias parados</b>, e afastamento do mês inteiro zera o repasse do mês.
         </p>
       )}
 
@@ -210,15 +212,17 @@ export default function AfastamentosColaborador({ colaborador, editar }: {
                      onChange={(e) => setForm({ ...form, data_inicio: e.target.value })} />
             </div>
             <div>
-              <Label className="text-[0.7rem]">Retorno previsto</Label>
+              <Label className="text-[0.7rem]">Previsão de volta</Label>
               <Input type="date" className="h-8 text-xs" value={form.data_prevista_retorno}
                      onChange={(e) => setForm({ ...form, data_prevista_retorno: e.target.value })} />
             </div>
             <div>
-              <Label className="text-[0.7rem]">Retorno efetivo</Label>
+              <Label className="text-[0.7rem]">Voltou a trabalhar em</Label>
               <Input type="date" className="h-8 text-xs" value={form.data_retorno}
                      onChange={(e) => setForm({ ...form, data_retorno: e.target.value })} />
-              <p className="mt-0.5 text-[0.65rem] text-muted-foreground">vazio = ainda afastado</p>
+              <p className="mt-0.5 text-[0.65rem] text-muted-foreground">
+                primeiro dia DE VOLTA (não conta como afastado) · vazio = ainda afastado
+              </p>
             </div>
           </div>
           <div>

@@ -613,12 +613,21 @@ class DpAfastamento(models.Model):
 
         A janela dos 15 primeiros dias é contada desde o início do afastamento,
         então um mesmo afastamento pode ter dias das duas naturezas no mesmo mês.
+
+        `data_retorno` é o dia em que a pessoa VOLTA A TRABALHAR, logo é
+        EXCLUSIVA: quem se afasta dia 1º e retorna dia 11 ficou 10 dias fora e
+        trabalhou no dia 11. Contá-la como dia afastado cobrava um dia a mais de
+        todo mundo e, no CLT, ainda empurrava a fronteira dos 15 dias da empresa
+        para dentro da faixa do INSS.
         """
         from calendar import monthrange
         ini_mes = date(ano, mes, 1)
         fim_mes = date(ano, mes, monthrange(ano, mes)[1])
         ini = max(self.data_inicio, ini_mes)
-        fim = min(self.data_retorno or self.data_prevista_retorno or fim_mes, fim_mes)
+        volta = self.data_retorno or self.data_prevista_retorno
+        # último dia efetivamente afastado = véspera da volta
+        ultimo = (volta - timedelta(days=1)) if volta else fim_mes
+        fim = min(ultimo, fim_mes)
         if ini > fim:
             return 0, 0
         r = self.regra

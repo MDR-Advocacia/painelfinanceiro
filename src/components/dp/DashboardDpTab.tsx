@@ -30,8 +30,13 @@ export default function DashboardDpTab({ onAbrirQuadro }: {
   onAbrirQuadro?: (f: FiltroQuadro, rotulo: string) => void;
 }) {
   const [d, setD] = useState<DpDashboard | null>(null);
+  // o painel nasce na ULTIMA FOLHA FECHADA: o mes em curso ainda nao tem
+  // faltas, premios e acertos lancados, e mostra um custo pela metade
+  const [escopo, setEscopo] = useState<"fechadas" | "todas">("fechadas");
 
-  useEffect(() => { relatoriosApi.dashboard().then(setD).catch(() => undefined); }, []);
+  useEffect(() => {
+    relatoriosApi.dashboard(escopo).then(setD).catch(() => undefined);
+  }, [escopo]);
 
   if (!d) {
     return (
@@ -50,6 +55,38 @@ export default function DashboardDpTab({ onAbrirQuadro }: {
 
   return (
     <div className="space-y-4">
+      <div className="flex flex-wrap items-center justify-between gap-2 rounded-lg border bg-muted/40 px-3 py-2">
+        <div className="flex flex-wrap items-center gap-2 text-xs">
+          <span className="font-semibold">Base do painel:</span>
+          {d.competencia_base ? (
+            <span className="rounded bg-card px-2 py-0.5 font-medium">
+              {d.competencia_base.mes_nome} {d.competencia_base.ano}
+              <span className={`ml-1.5 rounded px-1 py-px text-[0.62rem] uppercase ${
+                d.competencia_base.status === "fechada"
+                  ? "bg-emerald-100 text-emerald-700" : "bg-amber-100 text-amber-800"}`}>
+                {d.competencia_base.status === "fechada" ? "fechada" : "em aberto"}
+              </span>
+            </span>
+          ) : <span className="text-muted-foreground">nenhuma competência</span>}
+          <Ajuda texto={
+            "O painel é montado pela última folha FECHADA. A folha do mês em curso ainda " +
+            "não tem todas as faltas, prêmios e acertos lançados — usá-la como base mostraria " +
+            "um custo pela metade. Troque para “inclui a aberta” quando quiser acompanhar o " +
+            "mês em andamento, sabendo que ele ainda vai mudar."
+          } />
+        </div>
+        <div className="flex overflow-hidden rounded-md border">
+          {([["fechadas", "Só folhas fechadas"], ["todas", "Inclui a aberta"]] as const).map(([v, rot]) => (
+            <button key={v} onClick={() => setEscopo(v)}
+                    className={`px-2.5 py-1 text-[0.7rem] transition-colors ${
+                      escopo === v ? "bg-primary text-primary-foreground"
+                                   : "bg-card hover:bg-muted"}`}>
+              {rot}
+            </button>
+          ))}
+        </div>
+      </div>
+
       <div className="flex flex-wrap items-center justify-between gap-2">
         <p className="text-xs text-muted-foreground">
           Clique nos cartões e gráficos para abrir a lista de colaboradores já filtrada.

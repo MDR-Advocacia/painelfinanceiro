@@ -441,6 +441,10 @@ export const folhaApi = {
 
 // ── F4: dashboard + relatórios timbrados ──
 export interface DpDashboard {
+  /** "fechadas" | "todas" — de onde vieram os KPIs */
+  escopo?: string;
+  competencia_base?: { ano: number; mes: number; mes_nome: string; status: string } | null;
+  competencias_fechadas?: number;
   headcount: number; por_regime: Record<string, number>;
   admissoes_mes: number; desligamentos_mes: number; turnover_mes: number;
   custo_competencia: { mes: string; status: string; headcount: number; folha: number; provisoes: number; patronal: number; custo_total: number } | null;
@@ -482,8 +486,10 @@ async function baixar(url: string, nomePadrao: string) {
 }
 
 export const relatoriosApi = {
-  dashboard: () =>
-    fetch(`${API_URL}/dp/dashboard/`, { headers: authHeaders() }).then((r) => j<DpDashboard>(r)),
+  /** escopo "fechadas" (default) usa só competências fechadas; "todas" inclui a aberta */
+  dashboard: (escopo: "fechadas" | "todas" = "fechadas") =>
+    fetch(`${API_URL}/dp/dashboard/?escopo=${escopo}`, { headers: authHeaders() })
+      .then((r) => j<DpDashboard>(r)),
   folhaExcel: (compId: string) =>
     baixar(`${API_URL}/dp/competencias/${compId}/relatorio/?tipo=folha&formato=excel`, "folha.xlsx"),
   rateioExcel: (compId: string) =>

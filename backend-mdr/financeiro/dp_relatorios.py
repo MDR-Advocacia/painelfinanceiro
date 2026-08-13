@@ -9,6 +9,8 @@ from datetime import date, datetime
 from io import BytesIO
 
 from django.db.models import Count, Q, Sum
+
+from .dp_folha import MES_NOMES
 from django.http import HttpResponse
 from rest_framework.decorators import api_view, permission_classes
 from rest_framework.response import Response
@@ -32,6 +34,21 @@ NAVY = "0A1940"
 @permission_classes(_PERM)
 def dp_dashboard(request):
     hoje = date.today()
+    # ── ESCOPO: quais competências alimentam os KPIs ────────────────────────
+    # Default é FECHADAS. A folha aberta é um retrato pela metade — em agosto,
+    # antes do fechamento, faltam faltas, prêmios e acertos do mês, e o painel
+    # mostrava esse número incompleto como se fosse o custo do escritório.
+    # Quem quiser ver o mês em curso pede escopo=todas explicitamente.
+    escopo = (request.query_params.get("escopo") or "fechadas").lower()
+    if escopo not in ("fechadas", "todas"):
+        escopo = "fechadas"
+    comps_qs = DpCompetencia.objects.order_by("ano", "mes")
+    if escopo == "fechadas":
+        comps_qs = comps_qs.filter(status="fechada")
+        # se nenhuma fechou ainda, cair pra todas em vez de devolver painel vazio
+        if not comps_qs.exists():
+            comps_qs = DpCompetencia.objects.order_by("ano", "mes")
+            escopo = "todas"
     ativos = filtrar_colaboradores(DpColaborador.objects.filter(status="ativo"), request.user)
     headcount = ativos.count()
     por_regime = dict(ativos.values_list("regime").annotate(n=Count("id")))
@@ -56,13 +73,29 @@ def dp_dashboard(request):
         des = (DpEvento.objects.filter(tipo="desligamento",
                                        data_efeito__gte=ini, data_efeito__lt=fim)
                .exclude(colaborador_id__in=saidas_transf).count())
-        serie_mov.append({"mes": f"{a}-{m:02d}", "admissoes": adm, "desligamentos": des})
+        # HEADCOUNT MEDIO DO MES, nao o de hoje. Dividir o desligamento de
+        # janeiro pelo quadro de agosto compara epocas diferentes e o indice
+        # anda sozinho toda vez que o escritorio cresce.
+        hc_fim = (DpColaborador.objects
+                  .filter(data_admissao__lt=fim)
+                  .exclude(data_demissao__lt=fim)
+                  .exclude(id__in=entradas_transf).count())
+        hc_ini = hc_fim - adm + des
+        hc_medio = (hc_ini + hc_fim) / 2 or 0
+        # DOIS indices, porque medem coisas diferentes:
+        #  · desligamento  = perda de gente (o que interessa pra retencao)
+        #  · classico      = rotatividade (media de entradas e saidas, Chiavenato)
+        t_deslig = round(des / hc_medio * 100, 2) if hc_medio else 0.0
+        t_classico = round(((adm + des) / 2) / hc_medio * 100, 2) if hc_medio else 0.0
+        serie_mov.append({"mes": f"{a}-{m:02d}", "admissoes": adm, "desligamentos": des,
+                          "headcount_medio": round(hc_medio, 1),
+                          "turnover": t_deslig, "turnover_classico": t_classico})
 
     # série mensal COMPLETA por competência (espelha a aba de evolução da planilha)
     serie_custo = []
     fgts_acum = multa_acum = 0.0
     mov_por_mes = {m["mes"]: m for m in serie_mov}
-    for comp in DpCompetencia.objects.order_by("ano", "mes")[:24]:
+    for comp in comps_qs[:24]:
         itens = filtrar_folha(comp.itens.all(), request.user)
         ag = itens.aggregate(pagar=Sum("total_pagar"), prov=Sum("custo_provisoes"),
                              pat=Sum("inss_patronal"), custo=Sum("custo_total"),
@@ -92,7 +125,30 @@ def dp_dashboard(request):
 
     ult = serie_custo[-1] if serie_custo else None
     mov_mes = serie_mov[-1] if serie_mov else {"admissoes": 0, "desligamentos": 0}
-    turnover = round(mov_mes["desligamentos"] / headcount * 100, 2) if headcount else 0.0
+    turnover = mov_mes.get("turnover", 0.0)
+
+    # ── TURNOVER ACUMULADO POR JANELA ──────────────────────────────────────
+    # Nao e' a media das taxas mensais: soma-se gente e divide-se por gente.
+    # A media aritmetica das taxas daria peso igual a um mes de 200 pessoas e a
+    # um de 30, o que distorce quando o quadro cresce no meio do periodo.
+    def _janela(n):
+        janela = serie_mov[-n:] if n else serie_mov
+        if not janela:
+            return None
+        adm = sum(x["admissoes"] for x in janela)
+        des = sum(x["desligamentos"] for x in janela)
+        hc = sum(x["headcount_medio"] for x in janela) / len(janela)
+        return {
+            "meses": len(janela), "admissoes": adm, "desligamentos": des,
+            "headcount_medio": round(hc, 1),
+            "turnover": round(des / hc * 100, 2) if hc else 0.0,
+            "turnover_classico": round(((adm + des) / 2) / hc * 100, 2) if hc else 0.0,
+            # media MENSAL da janela — comparavel com a taxa de um mes isolado
+            "turnover_mensal_medio": round(des / hc * 100 / len(janela), 2) if hc else 0.0,
+        }
+
+    turnover_janelas = {r: _janela(n) for r, n in
+                        (("3m", 3), ("6m", 6), ("12m", 12))}
 
     # ── análises extras (mais profundidade no painel) ──
     from django.db.models import Avg
@@ -109,7 +165,7 @@ def dp_dashboard(request):
 
     # custo por centro de custo (da última competência calculada)
     custo_por_cc, custo_medio_pessoa, participacao = [], 0.0, {}
-    comp_ult = DpCompetencia.objects.order_by("-ano", "-mes").first()
+    comp_ult = comps_qs.order_by("-ano", "-mes").first()
     if comp_ult:
         itens_ult = filtrar_folha(comp_ult.itens.all(), request.user)
         custo_por_cc = [{"nome": r["centro_custo_nome"], "quantidade": r["n"],
@@ -204,7 +260,19 @@ def dp_dashboard(request):
         "headcount": headcount, "por_regime": por_regime,
         "admissoes_mes": mov_mes["admissoes"], "desligamentos_mes": mov_mes["desligamentos"],
         "turnover_mes": turnover,
+        "turnover_classico_mes": mov_mes.get("turnover_classico", 0.0),
+        "turnover_janelas": turnover_janelas,
         "custo_competencia": ult, "serie_mov": serie_mov, "serie_custo": serie_custo,
+        # de onde vieram os numeros: o painel precisa DIZER isso, senao o
+        # operador compara com a folha da tela ao lado e nao entende a diferenca
+        "escopo": escopo,
+        "competencia_base": ({"ano": comp_ult.ano, "mes": comp_ult.mes,
+                              # mes_nome e' campo do SERIALIZER, nao do model —
+                              # ler do objeto direto dava 500 no dashboard
+                              "mes_nome": MES_NOMES[comp_ult.mes],
+                              "status": comp_ult.status}
+                             if comp_ult else None),
+        "competencias_fechadas": DpCompetencia.objects.filter(status="fechada").count(),
         # extras
         "por_unidade": por_unidade, "por_area": por_area, "por_cc_qtd": por_cc_qtd,
         "custo_por_cc": custo_por_cc, "custo_por_regime": custo_por_regime,
@@ -407,42 +475,111 @@ def dp_relatorio_competencia(request, pk):
                 larguras=[26, 17, 14, 16, 16, 18, 17, 11, 18], money_cols={4, 5, 6, 7, 9})
         return _resposta_excel(wb, f"resumo_cc_{comp.ano}_{comp.mes:02d}.xlsx")
 
+    # ── RESCISOES DA COMPETENCIA ───────────────────────────────────────────
+    # O relatorio mostrava a folha do mes e calava sobre quem foi desligado —
+    # justamente o evento de maior impacto financeiro do mes. Traz a marca na
+    # linha da pessoa e as verbas rescisorias numa aba/bloco proprio.
+    from .models import DpRescisao
+    _ini = date(comp.ano, comp.mes, 1)
+    _fim = date(comp.ano + (comp.mes == 12), (comp.mes % 12) + 1, 1)
+    rescisoes = list(DpRescisao.objects.filter(
+        data_desligamento__gte=_ini, data_desligamento__lt=_fim)
+        .select_related("colaborador").order_by("data_desligamento"))
+    resc_por_colab = {r.colaborador_id: r for r in rescisoes}
+    resc_total = round(sum(r.liquido for r in rescisoes), 2)
+
+    def _marca(it):
+        """Sinaliza a rescisao na linha da pessoa."""
+        r = resc_por_colab.get(it.colaborador_id)
+        if not r:
+            return ""
+        return f"RESCISÃO {r.data_desligamento.strftime('%d/%m')} · {r.get_tipo_display()}"
+
     # folha analítica
     if formato == "pdf":
-        rows = [[it.matricula, it.nome[:32], REG_LABEL.get(it.regime, it.regime),
-                 it.centro_custo_nome[:24], _brl(it.salario_bruto), _brl(it.desc_inss),
-                 _brl(it.desc_vt), _brl(it.total_pagar), _brl(it.custo_total)]
+        rows = [[it.matricula, it.nome[:30], REG_LABEL.get(it.regime, it.regime),
+                 it.centro_custo_nome[:20], _brl(it.salario_bruto), _brl(it.desc_inss),
+                 _brl(it.total_pagar), _brl(it.custo_total), _marca(it)]
                 for it in comp.itens.all()]
-        tot = ["TOTAL", "", "", "", "", "", "",
+        tot = ["TOTAL", "", "", "", "", "",
                _brl(sum(i.total_pagar for i in comp.itens.all())),
-               _brl(sum(i.custo_total for i in comp.itens.all()))]
+               _brl(sum(i.custo_total for i in comp.itens.all())), ""]
+        # as verbas rescisorias fecham o relatorio, com o liquido de cada saida
+        for r in rescisoes:
+            rows.append(["", f"↳ rescisão: {r.colaborador.nome[:26]}",
+                         r.get_tipo_display()[:18],
+                         f"aviso {r.aviso_dias}d", _brl(r.proventos),
+                         _brl(r.total_descontos), _brl(r.liquido), "",
+                         r.data_desligamento.strftime("%d/%m/%Y")])
+        if rescisoes:
+            rows.append(["", f"TOTAL DAS RESCISÕES ({len(rescisoes)})", "", "", "", "",
+                         _brl(resc_total), "", ""])
         return _pdf_generico(f"Folha Analítica — {rotulo}",
-                             f"{len(rows)} colaboradores · status: {comp.status}",
+                             f"{comp.itens.count()} colaboradores · status: {comp.status}"
+                             + (f" · {len(rescisoes)} rescisão(ões) no mês, "
+                                f"líquido R$ {resc_total:,.2f}" if rescisoes else ""),
                              ["Mat.", "Nome", "Regime", "Centro de Custo", "Bruto",
-                              "INSS", "VT 6%", "A pagar", "Custo total"],
-                             rows + [tot], [16, 62, 24, 46, 24, 22, 22, 26, 28],
+                              "INSS", "A pagar", "Custo total", "Situação"],
+                             rows + [tot], [14, 56, 22, 38, 22, 20, 24, 26, 34],
                              _quem(request), f"folha_{comp.ano}_{comp.mes:02d}.pdf",
-                             aligns_dir={4, 5, 6, 7, 8}, linha_total=True, paisagem=True)
+                             aligns_dir={4, 5, 6, 7}, linha_total=True, paisagem=True)
 
-    headers = ["Mat.", "Nome", "Regime", "Centro de Custo", "Sal. Bruto", "Faltas (d)",
-               "Faltas (h)", "Desc. Faltas", "Desc. INSS", "Desc. VT", "VT", "VA",
-               "Saldo Livre", "Prêmios", "Acerto", "Total a Pagar", "13º", "Férias",
-               "1/3", "FGTS", "Multa FGTS", "Recesso", "Patronal", "Custo Total"]
+    headers = ["Mat.", "Nome", "Regime", "Centro de Custo", "Situação", "Sal. Bruto",
+               "Faltas (d)", "Faltas (h)", "Desc. Faltas", "DSR perdido", "Desc. INSS",
+               "Desc. IRRF", "Desc. VT", "VT", "VA", "Saldo Livre", "Prêmios", "Acerto",
+               "Férias", "1/3 Férias", "Sal. Família", "Total a Pagar", "13º", "Férias prov.",
+               "1/3 prov.", "FGTS", "Multa FGTS", "Recesso", "Patronal", "Custo Total"]
     rows = []
     for it in comp.itens.all():
-        rows.append([it.matricula, it.nome, it.regime, it.centro_custo_nome,
+        rows.append([it.matricula, it.nome, it.regime, it.centro_custo_nome, _marca(it),
                      it.salario_bruto, it.faltas_dias, it.faltas_horas, it.desc_faltas,
-                     it.desc_inss, it.desc_vt, it.vt_com_faltas, it.va_com_faltas,
-                     it.saldo_livre, it.premiacoes, it.acerto_contabil, it.total_pagar,
+                     getattr(it, "desc_dsr", 0) or 0, it.desc_inss,
+                     getattr(it, "desc_irrf", 0) or 0, it.desc_vt,
+                     it.vt_com_faltas, it.va_com_faltas,
+                     it.saldo_livre, it.premiacoes, it.acerto_contabil,
+                     it.ferias_valor, it.ferias_terco, it.salario_familia, it.total_pagar,
                      it.decimo_mensal, it.ferias_mensal, it.terco_ferias_mensal,
                      it.fgts_mensal, it.multa_fgts_mensal, it.recesso_mensal,
                      it.inss_patronal, it.custo_total])
     wb, ws = _wb_timbrado("Folha Analítica",
-                          f"Competência {rotulo} · {len(rows)} colaboradores · status: {comp.status}",
+                          f"Competência {rotulo} · {len(rows)} colaboradores · status: {comp.status}"
+                          + (f" · {len(rescisoes)} rescisão(ões), líquido R$ {resc_total:,.2f}"
+                             if rescisoes else ""),
                           _quem(request))
     _tabela(ws, 5, headers, rows,
-            larguras=[8, 32, 11, 24] + [12] * 20,
-            money_cols=set(range(5, 25)) - {6, 7})
+            larguras=[8, 32, 11, 24, 26] + [12] * 25,
+            money_cols=set(range(6, 31)) - {7, 8})
+
+    # aba propria com as verbas de cada rescisao, linha a linha
+    if rescisoes:
+        wsr = wb.create_sheet("Rescisões")
+        linhas_r = []
+        for r in rescisoes:
+            linhas_r.append([r.colaborador.matricula, r.colaborador.nome,
+                             r.get_tipo_display(), str(r.data_desligamento),
+                             r.aviso_dias, r.proventos, r.total_descontos, r.liquido,
+                             (r.motivo or "")[:120]])
+        linhas_r.append(["", f"TOTAL ({len(rescisoes)})", "", "", "",
+                         round(sum(r.proventos for r in rescisoes), 2),
+                         round(sum(r.total_descontos for r in rescisoes), 2),
+                         resc_total, ""])
+        _tabela(wsr, 1, ["Mat.", "Nome", "Tipo", "Desligamento", "Aviso (d)",
+                         "Proventos (R$)", "Descontos (R$)", "Líquido (R$)", "Motivo"],
+                linhas_r, larguras=[8, 32, 22, 14, 10, 15, 15, 15, 46],
+                money_cols={6, 7, 8})
+
+        # detalhe verba a verba, com a memoria de calculo congelada
+        wsd = wb.create_sheet("Verbas rescisórias")
+        det = []
+        for r in rescisoes:
+            for v in (r.verbas or []):
+                det.append([r.colaborador.matricula, r.colaborador.nome, "Provento",
+                            v.get("descricao", ""), v.get("valor", 0), v.get("memoria", "")])
+            for d in (r.descontos or []):
+                det.append([r.colaborador.matricula, r.colaborador.nome, "Desconto",
+                            d.get("descricao", ""), d.get("valor", 0), d.get("memoria", "")])
+        _tabela(wsd, 1, ["Mat.", "Nome", "Natureza", "Verba", "Valor (R$)", "Memória de cálculo"],
+                det, larguras=[8, 32, 12, 34, 14, 70], money_cols={5})
     return _resposta_excel(wb, f"folha_{comp.ano}_{comp.mes:02d}.xlsx")
 
 
