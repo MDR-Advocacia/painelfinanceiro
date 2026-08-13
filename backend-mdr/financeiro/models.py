@@ -877,6 +877,16 @@ class DpFolhaItem(models.Model):
     desc_irrf = models.FloatField(default=0)
     decimo_terceiro_pago = models.FloatField(default=0)
     media_variaveis_ferias = models.FloatField(default=0)
+    # decomposicao do INSS nas 3 linhas do espelho da contabilidade:
+    # INSS FERIAS + INSS DIFERENCA FERIAS + I.N.S.S. do salario = desc_inss
+    # bases declaradas no espelho da contabilidade — sem elas nao da' pra
+    # conferir linha a linha contra o holerite
+    base_inss = models.FloatField(default=0)
+    base_fgts = models.FloatField(default=0)
+    inss_ferias = models.FloatField(default=0)
+    inss_dif_ferias = models.FloatField(default=0)
+    inss_salario = models.FloatField(default=0)
+
     # faltas injustificadas e o DSR que elas fazem perder
     faltas_injustificadas_dias = models.FloatField(default=0)
     # quantas SEMANAS tiveram falta injustificada — é isso que dita o DSR

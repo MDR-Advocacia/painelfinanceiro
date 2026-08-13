@@ -466,10 +466,38 @@ def calcular_item(colab: DpColaborador, lanc, comp: DpCompetencia, fiscal: DpTab
     #
     # Fora da base: abono pecuniário (indenizatório) e salário-família
     # (benefício previdenciário, não remuneração).
+    inss_ferias = inss_salario = inss_dif_ferias = 0.0
     if clt:
         base_inss = round(sal_faltas + fer_valor + fer_terco, 2)
         desc_inss, mem_inss = calcular_inss(base_inss, fiscal.inss_faixas)
         mem["inss"] = mem_inss
+        if fer_valor:
+            # ── AS TRES LINHAS DO ESPELHO DA CONTABILIDADE ──────────────────
+            # O DP (13/08/2026) confirmou: o calculo e' apresentado SEPARADO,
+            # senao "pode dar erro na aliquota aplicada". O espelho da ALEXIA
+            # mostra as tres linhas — INSS FERIAS 86,25 + INSS DIFERENCA FERIAS
+            # 5,87 + I.N.S.S. 64,68 = 156,80 — e declara "Base INSS: 2.012,50",
+            # que e' exatamente a base unica que o motor ja' usava. Ou seja: o
+            # TOTAL sempre bateu; o que faltava era MOSTRAR a decomposicao.
+            #
+            # A linha do meio e' a chave: "diferenca de ferias" e' justamente o
+            # complemento que faz a tabela progressiva valer UMA vez sobre o
+            # total do mes. Sem ela, a faixa inicial seria aplicada duas vezes
+            # (uma no recibo, outra no salario) e a retencao sairia a menor.
+            inss_ferias, _ = calcular_inss(round(fer_valor + fer_terco, 2),
+                                           fiscal.inss_faixas)
+            inss_salario, _ = calcular_inss(sal_faltas, fiscal.inss_faixas)
+            inss_dif_ferias = round(desc_inss - inss_ferias - inss_salario, 2)
+            mem["inss_decomposto"] = (
+                f"INSS FÉRIAS R$ {inss_ferias:.2f} (sobre férias + 1/3 = "
+                f"R$ {fer_valor + fer_terco:.2f}) + INSS DIFERENÇA DE FÉRIAS "
+                f"R$ {inss_dif_ferias:.2f} + INSS DO SALÁRIO R$ {inss_salario:.2f} "
+                f"(sobre R$ {sal_faltas:.2f}) = R$ {desc_inss:.2f}. "
+                f"A diferença existe porque a tabela progressiva vale UMA vez "
+                f"sobre a base do mês (R$ {base_inss:.2f}) — calculando cada "
+                f"parcela isolada, a faixa inicial entraria duas vezes.")
+        else:
+            inss_salario = desc_inss
         if fer_valor:
             mem["inss_base"] = (
                 f"BASE ÚNICA da competência: salário do mês R$ {sal_faltas:.2f} "
@@ -531,11 +559,16 @@ def calcular_item(colab: DpColaborador, lanc, comp: DpCompetencia, fiscal: DpTab
             f"{afast_empresa} dia(s) de licença pagos pela empresa "
             f"({sal_compensavel:.2f}) são reembolsados na guia — não entram no custo")
 
-    # SALÁRIO-FAMÍLIA — o teto se afere pela remuneração DO MÊS, que é a mesma
-    # base do INSS (salário + férias + 1/3). Benefício previdenciário: não entra
-    # em base de INSS nem de FGTS, por isso é calculado depois delas.
+    # SALÁRIO-FAMÍLIA — o teto se afere pelo SALÁRIO CONTRATUAL, não pela
+    # remuneração inflada do mês. O espelho da ALEXIA prova: salário 1.725,00,
+    # base INSS de julho 2.012,50 (por causa das férias) e o benefício FOI PAGO
+    # (995 SALARIO FAMILIA 67,54). Medindo contra os 2.012,50 o teto de 1.980,38
+    # estourava e a pessoa perdia a cota justamente no mês em que tirou férias —
+    # o benefício é do dependente e não pode evaporar por causa disso.
+    # Benefício previdenciário: fora da base de INSS e de FGTS, por isso vem
+    # depois das duas.
     sal_familia, sf_cotas, mem_sf = calcular_salario_familia(
-        colab, comp, fiscal, base_inss)
+        colab, comp, fiscal, bruto)
     mem.update(mem_sf)
 
     # TOTAL a pagar = salário c/ descontos + VT + VA + saldo livre + acerto +
@@ -559,15 +592,32 @@ def calcular_item(colab: DpColaborador, lanc, comp: DpCompetencia, fiscal: DpTab
         #                     INTEIRO, mesmo nos dias que a empresa não paga;
         #   "dias_empresa"  → doença: só sobre o que a empresa custeia;
         #   "nunca"         → suspensão: não há FGTS nos dias suspensos.
-        if afast_inss and afast_fgts == "dias_empresa":
-            base_fgts = round(bruto - desc_afast, 2)
-        elif afast_fgts == "nunca":
-            base_fgts = round(bruto - desc_afast, 2)
+        # BASE NORMAL = a mesma remuneração que serve de base ao INSS: salário do
+        # mês + férias + 1/3. O espelho da ALEXIA declara "Base FGTS: 2.012,50"
+        # e "Valor FGTS: 161,00" — exatamente 8% dessa base, e igual à Base INSS.
+        # Usar só o salário contratual (1.725,00) dava 138,00 e subtraía R$ 23 do
+        # depósito de cada pessoa em mês de férias; o abono fica de fora dos dois
+        # (verba indenizatória), então base_inss já é o número certo.
+        # ATENCAO: base_normal ja' NASCE liquida dos dias nao custeados, porque
+        # sal_faltas = bruto - desc_faltas e desc_afast entrou em desc_faltas.
+        # Subtrair desc_afast de novo aqui descontava o afastamento DUAS vezes —
+        # foi o que as 3 falhas de valida_afastamento pegaram.
+        base_normal = base_inss if base_inss else bruto
+        if afast_fgts == "sempre":
+            # acidente e maternidade: FGTS sobre o salario INTEIRO, inclusive os
+            # dias que quem paga e' o INSS — por isso os dias voltam pra base
+            base_fgts = round(base_normal + desc_afast, 2)
         else:
-            base_fgts = bruto
+            # "dias_empresa" (doenca) e "nunca" (suspensao): a base ja' esta'
+            # limitada ao que a empresa custeia
+            base_fgts = base_normal
         fgts = round(base_fgts * fiscal.fgts_percent, 2)
         multa = round(fgts * fiscal.multa_fgts_percent, 2)
-        if base_fgts != bruto:
+        if fer_valor:
+            mem["fgts_base"] = (f"FGTS sobre R$ {base_fgts:.2f} = salário do mês "
+                                f"R$ {sal_faltas:.2f} + férias R$ {fer_valor:.2f} "
+                                f"+ 1/3 R$ {fer_terco:.2f} (o abono fica de fora)")
+        elif base_fgts != bruto:
             mem["fgts_base"] = (f"FGTS sobre {base_fgts:.2f} (e não {bruto:.2f}): "
                                 f"regra '{afast_fgts}' do afastamento")
         recesso = 0.0
@@ -577,10 +627,12 @@ def calcular_item(colab: DpColaborador, lanc, comp: DpCompetencia, fiscal: DpTab
                             "patronal": f"{bruto}×{fiscal.inss_patronal_percent:.0%}"}
     elif estagiario:
         decimo = ferias = terco = fgts = multa = patronal = 0.0
+        base_fgts = 0.0
         recesso = round(bruto / 12, 2)
         mem["provisoes"] = {"recesso": f"{bruto}/12 (recesso de estagiário)"}
     else:  # associado / pj — sem encargos
         decimo = ferias = terco = fgts = multa = recesso = patronal = 0.0
+        base_fgts = 0.0
 
     provisoes = round(decimo + ferias + terco + fgts + multa + recesso, 2)
     return {
@@ -593,6 +645,9 @@ def calcular_item(colab: DpColaborador, lanc, comp: DpCompetencia, fiscal: DpTab
         "desc_faltas": desc_faltas, "salario_com_faltas": sal_faltas,
         "vt_com_faltas": vt_faltas, "va_com_faltas": va_faltas,
         "desc_inss": desc_inss, "desc_vt": desc_vt, "desc_irrf": desc_irrf,
+        "inss_ferias": inss_ferias, "inss_dif_ferias": inss_dif_ferias,
+        "inss_salario": inss_salario, "base_inss": base_inss,
+        "base_fgts": base_fgts,
         "decimo_terceiro_pago": decimo_pago, "media_variaveis_ferias": media_var,
         "salario_com_descontos": sal_desc, "total_pagar": total_pagar,
         "decimo_mensal": decimo, "ferias_mensal": ferias, "terco_ferias_mensal": terco,
@@ -861,7 +916,9 @@ class DpCompetenciaViewSet(viewsets.ViewSet):
         # entra cru no order_by — seria injection de campo e quebraria com 500.
         ORDENAVEIS = {
             "matricula", "nome", "centro_custo_nome", "salario_bruto",
-            "faltas_dias", "desc_inss", "desc_vt", "desc_irrf", "vt_com_faltas",
+            "faltas_dias", "desc_inss", "inss_ferias", "inss_dif_ferias",
+            "inss_salario", "base_inss", "base_fgts", "desc_vt", "desc_irrf",
+            "vt_com_faltas",
             "va_com_faltas", "salario_com_descontos", "saldo_livre",
             "ferias_valor", "acerto_contabil", "premiacoes", "salario_familia",
             "decimo_terceiro_pago", "total_pagar", "custo_total",
