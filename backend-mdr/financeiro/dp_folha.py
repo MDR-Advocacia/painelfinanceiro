@@ -45,18 +45,42 @@ def tabela_fiscal_para(ano: int, mes: int) -> DpTabelaFiscal:
     return t
 
 
+def truncar_centavos(valor: float) -> float:
+    """Corta na segunda casa SEM arredondar — a régra da contabilidade.
+
+    O espelho da ALEXIA (07/2026) prova o critério em duas linhas independentes:
+    862,50 × 7,5% = 64,6875 vira 64,68 (arredondando daria 64,69) e
+    1.533,33 × 7,5% = 114,99975 vira 114,99 (arredondando daria 115,00).
+    É o padrão de retenção: nunca se retém mais do que o valor exato.
+
+    Passa por Decimal de propósito. Em float, truncar direto erra pra baixo —
+    86,25 vira 8624,999999 ao multiplicar por 100, e o corte devolveria 86,24,
+    um centavo a menos justamente onde a conta era exata. O round(...,6) antes
+    do Decimal absorve o ruído binário sem mexer no valor real.
+    """
+    from decimal import ROUND_DOWN, Decimal
+    return float(Decimal(str(round(float(valor), 6)))
+                 .quantize(Decimal("0.01"), rounding=ROUND_DOWN))
+
+
 def calcular_inss(salario: float, faixas: list) -> tuple:
     """INSS progressivo (parcela a deduzir). Acima do teto (última faixa), o
-    desconto trava no máximo. Retorna (valor, memoria)."""
+    desconto trava no máximo. Retorna (valor, memoria).
+
+    TRUNCA os centavos, não arredonda: é assim que a contabilidade da casa
+    fecha, e a régua aqui é bater com ela (decisão do operador em 13/08/2026).
+    """
     if salario <= 0 or not faixas:
         return 0.0, {"regra": "sem salário ou sem tabela"}
     for fx in faixas:
         if salario <= fx["ate"]:
-            v = round(salario * fx["aliquota"] - fx["deducao"], 2)
+            v = truncar_centavos(salario * fx["aliquota"] - fx["deducao"])
             return max(v, 0.0), {"faixa_ate": fx["ate"], "aliquota": fx["aliquota"],
-                                 "deducao": fx["deducao"], "conta": f"{salario}×{fx['aliquota']}−{fx['deducao']}"}
+                                 "deducao": fx["deducao"],
+                                 "conta": f"{salario}×{fx['aliquota']}−{fx['deducao']} "
+                                          f"(truncado em 2 casas) = {max(v, 0.0):.2f}"}
     ultima = faixas[-1]
-    teto = round(ultima["ate"] * ultima["aliquota"] - ultima["deducao"], 2)
+    teto = truncar_centavos(ultima["ate"] * ultima["aliquota"] - ultima["deducao"])
     return teto, {"regra": "acima do teto", "teto_desconto": teto}
 
 
