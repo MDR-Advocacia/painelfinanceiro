@@ -208,6 +208,36 @@ class DpCargoViewSet(viewsets.ModelViewSet):
               depois={"nome": obj.nome, "salario_base": obj.salario_base})
 
 
+def filtrar_quadro(qs, params):
+    """Filtros do Quadro de Pessoal, compartilhados pela listagem e pelo EXPORT.
+
+    Estava duplicado: a tela filtrava por busca/regime/cc/unidade e o export só
+    olhava `status`, então "exportar com filtro aplicado" baixava o quadro
+    inteiro. Uma função só garante que os dois não voltem a divergir.
+    """
+    busca = (params.get("busca") or "").strip()
+    if busca:
+        f = Q(nome__icontains=busca) | Q(cpf__icontains=busca)
+        if busca.isdigit():
+            f |= Q(matricula=int(busca))
+        qs = qs.filter(f)
+    if params.get("regime"):
+        qs = qs.filter(regime=params["regime"])
+    if params.get("status"):
+        qs = qs.filter(status=params["status"])
+    if params.get("cc"):
+        cc = DpCentroCusto.objects.filter(pk=params["cc"]).first()
+        # escolher o núcleo traz os subnúcleos junto (mesma regra da folha)
+        qs = qs.filter(centro_custo_id__in=cc.descendentes_ids()) if cc else qs.none()
+    if params.get("supervisor"):
+        qs = qs.filter(supervisor_id=params["supervisor"])
+    if params.get("coordenador"):
+        qs = qs.filter(coordenador_id=params["coordenador"])
+    if params.get("unidade"):
+        qs = qs.filter(unidade=params["unidade"])
+    return qs
+
+
 class DpColaboradorViewSet(viewsets.ModelViewSet):
     """Quadro de pessoal. list aceita: ?busca= (nome/matrícula/cpf), ?regime=,
     ?status=, ?cc= (uuid), ?unidade=, ?limit/?offset — devolve {total, items}."""
@@ -223,32 +253,15 @@ class DpColaboradorViewSet(viewsets.ModelViewSet):
     permission_classes = _PERM
 
     def list(self, request, *args, **kwargs):
-        qs = filtrar_colaboradores(self.get_queryset(), request.user)
-        busca = (request.query_params.get("busca") or "").strip()
-        if busca:
-            f = Q(nome__icontains=busca) | Q(cpf__icontains=busca)
-            if busca.isdigit():
-                f |= Q(matricula=int(busca))
-            qs = qs.filter(f)
-        if request.query_params.get("regime"):
-            qs = qs.filter(regime=request.query_params["regime"])
-        if request.query_params.get("status"):
-            qs = qs.filter(status=request.query_params["status"])
-        if request.query_params.get("cc"):
-            cc = DpCentroCusto.objects.filter(pk=request.query_params["cc"]).first()
-            # escolher o núcleo traz os subnúcleos junto (mesma regra da folha)
-            qs = qs.filter(centro_custo_id__in=cc.descendentes_ids()) if cc else qs.none()
-        if request.query_params.get("supervisor"):
-            qs = qs.filter(supervisor_id=request.query_params["supervisor"])
-        if request.query_params.get("coordenador"):
-            qs = qs.filter(coordenador_id=request.query_params["coordenador"])
-        if request.query_params.get("unidade"):
-            qs = qs.filter(unidade=request.query_params["unidade"])
+        qs = filtrar_quadro(
+            filtrar_colaboradores(self.get_queryset(), request.user),
+            request.query_params)
 
         # Filtro por situação do salário-família (?sf=pendente|regular|…).
         # A situação depende de idade e de datas de comprovação, que o ORM não
         # resolve num filter — então avaliamos em Python. Pré-filtramos por
         # "tem dependente ativo" no banco para não varrer o quadro inteiro.
+        # Fica FORA de filtrar_quadro porque depende do serializer.
         sf = (request.query_params.get("sf") or "").strip()
         if sf:
             qs = qs.filter(dependentes__ativo=True).distinct()

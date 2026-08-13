@@ -555,9 +555,16 @@ export const previsaoApi = {
 // Exports (Excel/PDF timbrados) de TODAS as abas
 export const exportApi = {
   dashboard: () => baixar(`${API_URL}/dp/relatorio-dashboard/`, "dashboard_dp.xlsx"),
-  quadro: (status = "", formato: "excel" | "pdf" = "excel") => {
+  /**
+   * Exporta o quadro com O MESMO recorte da tela. Antes só o status ia junto,
+   * então exportar "com filtro" baixava o quadro inteiro e o operador conferia
+   * uma planilha que não era a que ele estava vendo.
+   */
+  quadro: (filtros: { status?: string; regime?: string; busca?: string;
+                      cc?: string; unidade?: string } = {},
+           formato: "excel" | "pdf" = "excel") => {
     const qs = new URLSearchParams();
-    if (status) qs.set("status", status);
+    for (const [k, v] of Object.entries(filtros)) if (v) qs.set(k, v);
     if (formato === "pdf") qs.set("formato", "pdf");
     return baixar(`${API_URL}/dp/relatorio-quadro/?${qs}`, `quadro_pessoal.${formato === "pdf" ? "pdf" : "xlsx"}`);
   },

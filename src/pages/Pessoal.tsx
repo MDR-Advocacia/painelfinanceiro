@@ -166,6 +166,14 @@ function QuadroTab({ ccs, cargos, editar, onMudou, filtroExterno, rotuloFiltro, 
   const [regime, setRegime] = useState(TODOS);
   const [status, setStatus] = useState("ativo");
   const [cc, setCc] = useState(TODOS);
+
+  // o export leva EXATAMENTE o recorte da tela — o TODOS vira ausência de filtro
+  const filtrosExport = () => ({
+    status: status === TODOS ? "" : status,
+    regime: regime === TODOS ? "" : regime,
+    cc: cc === TODOS ? "" : cc,
+    busca: busca.trim(),
+  });
   const [unidade, setUnidade] = useState("");
   const [supervisor, setSupervisor] = useState<string | null>(null);
   // filtro de salário-família: serve pro DP achar quem está irregular sem
@@ -271,11 +279,11 @@ function QuadroTab({ ccs, cargos, editar, onMudou, filtroExterno, rotuloFiltro, 
             <RefreshCw className={`h-4 w-4 ${loading ? "animate-spin" : ""}`} />
           </button>
           <Button size="sm" variant="outline" className="ml-auto gap-1"
-                  onClick={() => exportApi.quadro(status === TODOS ? "" : status, "excel").catch((e) => toast.error(e.message))}>
+                  onClick={() => exportApi.quadro(filtrosExport(), "excel").catch((e) => toast.error(e.message))}>
             <Download className="h-4 w-4" /> Excel
           </Button>
           <Button size="sm" variant="outline" className="gap-1"
-                  onClick={() => exportApi.quadro(status === TODOS ? "" : status, "pdf").catch((e) => toast.error(e.message))}>
+                  onClick={() => exportApi.quadro(filtrosExport(), "pdf").catch((e) => toast.error(e.message))}>
             <FileText className="h-4 w-4" /> PDF
           </Button>
           {editar && (

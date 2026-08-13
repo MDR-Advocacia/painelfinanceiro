@@ -15,6 +15,7 @@ from rest_framework.response import Response
 
 from .dp_audit import humanizar
 from .dp_escopo import filtrar_colaboradores, filtrar_folha
+from .dp_views import filtrar_quadro
 from .models import DpCentroCusto, DpColaborador, DpCompetencia, DpEvento, DpFolhaItem
 from .views import modulo_permission
 
@@ -756,8 +757,6 @@ def dp_relatorio_projecao(request):
     return _resposta_excel(wb, "projecao_gastos.xlsx")
 
 
-@api_view(["GET"])
-@permission_classes(_PERM)
 def _pacote(c) -> float:
     """Quanto a pessoa recebe no pacote CHEIO: salário + saldo livre + VT + VA.
 
@@ -769,20 +768,39 @@ def _pacote(c) -> float:
                  + (c.vt or 0) + (c.va or 0), 2)
 
 
+@api_view(["GET"])
+@permission_classes(_PERM)
 def dp_relatorio_quadro(request):
-    """Excel do Quadro de Pessoal (com filtro de status opcional)."""
-    status_f = request.query_params.get("status", "")
-    qs = filtrar_colaboradores(
-        DpColaborador.objects.select_related("centro_custo", "cargo").all(), request.user)
-    if status_f:
-        qs = qs.filter(status=status_f)
-    if request.query_params.get("formato") == "pdf":
+    """Excel/PDF do Quadro de Pessoal, com OS MESMOS filtros da tela.
+
+    Os decorators aqui não são enfeite. Sem @api_view, `request` chega como
+    WSGIRequest e `request.query_params` não existe — era o 500 em toda
+    exportação. E sem @permission_classes o endpoint ficava SEM autenticação
+    nenhuma: só não vazava o quadro (nome, CPF, salário) porque estourava antes
+    de responder. Confirmado em produção: anônimo entrava na view; os endpoints
+    irmãos devolvem 401.
+    """
+    p = request.query_params
+    status_f = p.get("status", "")
+    qs = filtrar_quadro(
+        filtrar_colaboradores(
+            DpColaborador.objects.select_related("centro_custo", "cargo").all(),
+            request.user),
+        p)
+    # o subtítulo tem que dizer o recorte, senão duas planilhas diferentes
+    # saem com o mesmo cabeçalho e ninguém sabe qual é qual
+    recorte = " · ".join(
+        f"{rot}: {p[k]}" for k, rot in
+        (("status", "situação"), ("regime", "regime"), ("busca", "busca"),
+         ("unidade", "unidade"))
+        if p.get(k)) or "todos"
+    if p.get("formato") == "pdf":
         rows = [[c.matricula, c.nome[:32], REG_LABEL.get(c.regime, c.regime), c.status,
                  c.centro_custo.nome[:24] if c.centro_custo_id else "",
                  (c.cargo.nome[:24] if c.cargo_id else ""), _brl(c.salario_bruto),
                  _brl(c.saldo_livre), _brl(_pacote(c))] for c in qs]
         return _pdf_generico("Quadro de Pessoal",
-                             f"{len(rows)} colaborador(es)" + (f" · {status_f}" if status_f else " · todos"),
+                             f"{len(rows)} colaborador(es) · {recorte}",
                              ["Mat.", "Nome", "Regime", "Status", "Centro de Custo", "Cargo",
                               "Sal. bruto", "Saldo livre", "Total"],
                              rows, [15, 60, 24, 16, 46, 46, 26, 26, 27], _quem(request),
@@ -800,7 +818,7 @@ def dp_relatorio_quadro(request):
                      str(c.data_admissao or ""), str(c.data_demissao or ""),
                      c.salario_bruto, c.saldo_livre, c.vt, c.va, _pacote(c)])
     wb, ws = _wb_timbrado("Quadro de Pessoal",
-                          f"{len(rows)} colaborador(es)" + (f" · filtro: {status_f}" if status_f else " · todos"),
+                          f"{len(rows)} colaborador(es) · {recorte}",
                           _quem(request))
     _tabela(ws, 5, headers, rows,
             larguras=[8, 32, 13, 13, 9, 13, 7, 24, 16, 18, 24, 11, 11, 12, 11, 9, 9, 12],
