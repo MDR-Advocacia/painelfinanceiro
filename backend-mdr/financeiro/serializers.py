@@ -183,7 +183,7 @@ class DpColaboradorSerializer(serializers.ModelSerializer):
             'supervisor_id', 'supervisor_nome', 'coordenador_id', 'coordenador_nome',
             'cargo_id', 'cargo_nome', 'regime', 'regime_label', 'status',
             'data_entrada', 'data_admissao', 'data_demissao',
-            'salario_bruto', 'saldo_livre', 'vt', 'opta_vt', 'va',
+            'salario_bruto', 'saldo_livre', 'vt', 'opta_vt', 'va', 'aprendiz',
             'conta_bb', 'pix', 'conta_caixa', 'salario_familia', 'transferencia',
             'created_at', 'updated_at',
         ]

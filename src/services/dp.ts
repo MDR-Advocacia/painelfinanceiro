@@ -26,6 +26,8 @@ export interface DpColaborador {
   status: "ativo" | "inativo";
   data_entrada: string | null; data_admissao: string | null; data_demissao: string | null;
   salario_bruto: number; saldo_livre: number; vt: number; opta_vt: boolean; va: number;
+  /** contrato de aprendizagem: FGTS de 2% em vez de 8% */
+  aprendiz?: boolean;
   conta_bb: string; pix: string; conta_caixa: string;
   /** Situação do salário-família desta pessoa, resumida para o cadastro. */
   salario_familia?: DpSalarioFamiliaStatus;

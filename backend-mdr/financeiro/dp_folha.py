@@ -635,8 +635,23 @@ def calcular_item(colab: DpColaborador, lanc, comp: DpCompetencia, fiscal: DpTab
             # "dias_empresa" (doenca) e "nunca" (suspensao): a base ja' esta'
             # limitada ao que a empresa custeia
             base_fgts = base_normal
-        fgts = round(base_fgts * fiscal.fgts_percent, 2)
+        # aprendiz recolhe 2%; conferido no extrato de 07/2026 (JULIA CAUANY,
+        # salario 761,55 e FGTS de 15,23 = 2%, onde a aliquota cheia daria 60,92)
+        aliq_fgts = (float(getattr(fiscal, "fgts_percent_aprendiz", 0.02) or 0.02)
+                     if getattr(colab, "aprendiz", False) else fiscal.fgts_percent)
+        # FGTS TRUNCA, igual ao INSS. Medido no extrato de 07/2026 contra os 96
+        # casos casados por CPF: nos dois em que o centavo quebra (LANDI
+        # 2.108,33 x 8% = 168,6664 -> 168,66 e MIRTA 1.692,60 x 8% = 135,4080
+        # -> 135,40) a contabilidade cortou; nenhum caso arredondou.
+        # O vale-transporte, medido do mesmo jeito, ARREDONDA (MIRTA:
+        # 1.692,60 x 6% = 101,5560 -> 101,56) — por isso ele fica como esta'.
+        fgts = truncar_centavos(base_fgts * aliq_fgts)
         multa = round(fgts * fiscal.multa_fgts_percent, 2)
+        if getattr(colab, "aprendiz", False):
+            mem["fgts_aprendiz"] = (f"contrato de aprendizagem: FGTS de "
+                                    f"{aliq_fgts:.0%} sobre R$ {base_fgts:.2f} "
+                                    f"= R$ {fgts:.2f} (celetista comum recolheria "
+                                    f"R$ {base_fgts * fiscal.fgts_percent:.2f})")
         if fer_valor:
             mem["fgts_base"] = (f"FGTS sobre R$ {base_fgts:.2f} = salário do mês "
                                 f"R$ {sal_faltas:.2f} + férias R$ {fer_valor:.2f} "
@@ -687,6 +702,9 @@ def calcular_item(colab: DpColaborador, lanc, comp: DpCompetencia, fiscal: DpTab
         "afastamento_tipo": afast_tipo or afast_tipo_nao_clt, "afastamento_dias_empresa": afast_empresa,
         "afastamento_dias_inss": afast_inss, "desc_afastamento": desc_afast,
         "inss_patronal": patronal, "custo_provisoes": provisoes,
+        # FGTS do mes isolado — o extrato da contabilidade declara essa linha,
+        # entao ela precisa ser conferivel sem abrir a memoria de calculo
+        "fgts": fgts,
         # o salário-família SAI do custo: entrou no total_pagar porque o
         # colaborador recebe, mas quem arca é o INSS — o escritório só adianta
         # e compensa na guia. Mantê-lo aqui inflaria a folha e derrubaria a
@@ -941,7 +959,7 @@ class DpCompetenciaViewSet(viewsets.ViewSet):
         ORDENAVEIS = {
             "matricula", "nome", "centro_custo_nome", "salario_bruto",
             "faltas_dias", "desc_inss", "inss_ferias", "inss_dif_ferias",
-            "inss_salario", "base_inss", "base_fgts", "desc_vt", "desc_irrf",
+            "inss_salario", "base_inss", "base_fgts", "fgts", "desc_vt", "desc_irrf",
             "vt_com_faltas",
             "va_com_faltas", "salario_com_descontos", "saldo_livre",
             "ferias_valor", "acerto_contabil", "premiacoes", "salario_familia",

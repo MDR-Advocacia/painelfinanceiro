@@ -33,6 +33,7 @@ CAMPOS = {
     "vt": ("Vale-transporte", "moeda"),
     "va": ("Vale-alimentação", "moeda"),
     "opta_vt": ("Opta pelo vale-transporte", "sim_nao"),
+    "aprendiz": ("Contrato de aprendizagem (FGTS 2%)", "sim_nao"),
     "conta_bb": ("Conta Banco do Brasil", "texto"),
     "conta_caixa": ("Conta Caixa", "texto"),
     "pix": ("Chave PIX", "texto"),

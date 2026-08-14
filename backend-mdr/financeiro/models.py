@@ -307,6 +307,13 @@ class DpColaborador(models.Model):
     nome = models.CharField(max_length=200)
     sexo = models.CharField(max_length=10, blank=True, default="")
     cpf = models.CharField(max_length=14, blank=True, default="")
+    # APRENDIZ e' contrato CLT (Lei 10.097/2000), nao um regime a parte: tem
+    # INSS, VT e salario-familia iguais aos do celetista. O que muda e' o FGTS,
+    # que a lei fixa em 2% no lugar dos 8%. Por isso e' uma flag e nao um
+    # regime novo — virar regime obrigaria a repetir toda a logica de CLT.
+    aprendiz = models.BooleanField(
+        default=False,
+        help_text="Contrato de aprendizagem: FGTS de 2% em vez de 8%")
     unidade = models.CharField(max_length=80, blank=True, default="")
     area = models.CharField(max_length=20, blank=True, default="")
     centro_custo = models.ForeignKey(DpCentroCusto, on_delete=models.PROTECT,
@@ -708,6 +715,8 @@ class DpTabelaFiscal(models.Model):
     inss_faixas = models.JSONField(default=list)
     vt_percent = models.FloatField(default=0.06)
     fgts_percent = models.FloatField(default=0.08)
+    # FGTS do contrato de aprendizagem — 2% por forca de lei
+    fgts_percent_aprendiz = models.FloatField(default=0.02)
     multa_fgts_percent = models.FloatField(default=0.40)   # provisão sobre o FGTS
     inss_patronal_percent = models.FloatField(default=0.21)
     provisao_base = models.CharField(max_length=20, default="bruto_menos_inss",
@@ -883,6 +892,7 @@ class DpFolhaItem(models.Model):
     # conferir linha a linha contra o holerite
     base_inss = models.FloatField(default=0)
     base_fgts = models.FloatField(default=0)
+    fgts = models.FloatField(default=0)
     inss_ferias = models.FloatField(default=0)
     inss_dif_ferias = models.FloatField(default=0)
     inss_salario = models.FloatField(default=0)

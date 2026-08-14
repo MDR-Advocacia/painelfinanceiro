@@ -136,6 +136,7 @@ def _snap(obj: DpColaborador) -> dict:
         "data_admissao": str(obj.data_admissao or ""), "data_demissao": str(obj.data_demissao or ""),
         "salario_bruto": obj.salario_bruto, "saldo_livre": obj.saldo_livre,
         "vt": obj.vt, "va": obj.va, "opta_vt": obj.opta_vt,
+        "aprendiz": obj.aprendiz,
     }
 
 

@@ -477,7 +477,7 @@ function FichaDialog({ colaborador, ccs, cargos, editar, onClose, onMudou }: {
         coordenador_id: c.coordenador_id, equipe: c.equipe,
         cargo_id: c.cargo_id, salario_bruto: Number(c.salario_bruto) || 0,
         saldo_livre: Number(c.saldo_livre) || 0, vt: Number(c.vt) || 0,
-        va: Number(c.va) || 0, opta_vt: c.opta_vt, pix: c.pix,
+        va: Number(c.va) || 0, opta_vt: c.opta_vt, aprendiz: !!c.aprendiz, pix: c.pix,
         conta_bb: c.conta_bb, conta_caixa: c.conta_caixa,
       } as Partial<DpColaborador>);
       toast.success("Ficha atualizada.");
@@ -576,6 +576,17 @@ function FichaDialog({ colaborador, ccs, cargos, editar, onClose, onMudou }: {
           <label className="col-span-2 flex items-center gap-2 text-sm">
             <Checkbox checked={c.opta_vt} onCheckedChange={(v) => set("opta_vt", !!v)} disabled={ro} />
             Opta pelo VT (desconto de 6% — só CLT)
+          </label>
+          <label className="col-span-2 flex items-start gap-2 text-sm">
+            <Checkbox checked={!!c.aprendiz} className="mt-0.5"
+                      onCheckedChange={(v) => set("aprendiz", !!v)} disabled={ro} />
+            <span>
+              Contrato de aprendizagem
+              <span className="block text-xs text-muted-foreground">
+                FGTS de 2% no lugar de 8%. É contrato CLT: INSS, vale-transporte e
+                salário-família seguem iguais aos do celetista.
+              </span>
+            </span>
           </label>
           <CampoTexto rotulo="Chave PIX" valor={c.pix} onChange={(v) => set("pix", v)} ro={ro} />
           <CampoTexto rotulo="Conta Banco do Brasil" valor={c.conta_bb} onChange={(v) => set("conta_bb", v)} ro={ro} />
