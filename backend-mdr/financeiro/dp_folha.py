@@ -136,32 +136,98 @@ def calcular_salario_familia(colab, comp, fiscal, remuneracao: float) -> tuple:
     return valor, len(deps), mem
 
 
-def calcular_irrf(base: float, dependentes: int, fiscal) -> tuple:
-    """IRRF progressivo com parcela a deduzir — mesma mecânica do INSS.
+def _aplica_tabela_irrf(base: float, faixas: list) -> tuple:
+    """Roda a progressiva e devolve (imposto, faixa usada)."""
+    for fx in faixas:
+        if base <= fx["ate"]:
+            return max(round(base * fx["aliquota"] - fx.get("deducao", 0), 2), 0.0), fx
+    fx = faixas[-1]
+    return max(round(base * fx["aliquota"] - fx.get("deducao", 0), 2), 0.0), fx
 
-    Tabela VAZIA devolve zero, que é o estado de hoje: ninguém no escritório
-    atinge a alíquota. Preencher em Parâmetros passa a valer da vigência em
-    diante, sem tocar em mês fechado.
 
-    A base já vem líquida de INSS; aqui só se abate a dedução por dependente.
+def calcular_irrf(base: float, dependentes: int, fiscal, *, tabela: str = "mensal",
+                  pensao: float = 0.0, maior_65: bool = False) -> tuple:
+    """IRRF de UMA categoria de rendimento. Retorna (imposto, memória).
+
+    DUAS DIFERENÇAS DE FUNDO PARA O INSS, e é onde se erra:
+
+    1. CADA CATEGORIA É APURADA EM SEPARADO. Salário, férias, 13º e PLR não
+       somam base entre si — o oposto do INSS, que junta tudo numa base única
+       do mês. Por isso o parâmetro `tabela`: o 13º tem tributação exclusiva
+       na fonte e pode ter tabela própria.
+
+    2. O CONTRIBUINTE ESCOLHE O CAMINHO QUE PAGA MENOS. Ou abate as deduções
+       legais (dependentes, pensão, isenção dos 65+), ou usa o desconto
+       simplificado, que dispensa comprovação. O motor calcula os dois e fica
+       com o menor imposto — que é o direito, não uma liberalidade.
+
+    Tabela vazia devolve zero. É o estado de hoje: ninguém no escritório atinge
+    a alíquota, e o campo existe para quando atingir.
+
+    A base já chega líquida de INSS — a contribuição previdenciária é dedução
+    legal e sai antes, na chamada.
     """
-    faixas = getattr(fiscal, "irrf_faixas", None) or []
+    faixas = (getattr(fiscal, "irrf_faixas_13", None) or [] if tabela == "decimo"
+              else getattr(fiscal, "irrf_faixas_plr", None) or [] if tabela == "plr"
+              else getattr(fiscal, "irrf_faixas", None) or [])
+    if tabela == "decimo" and not faixas:
+        faixas = getattr(fiscal, "irrf_faixas", None) or []   # 13º cai na mensal
     if base <= 0 or not faixas:
         return 0.0, {"regra": "sem tabela de IRRF cadastrada" if not faixas else "base zero"}
-    ded = round(dependentes * float(getattr(fiscal, "irrf_deducao_dependente", 0) or 0), 2)
-    base_calc = round(base - ded, 2)
-    if base_calc <= 0:
-        return 0.0, {"regra": f"dedução de {dependentes} dependente(s) zerou a base"}
-    for fx in faixas:
-        if base_calc <= fx["ate"]:
-            v = round(base_calc * fx["aliquota"] - fx.get("deducao", 0), 2)
-            return max(v, 0.0), {
-                "base": base_calc, "deducao_dependentes": ded,
-                "regra": f"{base_calc} × {fx['aliquota']:.1%} − {fx.get('deducao', 0)}"}
-    fx = faixas[-1]
-    v = round(base_calc * fx["aliquota"] - fx.get("deducao", 0), 2)
-    return max(v, 0.0), {"base": base_calc, "deducao_dependentes": ded,
-                         "regra": "última faixa"}
+
+    # (a) caminho das deduções legais
+    ded_dep = round(dependentes * float(getattr(fiscal, "irrf_deducao_dependente", 0) or 0), 2)
+    ded_65 = float(getattr(fiscal, "irrf_isencao_maior_65", 0) or 0) if maior_65 else 0.0
+    ded_legais = round(ded_dep + (pensao or 0.0) + ded_65, 2)
+    imposto_legal, fx_legal = _aplica_tabela_irrf(max(base - ded_legais, 0.0), faixas)
+
+    # (b) caminho do desconto simplificado
+    simpl = float(getattr(fiscal, "irrf_desconto_simplificado", 0) or 0)
+    if simpl > 0:
+        imposto_simpl, fx_simpl = _aplica_tabela_irrf(max(base - simpl, 0.0), faixas)
+    else:
+        imposto_simpl, fx_simpl = None, None
+
+    if imposto_simpl is not None and imposto_simpl < imposto_legal:
+        escolhido, ded, fx, via = imposto_simpl, simpl, fx_simpl, "desconto simplificado"
+    else:
+        escolhido, ded, fx, via = imposto_legal, ded_legais, fx_legal, "deduções legais"
+
+    base_calc = round(max(base - ded, 0.0), 2)
+    mem = {
+        "tabela": tabela, "base_bruta": round(base, 2), "via": via,
+        "deducao_aplicada": ded, "base_calculo": base_calc,
+        "aliquota": fx["aliquota"], "parcela_deduzir": fx.get("deducao", 0),
+        "regra": (f"{base_calc:.2f} × {fx['aliquota']:.1%} − {fx.get('deducao', 0):.2f} "
+                  f"= {escolhido:.2f} (via {via})"),
+    }
+    if imposto_simpl is not None:
+        mem["comparacao"] = (f"deduções legais dariam {imposto_legal:.2f}; "
+                             f"simplificado dá {imposto_simpl:.2f} — vale o menor")
+    if dependentes:
+        mem["deducao_dependentes"] = ded_dep
+    if pensao:
+        mem["pensao_alimenticia"] = round(pensao, 2)
+    return escolhido, mem
+
+
+def calcular_retencao_pj(valor_nota: float, fiscal) -> tuple:
+    """IR retido de PJ prestadora de serviço profissional.
+
+    Não é folha: é retenção do TOMADOR sobre a nota. Fica aqui porque o
+    escritório contrata PJ e o recolhimento é do mesmo tributo. Abaixo do piso
+    de dispensa não se retém — reter centavos custa mais em obrigação acessória
+    do que o próprio imposto.
+    """
+    pct = float(getattr(fiscal, "irrf_retencao_pj_percent", 0) or 0)
+    if valor_nota <= 0 or pct <= 0:
+        return 0.0, {"regra": "sem percentual de retenção configurado"}
+    bruto = truncar_centavos(valor_nota * pct)
+    dispensa = float(getattr(fiscal, "irrf_retencao_pj_dispensa", 0) or 0)
+    if dispensa and bruto < dispensa:
+        return 0.0, {"regra": f"apurado {bruto:.2f} abaixo da dispensa de {dispensa:.2f}",
+                     "apurado": bruto}
+    return bruto, {"regra": f"{valor_nota:.2f} × {pct:.2%} = {bruto:.2f}"}
 
 
 def ler_faltas(lanc, comp) -> dict:
@@ -563,11 +629,28 @@ def calcular_item(colab: DpColaborador, lanc, comp: DpCompetencia, fiscal: DpTab
     if clt:
         n_dep_irrf = sum(1 for d in colab.dependentes.all() if d.ativo
                          and getattr(d, "conta_irrf", True))
-        irrf_sal, mem_irrf = calcular_irrf(round(sal_faltas - desc_inss, 2), n_dep_irrf, fiscal)
+        # Cada categoria de rendimento e' apurada SEPARADAMENTE — nada de base
+        # unica como no INSS. Ferias e 13o tem tributacao propria, e somar tudo
+        # jogaria a pessoa numa aliquota que ela nao deve.
+        irrf_sal, mem_irrf = calcular_irrf(round(sal_faltas - desc_inss, 2),
+                                           n_dep_irrf, fiscal, tabela="mensal")
         desc_irrf = irrf_sal
+        if irrf_sal:
+            mem["irrf_salario"] = mem_irrf
         if fer_valor:
-            irrf_fer, _ = calcular_irrf(round(fer_valor + fer_terco, 2), 0, fiscal)
+            irrf_fer, mem_fer = calcular_irrf(round(fer_valor + fer_terco, 2), 0,
+                                              fiscal, tabela="ferias")
             desc_irrf = round(desc_irrf + irrf_fer, 2)
+            if irrf_fer:
+                mem["irrf_ferias"] = mem_fer
+        if decimo_pago:
+            # 13o e' tributacao EXCLUSIVA na fonte: nao entra no ajuste anual e
+            # nao soma com o salario do mes
+            irrf_13, mem_13 = calcular_irrf(round(decimo_pago, 2), n_dep_irrf,
+                                            fiscal, tabela="decimo")
+            desc_irrf = round(desc_irrf + irrf_13, 2)
+            if irrf_13:
+                mem["irrf_decimo"] = mem_13
         if desc_irrf:
             mem["irrf"] = mem_irrf
 

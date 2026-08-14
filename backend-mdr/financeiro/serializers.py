@@ -9,8 +9,52 @@ class DpTabelaFiscalSerializer(serializers.ModelSerializer):
     class Meta:
         model = DpTabelaFiscal
         fields = ['id', 'vigencia_inicio', 'inss_faixas', 'vt_percent', 'fgts_percent',
+                  'fgts_percent_aprendiz',
                   'multa_fgts_percent', 'inss_patronal_percent', 'provisao_base',
+                  'salario_familia_cota', 'salario_familia_teto',
+                  # IRRF: tabelas por categoria, deduções e retenção de prestador
+                  'irrf_faixas', 'irrf_faixas_13', 'irrf_faixas_plr',
+                  'irrf_deducao_dependente', 'irrf_desconto_simplificado',
+                  'irrf_isencao_maior_65', 'irrf_autonomo_usa_tabela_mensal',
+                  'irrf_retencao_pj_percent', 'irrf_retencao_pj_dispensa',
                   'created_at', 'updated_at']
+
+    def _valida_faixas(self, v, nome):
+        """Faixa mal formada vira imposto errado em silêncio — melhor recusar."""
+        if v in (None, ""):
+            return []
+        if not isinstance(v, list):
+            raise serializers.ValidationError(f"{nome}: precisa ser uma lista de faixas.")
+        anterior = 0.0
+        for i, fx in enumerate(v, 1):
+            if not isinstance(fx, dict) or "ate" not in fx or "aliquota" not in fx:
+                raise serializers.ValidationError(
+                    f"{nome}: faixa {i} precisa ter 'ate' e 'aliquota'.")
+            try:
+                ate, aliq = float(fx["ate"]), float(fx["aliquota"])
+                ded = float(fx.get("deducao", 0) or 0)
+            except (TypeError, ValueError):
+                raise serializers.ValidationError(f"{nome}: faixa {i} tem valor não numérico.")
+            if aliq < 0 or aliq > 1:
+                raise serializers.ValidationError(
+                    f"{nome}: faixa {i} — alíquota vai de 0 a 1 (7,5% = 0.075).")
+            if ded < 0:
+                raise serializers.ValidationError(f"{nome}: faixa {i} — dedução negativa.")
+            if ate <= anterior:
+                raise serializers.ValidationError(
+                    f"{nome}: as faixas têm que estar em ordem crescente de teto "
+                    f"(faixa {i} não é maior que a anterior).")
+            anterior = ate
+        return v
+
+    def validate_irrf_faixas(self, v):
+        return self._valida_faixas(v, "Tabela do IRRF")
+
+    def validate_irrf_faixas_13(self, v):
+        return self._valida_faixas(v, "Tabela do IRRF do 13º")
+
+    def validate_irrf_faixas_plr(self, v):
+        return self._valida_faixas(v, "Tabela do IRRF da PLR")
 
     def validate_inss_faixas(self, v):
         if not isinstance(v, list) or not v:

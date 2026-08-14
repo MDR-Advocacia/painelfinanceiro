@@ -530,11 +530,29 @@ export interface DpSimulacao {
     total_pagar: number; provisoes: number; patronal: number; custo_total: number }[];
   meses: number;
 }
+export interface DpFaixaIR { ate: number; aliquota: number; deducao: number }
+
 export interface DpTabelaFiscal {
   id: string; vigencia_inicio: string;
-  inss_faixas: { ate: number; aliquota: number; deducao: number }[];
+  inss_faixas: DpFaixaIR[];
   vt_percent: number; fgts_percent: number; multa_fgts_percent: number;
   inss_patronal_percent: number; provisao_base: "bruto_menos_inss" | "bruto";
+  fgts_percent_aprendiz?: number;
+  salario_familia_cota?: number; salario_familia_teto?: number;
+
+  // ── IRRF ──
+  /** tabela progressiva mensal (salário e férias) */
+  irrf_faixas?: DpFaixaIR[];
+  /** tabela do 13º; vazia usa a mensal */
+  irrf_faixas_13?: DpFaixaIR[];
+  /** tabela anual da PLR; vazia = não tributa */
+  irrf_faixas_plr?: DpFaixaIR[];
+  irrf_deducao_dependente?: number;
+  irrf_desconto_simplificado?: number;
+  irrf_isencao_maior_65?: number;
+  irrf_autonomo_usa_tabela_mensal?: boolean;
+  irrf_retencao_pj_percent?: number;
+  irrf_retencao_pj_dispensa?: number;
 }
 
 export const previsaoApi = {

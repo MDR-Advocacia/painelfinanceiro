@@ -739,6 +739,41 @@ class DpTabelaFiscal(models.Model):
         help_text='[{"ate": 2259.20, "aliquota": 0.075, "deducao": 169.44}, ...]')
     irrf_deducao_dependente = models.FloatField(
         default=0, help_text="Dedução por dependente na base do IRRF")
+
+    # ── IRRF: DEDUÇÕES ────────────────────────────────────────────────────
+    # A lei dá DOIS caminhos e o contribuinte fica com o que pagar MENOS:
+    #   (a) deduções legais — dependentes + pensão alimentícia + previdência;
+    #   (b) desconto simplificado — abatimento fixo que dispensa comprovação.
+    # Guardar os dois aqui deixa o motor escolher; zerar o simplificado desliga
+    # o caminho (b) sem mexer em código.
+    irrf_desconto_simplificado = models.FloatField(
+        default=0,
+        help_text="Desconto simplificado mensal em R$ (2025: 607,20). Zero desliga.")
+    irrf_isencao_maior_65 = models.FloatField(
+        default=0,
+        help_text="Parcela isenta adicional para quem tem 65 anos ou mais, em R$.")
+
+    # ── IRRF: TABELAS POR CATEGORIA DE RENDIMENTO ─────────────────────────
+    # Cada uma é apurada SEPARADAMENTE, não somam base entre si — é o oposto
+    # do INSS, onde tudo entra numa base única do mês. Vazia = usa a mensal.
+    irrf_faixas_13 = models.JSONField(
+        default=list, blank=True,
+        help_text="Tabela do 13º (tributação exclusiva na fonte). Vazia usa a mensal.")
+    irrf_faixas_plr = models.JSONField(
+        default=list, blank=True,
+        help_text="Tabela ANUAL própria da PLR (Lei 10.101). Vazia = não tributa.")
+
+    # ── IR RETIDO DE PRESTADOR (não é folha, mas é recolhimento de IR) ─────
+    # O escritório tem associados e PJ; a retenção deles segue regra própria.
+    irrf_autonomo_usa_tabela_mensal = models.BooleanField(
+        default=True,
+        help_text="Autônomo/RPA usa a mesma tabela progressiva mensal.")
+    irrf_retencao_pj_percent = models.FloatField(
+        default=0,
+        help_text="Retenção sobre serviços de PJ (serviços profissionais: 1,5%).")
+    irrf_retencao_pj_dispensa = models.FloatField(
+        default=0,
+        help_text="Não retém de PJ quando o imposto apurado fica abaixo deste valor.")
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 

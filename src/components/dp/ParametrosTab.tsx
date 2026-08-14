@@ -24,6 +24,10 @@ import { Ajuda, TituloAjuda } from "@/components/dp/Ajuda";
 import ArvoreCentrosCusto from "@/components/dp/ArvoreCentrosCusto";
 import { CcPicker } from "@/components/dp/Pickers";
 import { Checkbox } from "@/components/ui/checkbox";
+import type { DpFaixaIR } from "@/services/dp";
+
+/** As tres tabelas de IRRF vivem em campos diferentes da mesma vigencia. */
+type ChaveIR = "irrf_faixas" | "irrf_faixas_13" | "irrf_faixas_plr";
 import {
   type DpCargo, type DpCcNo, type DpCentroCusto, type DpLideranca, type DpTabelaFiscal,
   dpApi, exportApi, fmtBRL, fmtData, previsaoApi,
@@ -63,6 +67,18 @@ function FiscaisBloco({ editar }: { editar: boolean }) {
   const setFaixa = (i: number, campo: "ate" | "aliquota" | "deducao", v: number) =>
     setSel((s) => s ? { ...s, inss_faixas: s.inss_faixas.map((f, idx) => idx === i ? { ...f, [campo]: v } : f) } : s);
 
+  // as tabelas de IRRF (mensal, 13º e PLR) têm a mesma forma da do INSS, então
+  // um só conjunto de helpers atende as três — chave dinâmica
+  const setFaixaIR = (chave: ChaveIR, i: number,
+                      campo: "ate" | "aliquota" | "deducao", v: number) =>
+    setSel((s) => s ? {
+      ...s, [chave]: (s[chave] ?? []).map((f, idx) => idx === i ? { ...f, [campo]: v } : f),
+    } : s);
+  const addFaixaIR = (chave: ChaveIR) =>
+    setSel((s) => s ? { ...s, [chave]: [...(s[chave] ?? []), { ate: 0, aliquota: 0, deducao: 0 }] } : s);
+  const removeFaixaIR = (chave: ChaveIR, i: number) =>
+    setSel((s) => s ? { ...s, [chave]: (s[chave] ?? []).filter((_, idx) => idx !== i) } : s);
+
   const salvar = async () => {
     if (!sel) return;
     setSalvando(true);
@@ -71,6 +87,16 @@ function FiscaisBloco({ editar }: { editar: boolean }) {
         inss_faixas: sel.inss_faixas, vt_percent: sel.vt_percent, fgts_percent: sel.fgts_percent,
         multa_fgts_percent: sel.multa_fgts_percent, inss_patronal_percent: sel.inss_patronal_percent,
         provisao_base: sel.provisao_base,
+        fgts_percent_aprendiz: sel.fgts_percent_aprendiz,
+        irrf_faixas: sel.irrf_faixas ?? [],
+        irrf_faixas_13: sel.irrf_faixas_13 ?? [],
+        irrf_faixas_plr: sel.irrf_faixas_plr ?? [],
+        irrf_deducao_dependente: sel.irrf_deducao_dependente,
+        irrf_desconto_simplificado: sel.irrf_desconto_simplificado,
+        irrf_isencao_maior_65: sel.irrf_isencao_maior_65,
+        irrf_autonomo_usa_tabela_mensal: sel.irrf_autonomo_usa_tabela_mensal,
+        irrf_retencao_pj_percent: sel.irrf_retencao_pj_percent,
+        irrf_retencao_pj_dispensa: sel.irrf_retencao_pj_dispensa,
       });
       toast.success("Parâmetros salvos — recalcule a competência aberta pra aplicar.");
       carregar();
@@ -195,16 +221,228 @@ function FiscaisBloco({ editar }: { editar: boolean }) {
                   Decisão pendente com o DP/contador — trocar aqui recalcula tudo que estiver aberto.
                 </p>
               </div>
-              {editar && (
-                <Button size="sm" className="glass-button gap-1 border-0" onClick={salvar} disabled={salvando}>
-                  {salvando ? <Loader2 className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />} Salvar parâmetros
-                </Button>
-              )}
             </div>
           </div>
+
+          {/* ═══ IMPOSTO DE RENDA RETIDO NA FONTE ═══ */}
+          <div className="mt-6 border-t pt-5">
+            <div className="mb-1 flex items-center gap-1.5 text-sm font-semibold">
+              Imposto de Renda (IRRF)
+              <Ajuda titulo="Imposto de Renda Retido na Fonte"
+                     texto={"O IRRF funciona por CATEGORIA DE RENDIMENTO: salário, férias, 13º e PLR são "
+                            + "apurados em separado, cada um com sua base. É o oposto do INSS, que junta "
+                            + "tudo numa base única do mês. Somar as categorias jogaria a pessoa numa "
+                            + "alíquota que ela não deve."} />
+            </div>
+            <p className="mb-4 text-xs text-muted-foreground">
+              Hoje ninguém no escritório atinge a alíquota — deixar as tabelas vazias mantém o
+              desconto em zero. Preencher passa a valer da vigência em diante, sem tocar em
+              mês já fechado.
+            </p>
+
+            <div className="grid gap-5 lg:grid-cols-2">
+              <div className="space-y-5">
+                <TabelaIR
+                  titulo="Tabela mensal — salário e férias"
+                  ajuda="Progressiva aplicada ao salário do mês (já descontado o INSS) e, em separado, às férias. É a tabela principal."
+                  faixas={sel.irrf_faixas ?? []} chave="irrf_faixas"
+                  editar={editar} setFaixa={setFaixaIR} add={addFaixaIR} remove={removeFaixaIR} />
+                <TabelaIR
+                  titulo="Tabela do 13º salário"
+                  ajuda="O 13º tem tributação EXCLUSIVA na fonte: não entra no ajuste anual nem soma com o salário do mês. Deixar vazia faz o 13º usar a tabela mensal, que é o comportamento usual."
+                  faixas={sel.irrf_faixas_13 ?? []} chave="irrf_faixas_13"
+                  editar={editar} setFaixa={setFaixaIR} add={addFaixaIR} remove={removeFaixaIR}
+                  vazioTexto="Vazia — o 13º usa a tabela mensal acima." />
+                <TabelaIR
+                  titulo="Tabela da PLR"
+                  ajuda="A participação nos lucros tem tabela ANUAL própria (Lei 10.101) e também é exclusiva na fonte. Vazia significa que não há PLR tributável configurada."
+                  faixas={sel.irrf_faixas_plr ?? []} chave="irrf_faixas_plr"
+                  editar={editar} setFaixa={setFaixaIR} add={addFaixaIR} remove={removeFaixaIR}
+                  vazioTexto="Vazia — nenhuma PLR tributável configurada." />
+              </div>
+
+              <div className="space-y-4">
+                <div>
+                  <div className="mb-2 flex items-center gap-1.5 text-xs font-semibold text-muted-foreground">
+                    Deduções da base
+                    <Ajuda titulo="Os dois caminhos da dedução"
+                           texto={"A lei dá duas opções e o contribuinte fica com a que pagar MENOS: abater "
+                                  + "as deduções legais (dependentes, pensão, isenção dos 65+) ou usar o "
+                                  + "desconto simplificado, que dispensa comprovação. O sistema calcula os "
+                                  + "dois e aplica o menor imposto automaticamente."} />
+                  </div>
+                  <div className="grid grid-cols-2 gap-3">
+                    <Reais rotulo="Dedução por dependente" valor={sel.irrf_deducao_dependente ?? 0}
+                           set={(v) => set({ irrf_deducao_dependente: v })} ro={!editar}
+                           dica="Valor mensal por dependente que conta para o IR. Na ficha de cada colaborador você marca quais dependentes contam." />
+                    <Reais rotulo="Desconto simplificado" valor={sel.irrf_desconto_simplificado ?? 0}
+                           set={(v) => set({ irrf_desconto_simplificado: v })} ro={!editar}
+                           dica="Abatimento fixo mensal que substitui as deduções legais quando for mais vantajoso. Zero desliga essa alternativa." />
+                    <Reais rotulo="Isenção 65 anos ou mais" valor={sel.irrf_isencao_maior_65 ?? 0}
+                           set={(v) => set({ irrf_isencao_maior_65: v })} ro={!editar}
+                           dica="Parcela isenta adicional para quem tem 65 anos ou mais." />
+                  </div>
+                </div>
+
+                <div className="rounded-lg border bg-muted/30 p-3">
+                  <div className="mb-2 flex items-center gap-1.5 text-xs font-semibold text-muted-foreground">
+                    Retenção de prestador
+                    <Ajuda titulo="IR retido de quem não é CLT"
+                           texto={"Associado e autônomo (RPA) são pessoa física: seguem a mesma tabela "
+                                  + "progressiva mensal. PJ é diferente — a retenção é um percentual fixo "
+                                  + "sobre a nota de serviço, e há um piso abaixo do qual não se retém, "
+                                  + "porque a obrigação acessória custa mais que o imposto."} />
+                  </div>
+                  <label className="mb-3 flex items-start gap-2 text-xs">
+                    <Checkbox checked={sel.irrf_autonomo_usa_tabela_mensal !== false} className="mt-0.5"
+                              disabled={!editar}
+                              onCheckedChange={(v) => set({ irrf_autonomo_usa_tabela_mensal: !!v })} />
+                    <span>
+                      Autônomo e associado usam a tabela mensal
+                      <span className="block text-[0.68rem] text-muted-foreground">
+                        pessoa física segue a progressiva, igual ao celetista
+                      </span>
+                    </span>
+                  </label>
+                  <div className="grid grid-cols-2 gap-3">
+                    <Perc rotulo="Retenção de PJ (serviços)" valor={sel.irrf_retencao_pj_percent ?? 0}
+                          set={(v) => set({ irrf_retencao_pj_percent: v })} ro={!editar} />
+                    <Reais rotulo="Não reter abaixo de" valor={sel.irrf_retencao_pj_dispensa ?? 0}
+                           set={(v) => set({ irrf_retencao_pj_dispensa: v })} ro={!editar}
+                           dica="Piso de dispensa: se o imposto apurado ficar abaixo deste valor, não se retém." />
+                  </div>
+                </div>
+
+                <div>
+                  <div className="mb-2 text-xs font-semibold text-muted-foreground">
+                    FGTS do contrato de aprendizagem
+                  </div>
+                  <Perc rotulo="FGTS do aprendiz" valor={sel.fgts_percent_aprendiz ?? 0.02}
+                        set={(v) => set({ fgts_percent_aprendiz: v })} ro={!editar} />
+                  <p className="mt-1 text-[10px] text-muted-foreground">
+                    A lei fixa 2% no lugar dos 8%. Marque quem é aprendiz na ficha do colaborador.
+                  </p>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          {editar && (
+            <div className="mt-5 border-t pt-4">
+              <Button size="sm" className="glass-button gap-1 border-0" onClick={salvar} disabled={salvando}>
+                {salvando ? <Loader2 className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />} Salvar parâmetros
+              </Button>
+              <span className="ml-3 text-[11px] text-muted-foreground">
+                vale da vigência em diante — mês fechado mantém a tabela da época
+              </span>
+            </div>
+          )}
         </CardContent>
       )}
     </Card>
+  );
+}
+
+/**
+ * Tabela progressiva editável — serve para as três categorias de IRRF.
+ *
+ * Vazia é um estado LEGÍTIMO e não um erro: sem faixas o imposto é zero, que
+ * é a realidade do escritório hoje. Por isso o vazio explica o que significa
+ * em vez de mostrar uma tabela em branco sem contexto.
+ */
+function TabelaIR({ titulo, ajuda, faixas, chave, editar, setFaixa, add, remove, vazioTexto }: {
+  titulo: string; ajuda: string; faixas: DpFaixaIR[]; chave: ChaveIR; editar: boolean;
+  setFaixa: (c: ChaveIR, i: number, campo: "ate" | "aliquota" | "deducao", v: number) => void;
+  add: (c: ChaveIR) => void; remove: (c: ChaveIR, i: number) => void; vazioTexto?: string;
+}) {
+  return (
+    <div>
+      <div className="mb-2 flex items-center justify-between gap-2">
+        <span className="inline-flex items-center gap-1.5 text-xs font-semibold text-muted-foreground">
+          {titulo}
+          <Ajuda titulo={titulo} texto={ajuda} />
+        </span>
+        {editar && (
+          <Button size="sm" variant="outline" className="h-6 px-2 text-[11px]"
+                  onClick={() => add(chave)}>
+            + faixa
+          </Button>
+        )}
+      </div>
+      {faixas.length === 0 ? (
+        <p className="rounded border border-dashed px-2 py-3 text-center text-[11px] text-muted-foreground">
+          {vazioTexto ?? "Sem tabela — o desconto fica em zero."}
+        </p>
+      ) : (
+        <>
+          <Table>
+            <TableHeader>
+              <TableRow>
+                <TableHead className="text-xs">Até (R$)</TableHead>
+                <TableHead className="text-xs">Alíquota</TableHead>
+                <TableHead className="text-xs">Dedução (R$)</TableHead>
+                {editar && <TableHead className="w-8" />}
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              {faixas.map((f, i) => (
+                <TableRow key={i}>
+                  <TableCell className="py-1">
+                    <Input type="number" step="0.01" value={f.ate} disabled={!editar}
+                           onChange={(e) => setFaixa(chave, i, "ate", Number(e.target.value))}
+                           className="h-8 font-mono text-xs" />
+                  </TableCell>
+                  <TableCell className="py-1">
+                    <Input type="number" step="0.001" value={f.aliquota} disabled={!editar}
+                           onChange={(e) => setFaixa(chave, i, "aliquota", Number(e.target.value))}
+                           className="h-8 font-mono text-xs" />
+                  </TableCell>
+                  <TableCell className="py-1">
+                    <Input type="number" step="0.01" value={f.deducao} disabled={!editar}
+                           onChange={(e) => setFaixa(chave, i, "deducao", Number(e.target.value))}
+                           className="h-8 font-mono text-xs" />
+                  </TableCell>
+                  {editar && (
+                    <TableCell className="py-1">
+                      <Button size="sm" variant="ghost" className="h-7 w-7 p-0 text-muted-foreground"
+                              onClick={() => remove(chave, i)} title="Remover faixa">
+                        <Trash2 className="h-3.5 w-3.5" />
+                      </Button>
+                    </TableCell>
+                  )}
+                </TableRow>
+              ))}
+            </TableBody>
+          </Table>
+          <p className="mt-1 text-[10px] text-muted-foreground">
+            Alíquota em decimal (0.075 = 7,5%). As faixas têm que estar em ordem crescente
+            de teto; a última é o topo da tabela.
+          </p>
+        </>
+      )}
+    </div>
+  );
+}
+
+/** Campo de valor em R$ com dica — irmão do Perc, que é percentual. */
+function Reais({ rotulo, valor, set, ro, dica }: {
+  rotulo: string; valor: number; set: (v: number) => void; ro: boolean; dica?: string;
+}) {
+  return (
+    <div>
+      <Label className="flex items-center gap-1 text-xs text-muted-foreground">
+        {rotulo}
+        {dica && <Ajuda titulo={rotulo} texto={dica} />}
+      </Label>
+      <div className="relative">
+        <span className="pointer-events-none absolute left-2 top-1/2 -translate-y-1/2 text-xs text-muted-foreground">
+          R$
+        </span>
+        <Input type="number" step="0.01" value={valor} disabled={ro}
+               onChange={(e) => set(Number(e.target.value))}
+               className="h-9 pl-8 font-mono text-sm" />
+      </div>
+    </div>
   );
 }
 
