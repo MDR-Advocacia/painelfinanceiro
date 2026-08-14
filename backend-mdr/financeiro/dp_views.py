@@ -544,7 +544,7 @@ class DpColaboradorViewSet(viewsets.ModelViewSet):
         dep = DpDependente.objects.create(
             colaborador=colab, nome=nome[:150], data_nascimento=nasc,
             tipo=(request.data.get("tipo") or "filho"),
-            cpf=(request.data.get("cpf") or "")[:14],
+            cpf=_cpf(request.data.get("cpf"))[:14],
             invalido=bool(request.data.get("invalido")),
             vacinacao_valida_ate=_data_ou_none(request.data.get("vacinacao_valida_ate")),
             frequencia_escolar_valida_ate=_data_ou_none(
@@ -584,7 +584,7 @@ class DpColaboradorViewSet(viewsets.ModelViewSet):
         if "tipo" in request.data:
             dep.tipo = request.data.get("tipo") or dep.tipo
         if "cpf" in request.data:
-            dep.cpf = (request.data.get("cpf") or "")[:14]
+            dep.cpf = _cpf(request.data.get("cpf"))[:14]
         if "invalido" in request.data:
             dep.invalido = bool(request.data.get("invalido"))
         if "ativo" in request.data:
@@ -822,6 +822,28 @@ def _norm(v):
     return s[:-2] if s.endswith(".0") and s[:-2].isdigit() else s
 
 
+def _cpf(v) -> str:
+    """CPF/CNPJ da planilha, com o zero à esquerda de volta.
+
+    O Excel guarda documento como NÚMERO, então 063.395.424-17 chega aqui como
+    63395424417 e o zero já sumiu antes do código ver o valor. Ficava um CPF de
+    10 dígitos que não casa com nada — foi o que impediu 29 pessoas de bater com
+    o extrato da contabilidade, e mascarou 83 registros até 13/08/2026.
+
+    Completar à esquerda é seguro porque o comprimento é fixo: 11 para CPF, 14
+    para CNPJ (PJ). Documento maior que 14 fica intocado — aí não é zero
+    perdido, é dado errado, e adivinhar seria pior que deixar visível.
+    """
+    d = "".join(c for c in _norm(v) if c.isdigit())
+    if not d:
+        return ""
+    if len(d) <= 11:
+        return d.zfill(11)
+    if len(d) <= 14:
+        return d.zfill(14)
+    return d
+
+
 def _data(v):
     if isinstance(v, datetime):
         return v.date()
@@ -942,7 +964,7 @@ def dp_importar(request):
                         f"(sem salário base — confira dias/carga com o DP)")
                 regime = _REGIME_MAP.get(_norm(row[13] if len(row) > 13 else "").lower(), "clt")
                 campos = {
-                    "nome": nome, "sexo": _norm(row[3]), "cpf": _norm(row[4]),
+                    "nome": nome, "sexo": _norm(row[3]), "cpf": _cpf(row[4]),
                     "unidade": _norm(row[5]), "area": _norm(row[6]),
                     "centro_custo": cc,
                     # a planilha traz "Fulano - SUP" / "Fulano - COOR" na mesma
