@@ -100,6 +100,47 @@ export default function FolhaTab({ editar }: { editar: boolean }) {
   );
 }
 
+/**
+ * Célula de dinheiro da folha, com o SINAL explícito.
+ *
+ * Sem isso, INSS e desconto de VT apareciam como "R$ 130,93" — visualmente
+ * idênticos a um vale-transporte de "R$ 225,00" que SOMA. Quem olha a linha
+ * não conseguia dizer o que entra e o que sai, e a conta não fechava de olho.
+ *
+ *   desconto → sinal "−" e vermelho     (sai do que a pessoa recebe)
+ *   provento → sinal "+" e verde        (entra)
+ *   neutro   → sem sinal                (salário base e subtotais: nem um nem outro)
+ *   total    → sem sinal, em negrito    (o resultado da linha)
+ *
+ * Valor zero vira travessão em vez de "R$ 0,00": zero repetido em dez colunas
+ * vira ruído e esconde os números que importam.
+ */
+function Val({ v, tipo = "neutro", titulo, className = "" }: {
+  v: number | undefined | null;
+  tipo?: "desconto" | "provento" | "neutro" | "total";
+  titulo?: string;
+  className?: string;
+}) {
+  const n = v ?? 0;
+  if (!n) return <span className="text-muted-foreground">—</span>;
+
+  // acerto contábil e ajustes podem vir negativos já na origem: o sinal do
+  // NÚMERO manda sobre o papel da coluna, senão um estorno apareceria somando
+  const negativo = tipo === "desconto" ? n > 0 : n < 0;
+  const cor = tipo === "total" ? "font-semibold"
+    : negativo ? "text-rose-600"
+    : tipo === "provento" ? "text-emerald-700"
+    : "";
+  const sinal = tipo === "total" || tipo === "neutro" ? ""
+    : negativo ? "−" : "+";
+
+  return (
+    <span className={`${cor} ${className}`} title={titulo}>
+      {sinal}{fmtBRL(Math.abs(n))}
+    </span>
+  );
+}
+
 function AbrirDialog({ onClose, onAbriu }: { onClose: () => void; onAbriu: () => void }) {
   const agora = new Date();
   const [ano, setAno] = useState(agora.getFullYear());
@@ -368,6 +409,24 @@ function CompetenciaDetalhe({ comp, editar, onMudou }: {
                 {/* o cabeçalho gruda no topo da caixa: com 13 colunas e 177
                     linhas, rolar sem saber que coluna se está lendo é o pior
                     jeito de conferir uma folha */}
+              {/* legenda: sem ela o operador tem que deduzir a convenção de cor */}
+              <div className="mb-2 flex flex-wrap items-center gap-x-4 gap-y-1 px-1 text-[11px] text-muted-foreground">
+                <span className="flex items-center gap-1">
+                  <span className="font-mono text-emerald-700">+</span> soma no que a pessoa recebe
+                </span>
+                <span className="flex items-center gap-1">
+                  <span className="font-mono text-rose-600">−</span> desconto
+                </span>
+                <span className="flex items-center gap-1">
+                  <span className="font-mono text-sky-700">+</span> férias e salário-família
+                  <Ajuda titulo="Por que azul?"
+                         texto={"Entram no que a pessoa recebe, mas não são custo novo do "
+                                + "escritório: as férias já estavam provisionadas mês a mês, e o "
+                                + "salário-família é adiantado e compensado na guia do INSS."} />
+                </span>
+                <span>sem sinal = salário base e subtotais</span>
+                <span className="font-semibold text-foreground">negrito = totais da linha</span>
+              </div>
                 <TableHeader className="sticky top-0 z-10 bg-card/95 backdrop-blur [&_th]:border-b">
                   <TableRow>
                     <TableHead className="text-xs">Matrícula</TableHead>
@@ -442,18 +501,18 @@ function CompetenciaDetalhe({ comp, editar, onMudou }: {
                         </span>
                       </TableCell>
                       <TableCell className="hidden max-w-[150px] truncate text-xs lg:table-cell">{it.centro_custo_nome}</TableCell>
-                      <TableCell className="text-right font-mono text-xs">{fmtBRL(it.salario_bruto)}</TableCell>
+                      <TableCell className="text-right font-mono text-xs"><Val v={it.salario_bruto} /></TableCell>
                       <TableCell className="hidden text-right font-mono text-xs sm:table-cell">
                         {it.faltas_dias > 0 || it.faltas_horas > 0
                           ? <span className="text-rose-600">{it.faltas_dias}d {it.faltas_horas}h</span> : "—"}
                       </TableCell>
-                      <TableCell className="text-right font-mono text-xs">{fmtBRL(it.desc_inss)}</TableCell>
-                      <TableCell className="hidden text-right font-mono text-xs md:table-cell">{fmtBRL(it.desc_vt)}</TableCell>
-                      <TableCell className="hidden text-right font-mono text-xs xl:table-cell">{fmtBRL(it.vt_com_faltas)}</TableCell>
-                      <TableCell className="hidden text-right font-mono text-xs xl:table-cell">{fmtBRL(it.va_com_faltas)}</TableCell>
-                      <TableCell className="hidden text-right font-mono text-xs xl:table-cell">{fmtBRL(it.salario_com_descontos ?? 0)}</TableCell>
+                      <TableCell className="text-right font-mono text-xs"><Val v={it.desc_inss} tipo="desconto" /></TableCell>
+                      <TableCell className="hidden text-right font-mono text-xs md:table-cell"><Val v={it.desc_vt} tipo="desconto" /></TableCell>
+                      <TableCell className="hidden text-right font-mono text-xs xl:table-cell"><Val v={it.vt_com_faltas} tipo="provento" /></TableCell>
+                      <TableCell className="hidden text-right font-mono text-xs xl:table-cell"><Val v={it.va_com_faltas} tipo="provento" /></TableCell>
+                      <TableCell className="hidden text-right font-mono text-xs xl:table-cell"><Val v={it.salario_com_descontos} /></TableCell>
                       <TableCell className="text-right font-mono text-xs">
-                        {it.saldo_livre ? fmtBRL(it.saldo_livre) : "—"}
+                        <Val v={it.saldo_livre} tipo="provento" />
                       </TableCell>
                       <TableCell className="text-right font-mono text-xs">
                         {(() => {
@@ -462,35 +521,34 @@ function CompetenciaDetalhe({ comp, editar, onMudou }: {
                             <span className="text-sky-700"
                                   title={`Férias ${fmtBRL(it.ferias_valor ?? 0)} + 1/3 ${fmtBRL(it.ferias_terco ?? 0)}`
                                          + ((it.ferias_abono ?? 0) ? ` + abono ${fmtBRL(it.ferias_abono ?? 0)}` : "")}>
-                              {fmtBRL(fer)}
+                              +{fmtBRL(fer)}
                             </span>
                           ) : "—";
                         })()}
                       </TableCell>
                       <TableCell className="hidden text-right font-mono text-xs xl:table-cell">
-                        {it.acerto_contabil
-                          ? <span className={it.acerto_contabil < 0 ? "text-rose-600" : ""}>{fmtBRL(it.acerto_contabil)}</span>
-                          : "—"}
+                        <Val v={it.acerto_contabil} tipo="provento"
+                             titulo="Acerto contábil do mês — pode somar ou subtrair" />
                       </TableCell>
                       <TableCell className="hidden text-right font-mono text-xs md:table-cell">
-                        {it.premiacoes ? <span className="text-emerald-700">{fmtBRL(it.premiacoes)}</span> : "—"}
+                        <Val v={it.premiacoes} tipo="provento" />
                       </TableCell>
                       <TableCell className="hidden text-right font-mono text-xs lg:table-cell">
                         {it.salario_familia ? (
                           <span className="text-sky-700"
                                 title={`${it.salario_familia_cotas} cota(s) — compensado na GPS, não é custo do escritório`}>
-                            {fmtBRL(it.salario_familia)}
+                            +{fmtBRL(it.salario_familia)}
                           </span>
                         ) : "—"}
                       </TableCell>
                       <TableCell className="hidden text-right font-mono text-xs xl:table-cell">
-                        {it.desc_irrf ? <span className="text-rose-600">{fmtBRL(it.desc_irrf)}</span> : "—"}
+                        <Val v={it.desc_irrf} tipo="desconto" />
                       </TableCell>
                       <TableCell className="hidden text-right font-mono text-xs xl:table-cell">
-                        {it.decimo_terceiro_pago ? fmtBRL(it.decimo_terceiro_pago) : "—"}
+                        <Val v={it.decimo_terceiro_pago} tipo="provento" />
                       </TableCell>
-                      <TableCell className="text-right font-mono text-xs font-semibold">{fmtBRL(it.total_pagar)}</TableCell>
-                      <TableCell className="hidden text-right font-mono text-xs sm:table-cell">{fmtBRL(it.custo_total)}</TableCell>
+                      <TableCell className="text-right font-mono text-xs"><Val v={it.total_pagar} tipo="total" /></TableCell>
+                      <TableCell className="hidden text-right font-mono text-xs sm:table-cell"><Val v={it.custo_total} tipo="total" /></TableCell>
                       {editar && aberta && (
                         // stopPropagation: o menu vive dentro da linha clicável e,
                         // sem isso, o clique borbulha e reabre sempre "faltas"
