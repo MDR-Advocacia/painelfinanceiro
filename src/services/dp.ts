@@ -345,6 +345,10 @@ export interface DpFolhaItem {
   afastamento_dias_empresa?: number;
   afastamento_dias_inss?: number;
   desc_afastamento?: number;
+  /** soma de tudo que a pessoa recebe, no formato do extrato da contabilidade */
+  total_proventos?: number;
+  /** soma de tudo que sai (INSS, desconto de VT, IRRF) */
+  total_descontos?: number;
   /** IRRF retido — zero enquanto a tabela não for preenchida em Parâmetros */
   /** calendário de faltas: [{data:"YYYY-MM-DD", justificada:bool}] */
   faltas_datas?: { data: string; justificada?: boolean; motivo?: string }[];
@@ -363,6 +367,9 @@ export interface DpFolhaItem {
 }
 export interface DpFolhaTotais {
   total_pagar: number; provisoes: number; inss_patronal: number; custo_total: number;
+  salario_familia?: number;
+  /** somas da competência no formato do extrato da contabilidade */
+  total_proventos?: number; total_descontos?: number;
 }
 export interface DpRateioLinha {
   centro_custo_nome: string; nucleo: string; headcount: number;

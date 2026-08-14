@@ -683,6 +683,25 @@ def calcular_item(colab: DpColaborador, lanc, comp: DpCompetencia, fiscal: DpTab
     total_pagar = round(sal_desc + vt_faltas + va_faltas + saldo + acerto + premio
                         + fer_valor + fer_terco + fer_abono_valor + sal_familia
                         + decimo_pago, 2)
+
+    # ── TOTAL DOS PROVENTOS / TOTAL DOS DESCONTOS ─────────────────────────
+    # O extrato da contabilidade fecha toda linha com esses dois totais, e sem
+    # eles não dá para conferir documento contra documento: a folha mostrava só
+    # o líquido, que é a diferença — e diferença igual pode vir de proventos e
+    # descontos completamente diferentes.
+    #
+    # O SALÁRIO ENTRA PELO BRUTO, não pelo já descontado. `sal_desc` é salário
+    # menos INSS, VT e IRRF; usá-lo aqui contaria os descontos duas vezes — uma
+    # embutida no provento e outra na coluna de descontos — e o líquido não
+    # fecharia. Por isso proventos parte de `sal_faltas` (bruto do mês, já
+    # líquido de faltas e dos dias de férias, que não são desconto e sim dia
+    # não trabalhado) e os descontos ficam todos do outro lado.
+    total_proventos = round(sal_faltas + vt_faltas + va_faltas + saldo + acerto
+                            + premio + fer_valor + fer_terco + fer_abono_valor
+                            + sal_familia + decimo_pago, 2)
+    total_descontos = round(desc_inss + desc_vt + desc_irrf, 2)
+    mem["totais"] = (f"proventos {total_proventos:.2f} − descontos "
+                     f"{total_descontos:.2f} = líquido {total_pagar:.2f}")
     if decimo_pago:
         mem["decimo_terceiro"] = (
             f"13º pago neste mês: {decimo_pago:.2f}. NÃO soma custo — a despesa "
@@ -772,6 +791,7 @@ def calcular_item(colab: DpColaborador, lanc, comp: DpCompetencia, fiscal: DpTab
         "base_fgts": base_fgts,
         "decimo_terceiro_pago": decimo_pago, "media_variaveis_ferias": media_var,
         "salario_com_descontos": sal_desc, "total_pagar": total_pagar,
+        "total_proventos": total_proventos, "total_descontos": total_descontos,
         "decimo_mensal": decimo, "ferias_mensal": ferias, "terco_ferias_mensal": terco,
         "fgts_mensal": fgts, "multa_fgts_mensal": multa, "recesso_mensal": recesso,
         "ferias_dias": fer_dias, "ferias_valor": fer_valor, "ferias_terco": fer_terco,
@@ -1043,6 +1063,7 @@ class DpCompetenciaViewSet(viewsets.ViewSet):
             "matricula", "nome", "centro_custo_nome", "salario_bruto",
             "faltas_dias", "desc_inss", "inss_ferias", "inss_dif_ferias",
             "inss_salario", "base_inss", "base_fgts", "fgts", "desc_vt", "desc_irrf",
+            "total_proventos", "total_descontos",
             "vt_com_faltas",
             "va_com_faltas", "salario_com_descontos", "saldo_livre",
             "ferias_valor", "acerto_contabil", "premiacoes", "salario_familia",
@@ -1056,7 +1077,9 @@ class DpCompetenciaViewSet(viewsets.ViewSet):
         from django.db.models import Sum
         ag = qs.aggregate(pagar=Sum("total_pagar"), prov=Sum("custo_provisoes"),
                           patronal=Sum("inss_patronal"), custo=Sum("custo_total"),
-                          sal_familia=Sum("salario_familia"))
+                          sal_familia=Sum("salario_familia"),
+                          proventos=Sum("total_proventos"),
+                          descontos=Sum("total_descontos"))
         try:
             limit = min(int(request.query_params.get("limit", 50)), 500)
             offset = max(int(request.query_params.get("offset", 0)), 0)
@@ -1087,6 +1110,9 @@ class DpCompetenciaViewSet(viewsets.ViewSet):
             # exposto à parte porque está DENTRO do total_pagar e FORA do custo:
             # sem isso as duas colunas parecem não fechar
             "salario_familia": round(ag["sal_familia"] or 0, 2),
+            # fecham a competência no formato do extrato da contabilidade
+            "total_proventos": round(ag["proventos"] or 0, 2),
+            "total_descontos": round(ag["descontos"] or 0, 2),
         }})
 
     @action(detail=True, methods=["get"])

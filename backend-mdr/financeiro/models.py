@@ -925,6 +925,11 @@ class DpFolhaItem(models.Model):
     # INSS FERIAS + INSS DIFERENCA FERIAS + I.N.S.S. do salario = desc_inss
     # bases declaradas no espelho da contabilidade — sem elas nao da' pra
     # conferir linha a linha contra o holerite
+    # totais no formato do extrato da contabilidade: sem eles nao da' pra
+    # conferir linha a linha, porque liquido igual pode vir de composicoes
+    # completamente diferentes
+    total_proventos = models.FloatField(default=0)
+    total_descontos = models.FloatField(default=0)
     base_inss = models.FloatField(default=0)
     base_fgts = models.FloatField(default=0)
     fgts = models.FloatField(default=0)
