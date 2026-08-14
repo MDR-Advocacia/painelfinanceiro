@@ -439,7 +439,7 @@ function CompetenciaDetalhe({ comp, editar, onMudou }: {
                       <TituloAjuda titulo="Faltas" ajuda="Dias e horas de falta lançados no mês — geram desconto proporcional." />
                     </TableHead>
                     <TableHead className="text-right text-xs">
-                      <TituloAjuda titulo="INSS" ajuda="Desconto do INSS do colaborador, calculado pela tabela progressiva vigente (só CLT)." />
+                      <TituloAjuda titulo="INSS" ajuda={"Desconto do colaborador pela tabela progressiva vigente (só CLT). Em mês com férias são TRÊS parcelas somadas — INSS das férias, diferença de férias e INSS do salário —, exatamente como no espelho da contabilidade; passe o mouse sobre o valor para ver a quebra. O recibo de férias mostra só a PRIMEIRA delas, porque é o documento do adiantamento e não do mês fechado."} />
                     </TableHead>
                     <TableHead className="hidden text-right text-xs md:table-cell">
                       <TituloAjuda titulo="Desc. VT" ajuda="Desconto de até 6% do salário, previsto em lei, para quem opta pelo vale (só CLT)." />
@@ -506,7 +506,30 @@ function CompetenciaDetalhe({ comp, editar, onMudou }: {
                         {it.faltas_dias > 0 || it.faltas_horas > 0
                           ? <span className="text-rose-600">{it.faltas_dias}d {it.faltas_horas}h</span> : "—"}
                       </TableCell>
-                      <TableCell className="text-right font-mono text-xs"><Val v={it.desc_inss} tipo="desconto" /></TableCell>
+                      <TableCell className="text-right font-mono text-xs">
+                        {/* Em mes com ferias o INSS tem TRES parcelas, e mostrar so'
+                            o total fazia o numero parecer errado contra o recibo de
+                            ferias — que traz apenas a primeira delas. */}
+                        {it.inss_ferias || it.inss_dif_ferias ? (
+                          <span
+                            className="cursor-help border-b border-dotted border-rose-300"
+                            title={
+                              `INSS FÉRIAS ${fmtBRL(it.inss_ferias ?? 0)}\n`
+                              + `INSS DIFERENÇA DE FÉRIAS ${fmtBRL(it.inss_dif_ferias ?? 0)}\n`
+                              + `INSS DO SALÁRIO ${fmtBRL(it.inss_salario ?? 0)}\n`
+                              + `${"—".repeat(28)}\n`
+                              + `TOTAL ${fmtBRL(it.desc_inss)}   ·   base ${fmtBRL(it.base_inss ?? 0)}\n\n`
+                              + `A tabela progressiva vale UMA vez sobre a base do mês. `
+                              + `A parcela "diferença de férias" é o complemento que fecha `
+                              + `essa conta — sem ela, a faixa inicial entraria duas vezes `
+                              + `e a retenção sairia a menor.`
+                            }>
+                            <Val v={it.desc_inss} tipo="desconto" />
+                          </span>
+                        ) : (
+                          <Val v={it.desc_inss} tipo="desconto" />
+                        )}
+                      </TableCell>
                       <TableCell className="hidden text-right font-mono text-xs md:table-cell"><Val v={it.desc_vt} tipo="desconto" /></TableCell>
                       <TableCell className="hidden text-right font-mono text-xs xl:table-cell"><Val v={it.vt_com_faltas} tipo="provento" /></TableCell>
                       <TableCell className="hidden text-right font-mono text-xs xl:table-cell"><Val v={it.va_com_faltas} tipo="provento" /></TableCell>
