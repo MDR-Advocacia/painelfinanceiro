@@ -150,7 +150,9 @@ export interface DpAfastamento {
 export const dpApi = {
   resumo: () => fetch(`${API_URL}/dp/colaboradores/resumo/`, { headers: authHeaders() }).then((r) => j<DpResumo>(r)),
 
-  listar: (p: { busca?: string; regime?: string; status?: string; cc?: string; unidade?: string;
+  listar: (p: {
+    /** filtra por período de admissão ou de desligamento */
+    evento?: "admissao" | "desligamento"; de?: string; ate?: string; busca?: string; regime?: string; status?: string; cc?: string; unidade?: string;
                 supervisor?: string; coordenador?: string;
                 /** situação do salário-família (ex.: "pendente") */
                 sf?: string;

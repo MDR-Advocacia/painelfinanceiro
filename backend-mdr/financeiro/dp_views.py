@@ -209,6 +209,14 @@ class DpCargoViewSet(viewsets.ModelViewSet):
               depois={"nome": obj.nome, "salario_base": obj.salario_base})
 
 
+def _data_iso(v):
+    """'2026-07-01' -> date, e qualquer coisa fora disso -> None (sem explodir)."""
+    try:
+        return datetime.strptime((v or "").strip(), "%Y-%m-%d").date()
+    except (ValueError, TypeError):
+        return None
+
+
 def filtrar_quadro(qs, params):
     """Filtros do Quadro de Pessoal, compartilhados pela listagem e pelo EXPORT.
 
@@ -236,6 +244,22 @@ def filtrar_quadro(qs, params):
         qs = qs.filter(coordenador_id=params["coordenador"])
     if params.get("unidade"):
         qs = qs.filter(unidade=params["unidade"])
+
+    # PERÍODO POR EVENTO: "quem entrou/saiu entre tais datas".
+    # `evento` escolhe qual data filtrar — sem ele, um intervalo sozinho seria
+    # ambíguo (data de quê?). Quem não tem a data do evento sai do resultado:
+    # ativo não tem demissão, e listá-lo numa busca por desligados seria ruído.
+    evento = (params.get("evento") or "").strip()
+    de, ate = (params.get("de") or "").strip(), (params.get("ate") or "").strip()
+    if evento in ("admissao", "desligamento") and (de or ate):
+        campo = "data_admissao" if evento == "admissao" else "data_demissao"
+        qs = qs.exclude(**{f"{campo}__isnull": True})
+        # data malformada vira filtro ignorado, não 500 — o operador digita
+        # direto na URL e no input de data enquanto ainda está incompleto
+        if _data_iso(de):
+            qs = qs.filter(**{f"{campo}__gte": _data_iso(de)})
+        if _data_iso(ate):
+            qs = qs.filter(**{f"{campo}__lte": _data_iso(ate)})
     return qs
 
 

@@ -5,7 +5,7 @@ import { useCallback, useEffect, useState } from "react";
 import {
   Contact, Download, FileSpreadsheet, LayoutDashboard, Loader2, Plus, RefreshCw,
   FileText, ScrollText, Search, Sliders, TrendingUp, UserMinus, UserSearch, Users,
-  Wallet, X,
+  CalendarRange, Wallet, X,
 } from "lucide-react";
 import { toast } from "sonner";
 
@@ -173,12 +173,22 @@ function QuadroTab({ ccs, cargos, editar, onMudou, filtroExterno, rotuloFiltro, 
     regime: regime === TODOS ? "" : regime,
     cc: cc === TODOS ? "" : cc,
     busca: busca.trim(),
+    // sem isto, "exportar" ignoraria o período e baixaria gente fora do recorte
+    evento: evento || "",
+    de: evento ? de : "",
+    ate: evento ? ate : "",
   });
   const [unidade, setUnidade] = useState("");
   const [supervisor, setSupervisor] = useState<string | null>(null);
   // filtro de salário-família: serve pro DP achar quem está irregular sem
   // abrir ficha por ficha
   const [sf, setSf] = useState(TODOS);
+  // PERÍODO POR EVENTO — "quem entrou/saiu entre tais datas". O evento precisa
+  // vir junto: um intervalo sozinho seria ambíguo (data de quê?).
+  const [evento, setEvento] = useState<"" | "admissao" | "desligamento">("");
+  const [de, setDe] = useState("");
+  const [ate, setAte] = useState("");
+  const periodoAtivo = !!evento && (!!de || !!ate);
 
   // drill-down do painel: aplica o filtro que veio de lá
   useEffect(() => {
@@ -203,12 +213,14 @@ function QuadroTab({ ccs, cargos, editar, onMudou, filtroExterno, rotuloFiltro, 
       busca, regime: regime === TODOS ? "" : regime, status: status === TODOS ? "" : status,
       cc: cc === TODOS ? "" : cc, unidade, supervisor: supervisor ?? "",
       sf: sf === TODOS ? "" : sf,
+      evento: (evento || undefined) as "admissao" | "desligamento" | undefined,
+      de: evento ? de : "", ate: evento ? ate : "",
       limit: PAGE, offset: pagina * PAGE,
     })
       .then((r) => { setItems(r.items); setTotal(r.total); })
       .catch((e) => toast.error(e.message))
       .finally(() => setLoading(false));
-  }, [busca, regime, status, cc, unidade, supervisor, sf, pagina]);
+  }, [busca, regime, status, cc, unidade, supervisor, sf, evento, de, ate, pagina]);
   useEffect(() => { carregar(); }, [carregar]);
 
   const totalPaginas = Math.max(1, Math.ceil(total / PAGE));
@@ -275,6 +287,42 @@ function QuadroTab({ ccs, cargos, editar, onMudou, filtroExterno, rotuloFiltro, 
               <SelectItem value="sem_cota">Cota encerrada (14 anos)</SelectItem>
             </SelectContent>
           </Select>
+          {/* filtro por período de entrada/saída */}
+          <div className={`flex items-center gap-1.5 rounded-md border px-2 py-1 ${
+            periodoAtivo ? "border-sky-300 bg-sky-50 dark:border-sky-800 dark:bg-sky-950/40" : ""}`}>
+            <CalendarRange className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
+            <Select value={evento || TODOS}
+                    onValueChange={(v) => { setEvento(v === TODOS ? "" : v as any); setPagina(0); }}>
+              <SelectTrigger className="h-7 w-[132px] border-0 bg-transparent px-1 text-xs shadow-none">
+                <SelectValue placeholder="Período" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value={TODOS}>Sem filtro de data</SelectItem>
+                <SelectItem value="admissao">Admitidos em</SelectItem>
+                <SelectItem value="desligamento">Desligados em</SelectItem>
+              </SelectContent>
+            </Select>
+            <Input type="date" value={de} disabled={!evento}
+                   onChange={(e) => { setDe(e.target.value); setPagina(0); }}
+                   className="h-7 w-[130px] px-1.5 text-xs" title="De" />
+            <span className="text-xs text-muted-foreground">até</span>
+            <Input type="date" value={ate} disabled={!evento}
+                   onChange={(e) => { setAte(e.target.value); setPagina(0); }}
+                   className="h-7 w-[130px] px-1.5 text-xs" title="Até" />
+            {periodoAtivo && (
+              <button title="Limpar período"
+                      className="text-muted-foreground hover:text-foreground"
+                      onClick={() => { setEvento(""); setDe(""); setAte(""); setPagina(0); }}>
+                <X className="h-3.5 w-3.5" />
+              </button>
+            )}
+            <Ajuda titulo="Filtro por período"
+                   texto={"Mostra quem foi admitido ou desligado dentro do intervalo. "
+                          + "Escolha primeiro o evento — um intervalo sozinho seria ambíguo. "
+                          + "Deixar uma das pontas vazia deixa esse lado em aberto: só a data "
+                          + "final traz tudo até ela. Quem não tem a data do evento fica de "
+                          + "fora, então buscar desligados não devolve gente ativa."} />
+          </div>
           <button onClick={carregar} className="ml-1 text-muted-foreground hover:text-foreground" title="Atualizar">
             <RefreshCw className={`h-4 w-4 ${loading ? "animate-spin" : ""}`} />
           </button>
@@ -309,6 +357,12 @@ function QuadroTab({ ccs, cargos, editar, onMudou, filtroExterno, rotuloFiltro, 
                   <TituloAjuda titulo="Centro de custo" ajuda="Setor ou carteira que recebe o custo desta pessoa no rateio mensal." />
                 </TableHead>
                 <TableHead className="hidden text-xs lg:table-cell">Unidade</TableHead>
+                <TableHead className="hidden text-xs xl:table-cell">
+                  <TituloAjuda titulo="Admissão" ajuda="Data de entrada no contrato atual. Em quem foi efetivado, é a data da matrícula nova — o histórico anterior fica no vínculo de transferência da ficha." />
+                </TableHead>
+                <TableHead className="hidden text-xs xl:table-cell">
+                  <TituloAjuda titulo="Desligamento" ajuda="Data de saída. Fica vazia em quem está ativo." />
+                </TableHead>
                 <TableHead className="text-right text-xs">
                   <TituloAjuda titulo="Salário bruto" ajuda="Valor do salário antes dos descontos (INSS, vale-transporte)." />
                 </TableHead>
@@ -343,6 +397,14 @@ function QuadroTab({ ccs, cargos, editar, onMudou, filtroExterno, rotuloFiltro, 
                   <TableCell className="hidden max-w-[170px] truncate text-xs md:table-cell">{c.cargo_nome || "—"}</TableCell>
                   <TableCell className="hidden max-w-[180px] truncate text-xs lg:table-cell">{c.centro_custo_nome}</TableCell>
                   <TableCell className="hidden text-xs lg:table-cell">{c.unidade || "—"}</TableCell>
+                  <TableCell className="hidden font-mono text-xs xl:table-cell">
+                    {fmtData(c.data_admissao) || "—"}
+                  </TableCell>
+                  <TableCell className="hidden font-mono text-xs xl:table-cell">
+                    {c.data_demissao
+                      ? <span className="text-rose-600">{fmtData(c.data_demissao)}</span>
+                      : <span className="text-muted-foreground">—</span>}
+                  </TableCell>
                   <TableCell className="text-right font-mono text-xs">{fmtBRL(c.salario_bruto)}</TableCell>
                   <TableCell className="hidden text-right font-mono text-xs lg:table-cell">
                     {c.saldo_livre ? fmtBRL(c.saldo_livre) : "—"}
