@@ -72,7 +72,9 @@ function ProjecaoBloco() {
                            ajuda="Estimativa do custo de pessoal nos próximos meses partindo do quadro atual. Ajuste o reajuste anual e o crescimento previsto para simular." />
             </CardTitle>
             <CardDescription>
-              Projeta o custo do quadro atual e o <b>aprovisionamento acumulado</b> (13º, férias, FGTS…).
+              Repete o quadro de hoje pelos próximos meses para responder duas perguntas:
+              <b> quanto vai sair do caixa</b> e <b> quanto precisa ficar guardado</b> para
+              o 13º, as férias e o FGTS quando vencerem.
             </CardDescription>
           </div>
           {d && (
@@ -91,10 +93,14 @@ function ProjecaoBloco() {
       </CardHeader>
       <CardContent className="space-y-4">
         <div className="flex flex-wrap items-end gap-3">
-          <Campo rotulo="Meses" valor={meses} set={setMeses} w="w-20" />
-          <Campo rotulo="Reajuste (% a.a.)" valor={reajuste} set={setReajuste} w="w-28" step={0.5} />
-          <Campo rotulo="Mês do reajuste" valor={mesReajuste} set={setMesReajuste} w="w-28" />
-          <Campo rotulo="Crescimento HC (% a.m.)" valor={crescimento} set={setCrescimento} w="w-36" step={0.5} />
+          <Campo rotulo="Meses" valor={meses} set={setMeses} w="w-20"
+                 ajuda="Quantos meses projetar a partir do mês atual. 12 dá o ano cheio e mostra a reserva do 13º completa." />
+          <Campo rotulo="Reajuste (% a.a.)" valor={reajuste} set={setReajuste} w="w-28" step={0.5}
+                 ajuda="Aumento anual de salário (dissídio). Aplica uma vez por ano, no mês escolhido ao lado, e vale para todo o quadro. Em zero, os salários ficam parados." />
+          <Campo rotulo="Mês do reajuste" valor={mesReajuste} set={setMesReajuste} w="w-28"
+                 ajuda="Em que mês do ano o dissídio entra: 1 = janeiro, 5 = maio. Só tem efeito se o reajuste acima for maior que zero." />
+          <Campo rotulo="Crescimento HC (% a.m.)" valor={crescimento} set={setCrescimento} w="w-36" step={0.5}
+                 ajuda="Crescimento do quadro por MÊS, composto. 2 significa 2% a mais de gente a cada mês, com o custo médio de hoje — serve pra simular expansão, não substitui um plano de contratação com salários reais." />
           <Button size="sm" className="glass-button border-0" onClick={rodar} disabled={carregando}>
             {carregando ? <Loader2 className="mr-1 h-4 w-4 animate-spin" /> : null} Projetar
           </Button>
@@ -104,13 +110,57 @@ function ProjecaoBloco() {
           <>
             <div className="grid grid-cols-2 gap-3 md:grid-cols-4">
               <Mini rotulo="Custo mensal hoje" valor={fmtBRL(d.base.custo_total)}
-                    ajuda="Quanto o quadro atual custa por mês, já com benefícios, provisões e encargos." />
+                    ajuda={`O que o quadro de hoje custa em um mês: folha de ${fmtBRL(d.base.folha)} `
+                           + `+ provisões de ${fmtBRL(d.base.provisoes)} + INSS patronal de `
+                           + `${fmtBRL(d.base.patronal)}. É o ponto de partida da projeção.`} />
               <Mini rotulo={`Custo em ${d.premissas.meses} meses`} valor={fmtBRL(d.custo_12m)} destaque
-                    ajuda="Soma projetada do custo de pessoal no período, considerando o reajuste e o crescimento informados." />
+                    ajuda={`Soma do custo mês a mês no período. ${d.premissas.reajuste || d.premissas.crescimento
+                      ? "Já embute o reajuste e o crescimento que você informou."
+                      : "Com reajuste e crescimento em zero, é simplesmente o custo mensal repetido "
+                        + d.premissas.meses + " vezes."} Este número JÁ INCLUI a reserva do cartão ao lado.`} />
               <Mini rotulo="A reservar no período" valor={fmtBRL(d.aprovisionamento.total)}
-                    ajuda="Total que deve ficar guardado para pagar 13º, férias, FGTS e recesso quando vencerem." />
+                    ajuda={`NÃO é dinheiro a mais: é a parte do custo acima que não sai do caixa agora, `
+                           + `mas vence depois (13º, férias + 1/3, FGTS, multa e recesso). Representa `
+                           + `${(d.aprovisionamento.total / d.custo_12m * 100).toFixed(1)}% do custo do período. `
+                           + `Guardar esse valor é o que evita o aperto de caixa em dezembro.`} />
               <Mini rotulo="Pessoas hoje" valor={String(d.base.headcount)}
-                    ajuda="Quantidade de colaboradores usada como base da projeção." />
+                    ajuda="Quadro ativo usado como base. A projeção repete essas mesmas pessoas — ela não sabe de contratações ou saídas que ainda não aconteceram." />
+            </div>
+
+            {/* COMO LER — a duvida recorrente e' achar que "a reservar" e' dinheiro
+                a mais. Explicar com os numeros da tela na frente resolve de vez. */}
+            <div className="rounded-lg border border-sky-200 bg-sky-50/60 p-3 text-[0.78rem] leading-relaxed
+                            dark:border-sky-900 dark:bg-sky-950/30">
+              <div className="mb-1.5 font-semibold">Como ler esta projeção</div>
+              <p className="mb-2 text-muted-foreground">
+                O custo de cada mês tem três partes:{" "}
+                <b>folha</b> ({fmtBRL(d.base.folha)}) é o que a pessoa recebe;{" "}
+                <b>provisões</b> ({fmtBRL(d.base.provisoes)}) é o 13º, as férias e o FGTS
+                que estão sendo gerados agora e serão pagos depois;{" "}
+                <b>INSS patronal</b> ({fmtBRL(d.base.patronal)}) é a parte do empregador.
+                Somando, dá o custo mensal de {fmtBRL(d.base.custo_total)}.
+              </p>
+              <p className="mb-2">
+                <b>Os {fmtBRL(d.aprovisionamento.total)} a reservar já estão dentro dos{" "}
+                {fmtBRL(d.custo_12m)}</b> — não some os dois. A diferença é de{" "}
+                <i>quando o dinheiro sai</i>: a folha sai todo mês, a provisão fica guardada
+                até o 13º, as férias ou a rescisão vencerem.
+              </p>
+              <p className="text-muted-foreground">
+                A reserva é {(d.aprovisionamento.total / d.custo_12m * 100).toFixed(1)}% do custo
+                porque só quem é CLT gera 13º, férias e FGTS; estagiário gera recesso; associado
+                e PJ não geram nenhum dos dois. Quanto maior a fatia CLT do quadro, maior essa
+                reserva.
+              </p>
+            </div>
+
+            <div className="text-[0.78rem] text-muted-foreground">
+              No gráfico, a linha <b>Custo mensal</b> é o desembolso de cada mês
+              {d.premissas.reajuste || d.premissas.crescimento
+                ? " — ela sobe conforme o reajuste e o crescimento informados."
+                : " — ela fica plana porque reajuste e crescimento estão em zero."}{" "}
+              A linha <b>Reserva acumulada</b> só cresce: é a soma das provisões desde o
+              início, ou seja, o saldo que deveria estar guardado naquele mês.
             </div>
 
             <ResponsiveContainer width="100%" height={230}>
@@ -362,12 +412,16 @@ function SimulacaoBloco({ ccs, cargos }: { ccs: DpCentroCusto[]; cargos: DpCargo
 
 /* ─────────────────── auxiliares ─────────────────── */
 
-function Campo({ rotulo, valor, set, w, step }: {
-  rotulo: string; valor: number; set: (v: number) => void; w: string; step?: number;
+function Campo({ rotulo, valor, set, w, step, ajuda }: {
+  rotulo: string; valor: number; set: (v: number) => void; w: string;
+  step?: number; ajuda?: string;
 }) {
   return (
     <div>
-      <Label className="text-xs text-muted-foreground">{rotulo}</Label>
+      <Label className="flex items-center gap-1 text-xs text-muted-foreground">
+        {rotulo}
+        {ajuda && <Ajuda titulo={rotulo} texto={ajuda} />}
+      </Label>
       <Input type="number" step={step ?? 1} value={valor}
              onChange={(e) => set(Number(e.target.value))} className={`h-9 ${w} font-mono text-sm`} />
     </div>
