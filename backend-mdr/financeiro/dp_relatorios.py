@@ -5,6 +5,8 @@
 # Excel: openpyxl com cabeçalho timbrado. PDF: reportlab (rateio — o relatório
 # que vai pro fechamento/diretoria).
 import os
+import re
+import unicodedata
 from datetime import date, datetime
 from io import BytesIO
 
@@ -402,6 +404,59 @@ def _tabela(ws, linha0: int, headers: list, rows: list, larguras: list = None, m
     ws.freeze_panes = ws.cell(row=linha0 + 1, column=1)
 
 
+# ────────────────────── NOME DOS DOCUMENTOS ──────────────────────
+# Convenção única: {documento}_{escopo}_{periodo}.{ext}
+#
+#   extrato-mensal_2005-alexia-marinne-maia_2026-07.pdf
+#   extrato-mensal_folha-completa_2026-07.pdf
+#   quadro-pessoal_desligados_2026-08-17.xlsx
+#
+# Três decisões que fazem diferença na pasta do DP:
+#   • PERÍODO NO FIM E EM ISO (2026-07): ordena cronologicamente sozinho, que é
+#     como se procura documento de folha. "07-2026" embaralharia os anos.
+#   • ESCOPO EXPLÍCITO: individual leva matrícula + nome; geral diz o recorte
+#     ("folha-completa", "desligados"). Sem isso, dez downloads viram dez
+#     arquivos de nome igual e o operador renomeia na mão.
+#   • hífen DENTRO do segmento, underscore ENTRE segmentos — dá pra ler o
+#     nome quebrado sem contar posição.
+
+
+def _slug(txt, limite: int = 42) -> str:
+    """Texto livre → pedaço de nome de arquivo (sem acento, sem espaço)."""
+    t = unicodedata.normalize("NFKD", str(txt or ""))
+    t = "".join(c for c in t if not unicodedata.combining(c))
+    t = re.sub(r"[^A-Za-z0-9]+", "-", t).strip("-").lower()
+    return t[:limite].strip("-")
+
+
+# o status vem cru do banco; no nome do arquivo vale a palavra que o operador
+# usa, senão o DP recebe "quadro-pessoal_inativo" e pensa em cadastro inativo
+ROTULO_STATUS = {"ativo": "ativos", "inativo": "desligados", "": "todos"}
+
+
+def _nome_doc(documento: str, *partes, ext: str = "pdf") -> str:
+    """Monta o nome final; partes vazias somem em vez de virar '__'."""
+    segs = [_slug(documento)] + [_slug(x) for x in partes if x and _slug(x)]
+    return "_".join(segs) + f".{ext}"
+
+
+def _rot_pessoa(colab_ou_item) -> str:
+    """'2005-alexia-marinne-maia' — matrícula na frente para desempatar homônimo."""
+    mat = getattr(colab_ou_item, "matricula", "") or ""
+    nome = getattr(colab_ou_item, "nome", "") or ""
+    return f"{mat}-{_slug(nome, 34)}" if mat else _slug(nome, 34)
+
+
+def _rot_comp(comp) -> str:
+    """Competência em ISO curto: 2026-07."""
+    return f"{comp.ano}-{comp.mes:02d}"
+
+
+def _rot_hoje() -> str:
+    """Data do snapshot, para relatórios que retratam o AGORA e não um mês."""
+    return f"{date.today():%Y-%m-%d}"
+
+
 def _resposta_excel(wb, nome: str) -> HttpResponse:
     buf = BytesIO()
     wb.save(buf)
@@ -529,8 +584,10 @@ def _pdf_extrato_mensal(comp, itens, usuario):
     doc.build(el)
     buf.seek(0)
     resp = HttpResponse(buf.read(), content_type="application/pdf")
+    # individual → matrícula e nome de quem é; mês inteiro → o recorte
+    escopo = _rot_pessoa(itens[0]) if len(itens) == 1 else "folha-completa"
     resp["Content-Disposition"] = (
-        f'attachment; filename="extrato_mensal_{comp.ano}_{comp.mes:02d}.pdf"')
+        f'attachment; filename="{_nome_doc("extrato-mensal", escopo, _rot_comp(comp))}"')
     return resp
 
 
@@ -598,7 +655,7 @@ def dp_relatorio_competencia(request, pk):
                   n["patronal"], n["custo"], n["percentual"] / 100,
                   n.get("salario_familia", 0)] for n in dados["nucleos"]],
                 larguras=[26, 17, 14, 16, 16, 18, 17, 11, 18], money_cols={4, 5, 6, 7, 9})
-        return _resposta_excel(wb, f"resumo_cc_{comp.ano}_{comp.mes:02d}.xlsx")
+        return _resposta_excel(wb, _nome_doc("resumo-centro-custo", _rot_comp(comp), ext="xlsx"))
 
     # ── RESCISOES DA COMPETENCIA ───────────────────────────────────────────
     # O relatorio mostrava a folha do mes e calava sobre quem foi desligado —
@@ -646,7 +703,7 @@ def dp_relatorio_competencia(request, pk):
                              ["Mat.", "Nome", "Regime", "Centro de Custo", "Bruto",
                               "INSS", "A pagar", "Custo total", "Situação"],
                              rows + [tot], [14, 56, 22, 38, 22, 20, 24, 26, 34],
-                             _quem(request), f"folha_{comp.ano}_{comp.mes:02d}.pdf",
+                             _quem(request), _nome_doc("folha-analitica", _rot_comp(comp)),
                              aligns_dir={4, 5, 6, 7}, linha_total=True, paisagem=True)
 
     headers = ["Mat.", "Nome", "Regime", "Centro de Custo", "Situação", "Sal. Bruto",
@@ -705,7 +762,7 @@ def dp_relatorio_competencia(request, pk):
                             d.get("descricao", ""), d.get("valor", 0), d.get("memoria", "")])
         _tabela(wsd, 1, ["Mat.", "Nome", "Natureza", "Verba", "Valor (R$)", "Memória de cálculo"],
                 det, larguras=[8, 32, 12, 34, 14, 70], money_cols={5})
-    return _resposta_excel(wb, f"folha_{comp.ano}_{comp.mes:02d}.xlsx")
+    return _resposta_excel(wb, _nome_doc("folha-analitica", _rot_comp(comp), ext="xlsx"))
 
 
 def _pdf_rateio(comp, rows, tot, usuario: str, rotulo: str) -> HttpResponse:
@@ -762,7 +819,7 @@ def _pdf_rateio(comp, rows, tot, usuario: str, rotulo: str) -> HttpResponse:
                            ParagraphStyle("f", fontSize=7, textColor=colors.HexColor("#999999"))))
     doc.build(story)
     resp = HttpResponse(buf.getvalue(), content_type="application/pdf")
-    resp["Content-Disposition"] = f'attachment; filename="rateio_cc_{comp.ano}_{comp.mes:02d}.pdf"'
+    resp["Content-Disposition"] = f'attachment; filename="{_nome_doc("rateio-centro-custo", _rot_comp(comp))}"'
     resp["Access-Control-Expose-Headers"] = "Content-Disposition"
     return resp
 
@@ -847,7 +904,7 @@ def dp_relatorio_catalogos(request):
         rows = [[c.area, c.nome, _brl(c.salario_base), c.dias_mes, c.carga_horaria_mes] for c in cargos]
         return _pdf_generico("Plano de Cargos", f"{len(rows)} cargos",
                              ["Área", "Cargo", "Salário base", "Dias/mês", "Carga/mês"],
-                             rows, [20, 80, 30, 20, 25], usuario, "plano_cargos.pdf",
+                             rows, [20, 80, 30, 20, 25], usuario, _nome_doc("plano-cargos", _rot_hoje()),
                              aligns_dir={2, 3, 4})
 
     wb, ws = _wb_timbrado("Plano de Cargos", f"{len(cargos)} cargos cadastrados", usuario)
@@ -859,7 +916,7 @@ def dp_relatorio_catalogos(request):
     _tabela(ws2, 1, ["Código", "Centro de Custo", "Colaboradores ativos"],
             [[c.codigo, c.nome, c.colaboradores.filter(status="ativo").count()] for c in ccs],
             larguras=[10, 40, 20])
-    return _resposta_excel(wb, "cargos_e_centros_custo.xlsx")
+    return _resposta_excel(wb, _nome_doc("cargos-e-centros-custo", _rot_hoje(), ext="xlsx"))
 
 
 @api_view(["GET"])
@@ -883,7 +940,7 @@ def dp_relatorio_auditoria(request):
                           f"{len(rows)} registro(s) mais recentes", _quem(request))
     _tabela(ws, 5, ["Quando", "Quem", "O que aconteceu", "Detalhes da alteração"],
             rows, larguras=[20, 28, 62, 78])
-    return _resposta_excel(wb, "auditoria_dp.xlsx")
+    return _resposta_excel(wb, _nome_doc("trilha-auditoria", _rot_hoje(), ext="xlsx"))
 
 
 @api_view(["GET"])
@@ -926,7 +983,7 @@ def dp_relatorio_dashboard(request):
     _tabela(ws3, 1, ["Mês", "Admissões", "Desligamentos"],
             [[l["mes"], l["admissoes"], l["desligamentos"]] for l in dados["serie_mov"]],
             larguras=[14, 14, 16])
-    return _resposta_excel(wb, "dashboard_dp.xlsx")
+    return _resposta_excel(wb, _nome_doc("painel-indicadores", _rot_hoje(), ext="xlsx"))
 
 
 REG_LABEL = {"estagiario": "Estagiário (TCE)", "clt": "CLT",
@@ -958,7 +1015,7 @@ def dp_relatorio_simulacao(request):
                  _brl(r[3]) if r[0] != "Headcount" else r[3]] for r in resumo]
         return _pdf_generico(f"Simulação — {nome}", sub,
                              ["Indicador", "Cenário atual", "Cenário simulado", "Variação"],
-                             rows, [55, 40, 40, 40], usuario, "simulacao.pdf",
+                             rows, [55, 40, 40, 40], usuario, _nome_doc("simulacao-cenario", _rot_hoje()),
                              aligns_dir={1, 2, 3}, linha_total=True)
 
     wb, ws = _wb_timbrado(f"Simulação — {nome}", sub, usuario)
@@ -978,7 +1035,7 @@ def dp_relatorio_simulacao(request):
         _tabela(ws3, 1, ["Centro de Custo", "Novas vagas", "Custo mensal"],
                 [[c["centro_custo"], c["headcount"], c["custo_total"]] for c in porcc],
                 larguras=[32, 14, 18], money_cols={3})
-    return _resposta_excel(wb, "simulacao.xlsx")
+    return _resposta_excel(wb, _nome_doc("simulacao-cenario", _rot_hoje(), ext="xlsx"))
 
 
 @api_view(["GET"])
@@ -1000,7 +1057,7 @@ def dp_relatorio_projecao(request):
         return _pdf_generico("Projeção de Gastos com Pessoal", sub,
                              ["Mês", "HC", "Folha", "Provisões", "Patronal", "Custo total",
                               "Provisionado acum."],
-                             rows, [20, 14, 30, 30, 28, 32, 36], usuario, "projecao.pdf",
+                             rows, [20, 14, 30, 30, 28, 32, 36], usuario, _nome_doc("projecao-gastos", _rot_hoje()),
                              aligns_dir={1, 2, 3, 4, 5, 6}, paisagem=True)
 
     wb, ws = _wb_timbrado("Projeção de Gastos com Pessoal", sub, usuario)
@@ -1016,7 +1073,7 @@ def dp_relatorio_projecao(request):
              ["FGTS", ap["fgts"]], ["Multa FGTS (40%)", ap["multa_fgts"]],
              ["Recesso (estagiários)", ap["recesso"]], ["TOTAL", ap["total"]]],
             larguras=[30, 24], money_cols={2})
-    return _resposta_excel(wb, "projecao_gastos.xlsx")
+    return _resposta_excel(wb, _nome_doc("projecao-gastos", _rot_hoje(), ext="xlsx"))
 
 
 def _pacote(c) -> float:
@@ -1066,7 +1123,8 @@ def dp_relatorio_quadro(request):
                              ["Mat.", "Nome", "Regime", "Status", "Centro de Custo", "Cargo",
                               "Sal. bruto", "Saldo livre", "Total"],
                              rows, [15, 60, 24, 16, 46, 46, 26, 26, 27], _quem(request),
-                             "quadro_pessoal.pdf", aligns_dir={6, 7, 8}, paisagem=True)
+                             _nome_doc("quadro-pessoal", ROTULO_STATUS.get(status_f, status_f) or "todos",
+                             _rot_hoje()), aligns_dir={6, 7, 8}, paisagem=True)
 
     headers = ["Mat.", "Nome", "CPF", "Regime", "Status", "Unidade", "Área",
                "Centro de Custo", "Supervisor", "Equipe", "Cargo", "Admissão",
@@ -1085,7 +1143,9 @@ def dp_relatorio_quadro(request):
     _tabela(ws, 5, headers, rows,
             larguras=[8, 32, 13, 13, 9, 13, 7, 24, 16, 18, 24, 11, 11, 12, 11, 9, 9, 12],
             money_cols={14, 15, 16, 17, 18})
-    return _resposta_excel(wb, "quadro_pessoal.xlsx")
+    return _resposta_excel(wb, _nome_doc("quadro-pessoal",
+                                  ROTULO_STATUS.get(status_f, status_f) or "todos",
+                                  _rot_hoje(), ext="xlsx"))
 
 
 def _pdf_termo_rescisao(r, usuario: str) -> HttpResponse:
@@ -1201,7 +1261,7 @@ def _pdf_termo_rescisao(r, usuario: str) -> HttpResponse:
         ParagraphStyle("f", fontSize=7, textColor=colors.HexColor("#999999"))))
     doc.build(story)
     resp = HttpResponse(buf.getvalue(), content_type="application/pdf")
-    resp["Content-Disposition"] = f'attachment; filename="rescisao_{c.matricula}.pdf"'
+    resp["Content-Disposition"] = f'attachment; filename="{_nome_doc("termo-rescisao", _rot_pessoa(c))}"'
     resp["Access-Control-Expose-Headers"] = "Content-Disposition"
     return resp
 
@@ -1425,7 +1485,7 @@ def _pdf_ficha_financeira(colab, itens, rescisao, usuario: str) -> HttpResponse:
     doc.build(story)
 
     resp = HttpResponse(buf.getvalue(), content_type="application/pdf")
-    nome = f"ficha-financeira-{colab.matricula}.pdf"
+    nome = _nome_doc("ficha-financeira", _rot_pessoa(colab), _rot_hoje())
     resp["Content-Disposition"] = f'attachment; filename="{nome}"'
     resp["Access-Control-Expose-Headers"] = "Content-Disposition"
     return resp

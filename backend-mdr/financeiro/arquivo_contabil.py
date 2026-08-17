@@ -537,7 +537,8 @@ def arquivo_contabil_gerar(request):
     proxima = (RelatorioExercicio.objects.filter(exercicio=ano)
                .order_by("-versao").values_list("versao", flat=True).first() or 0) + 1
     pdf = _pdf_exercicio(dados, usuario, proxima)
-    nome = f"relatorio-tecnico-contabil-{ano}-v{proxima}.pdf"
+    # mesma convenção dos demais documentos: {documento}_{escopo}_{periodo}
+    nome = f"relatorio-tecnico-contabil_exercicio-{ano}_v{proxima}.pdf"
 
     with transaction.atomic():
         r = RelatorioExercicio(
