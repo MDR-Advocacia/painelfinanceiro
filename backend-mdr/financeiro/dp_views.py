@@ -14,7 +14,7 @@ from rest_framework.response import Response
 
 from .models import (
     DP_MATRICULA_BASE, DpAuditLog, DpCargo, DpCentroCusto, DpColaborador, DpDependente,
-    DpAfastamento, DpDocumento, DpEvento, DpLideranca, DpTransferenciaContrato,
+    DpAfastamento, DpConsignado, DpDocumento, DpEvento, DpLideranca, DpTransferenciaContrato,
 )
 from .models import REGRAS_AFASTAMENTO
 from .dp_audit import humanizar
@@ -81,6 +81,23 @@ def _dependente_json(d: DpDependente, colab=None) -> dict:
         "elegivel_hoje": d.elegivel_em(hoje.year, hoje.month),
         "cota_ate": (None if d.invalido else f"{mes14:02d}/{ano14}"),
         "comprovacao_pendente": d.comprovacao_pendente_em(hoje),
+    }
+
+
+def _consignado_json(c, hoje):
+    """Contrato + situação NA COMPETÊNCIA ATUAL, que é o que o DP quer saber."""
+    pagas = c.parcelas_pagas_ate(hoje.year, hoje.month)
+    ativo_no_mes = c.parcela_no_mes(hoje.year, hoje.month) > 0
+    return {
+        "id": str(c.id), "contrato": c.contrato, "banco": c.banco,
+        "parcela_valor": c.parcela_valor, "parcelas_total": c.parcelas_total,
+        "primeira_competencia": c.primeira_competencia.isoformat(),
+        "primeira_br": f"{c.primeira_competencia:%m/%Y}",
+        "ativo": c.ativo, "observacao": c.observacao,
+        "parcelas_pagas": pagas,
+        "descontando_neste_mes": ativo_no_mes,
+        "restantes": (max(c.parcelas_total - pagas, 0) if c.parcelas_total else None),
+        "quitado": bool(c.parcelas_total and pagas >= c.parcelas_total),
     }
 
 
@@ -359,6 +376,88 @@ class DpColaboradorViewSet(viewsets.ModelViewSet):
                                 autor=_quem(request))
         audit(request, "desligar", "dp_colaborador", obj.id, antes=antes, depois=_snap(obj))
         return Response(self.get_serializer(obj).data)
+
+    # ─────────────── crédito do trabalhador (consignado) ───────────────
+
+    @action(detail=True, methods=["get", "post"])
+    def consignados(self, request, pk=None):
+        """GET lista os contratos; POST registra um novo.
+
+        O desconto em folha vem DAQUI, por contrato: parcela fixa + prazo fazem
+        a folha descontar sozinha até quitar. Lançamento manual mês a mês fica
+        só para ajuste (quitação antecipada, renegociação).
+        """
+        colab = self.get_object()
+        hoje = date.today()
+        if request.method == "GET":
+            return Response([_consignado_json(c, hoje) for c in colab.consignados.all()])
+
+        try:
+            parcela = round(float(request.data.get("parcela_valor") or 0), 2)
+        except (TypeError, ValueError):
+            parcela = 0.0
+        if parcela <= 0:
+            return Response({"detail": "Informe o valor da parcela."}, status=400)
+        contrato = (request.data.get("contrato") or "").strip()[:60]
+        if not contrato:
+            return Response({"detail": "Informe o número do contrato — é ele que "
+                                       "casa com o extrato da contabilidade."}, status=400)
+        primeira = _data_ou_none(request.data.get("primeira_competencia"))
+        if not primeira:
+            return Response({"detail": "Informe a competência da primeira parcela."}, status=400)
+        try:
+            total = max(int(request.data.get("parcelas_total") or 0), 0)
+        except (TypeError, ValueError):
+            total = 0
+
+        c = DpConsignado.objects.create(
+            colaborador=colab, contrato=contrato,
+            banco=(request.data.get("banco") or "")[:60],
+            parcela_valor=parcela, parcelas_total=total,
+            primeira_competencia=primeira.replace(day=1),
+            observacao=(request.data.get("observacao") or "")[:200])
+        audit(request, "consignado", "dp_consignado", c.id, colaborador=colab,
+              depois={"colaborador": colab.nome, "contrato": contrato,
+                      "parcela": f"R$ {parcela:,.2f}",
+                      "parcelas": total or "sem prazo",
+                      "primeira": f"{primeira:%m/%Y}"})
+        return Response(_consignado_json(c, hoje), status=201)
+
+    @action(detail=True, methods=["patch", "delete"],
+            url_path=r"consignados/(?P<ct_id>[^/.]+)")
+    def consignado(self, request, pk=None, ct_id=None):
+        """PATCH encerra/reativa ou corrige; DELETE remove (só se lançado errado)."""
+        colab = self.get_object()
+        c = colab.consignados.filter(pk=ct_id).first()
+        if not c:
+            return Response({"detail": "Contrato não encontrado."}, status=404)
+
+        if request.method == "DELETE":
+            audit(request, "excluir", "dp_consignado", c.id, colaborador=colab,
+                  antes={"contrato": c.contrato, "parcela": c.parcela_valor},
+                  depois={"colaborador": colab.nome, "situacao": "removido"})
+            c.delete()
+            return Response({"detail": "Contrato removido."})
+
+        antes = {"ativo": c.ativo, "parcela": c.parcela_valor}
+        if "ativo" in request.data:
+            c.ativo = bool(request.data.get("ativo"))
+        if "parcela_valor" in request.data:
+            try:
+                c.parcela_valor = round(float(request.data.get("parcela_valor") or 0), 2)
+            except (TypeError, ValueError):
+                pass
+        if "parcelas_total" in request.data:
+            try:
+                c.parcelas_total = max(int(request.data.get("parcelas_total") or 0), 0)
+            except (TypeError, ValueError):
+                pass
+        if "observacao" in request.data:
+            c.observacao = (request.data.get("observacao") or "")[:200]
+        c.save()
+        audit(request, "editar", "dp_consignado", c.id, colaborador=colab,
+              antes=antes, depois={"ativo": c.ativo, "parcela": c.parcela_valor})
+        return Response(_consignado_json(c, date.today()))
 
     # ─────────────── afastamentos e suspensões ───────────────
 

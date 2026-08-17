@@ -560,6 +560,56 @@ def ids_em_transferencia():
     return saidas, entradas
 
 
+class DpConsignado(models.Model):
+    """Crédito do trabalhador (empréstimo consignado) — POR CONTRATO.
+
+    O desconto vem do CADASTRO, não de lançamento manual mês a mês: contrato
+    tem parcela fixa e prazo, então registrar uma vez faz a folha descontar
+    sozinha até quitar — e parar sozinha, que é onde o manual erra (a ALEXIA
+    tem 3 contratos simultâneos; controlar isso de cabeça todo mês não escala).
+
+    Não é custo do escritório: a empresa retém e repassa ao banco. Entra nos
+    descontos do líquido e volta na conta do custo.
+    """
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    colaborador = models.ForeignKey(
+        DpColaborador, on_delete=models.CASCADE, related_name="consignados")
+    contrato = models.CharField(
+        max_length=60, help_text="Número do contrato (aparece no extrato da contabilidade)")
+    banco = models.CharField(max_length=60, blank=True, default="")
+    parcela_valor = models.FloatField(help_text="Valor fixo descontado por mês")
+    parcelas_total = models.IntegerField(
+        default=0, help_text="Quantidade de parcelas; 0 = sem prazo definido")
+    # competência (ano/mês) da PRIMEIRA parcela — dia é ignorado
+    primeira_competencia = models.DateField()
+    ativo = models.BooleanField(default=True)
+    observacao = models.CharField(max_length=200, blank=True, default="")
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        db_table = "dp_consignados"
+        ordering = ["-ativo", "primeira_competencia"]
+
+    def parcela_no_mes(self, ano: int, mes: int) -> float:
+        """Valor a descontar nesta competência (0 se fora da janela)."""
+        if not self.ativo or not self.parcela_valor:
+            return 0.0
+        ini = self.primeira_competencia
+        decorrido = (ano - ini.year) * 12 + (mes - ini.month)
+        if decorrido < 0:
+            return 0.0
+        if self.parcelas_total and decorrido >= self.parcelas_total:
+            return 0.0
+        return round(self.parcela_valor, 2)
+
+    def parcelas_pagas_ate(self, ano: int, mes: int) -> int:
+        ini = self.primeira_competencia
+        decorrido = (ano - ini.year) * 12 + (mes - ini.month) + 1
+        if decorrido < 0:
+            return 0
+        return min(decorrido, self.parcelas_total) if self.parcelas_total else decorrido
+
+
 class DpAfastamento(models.Model):
     """Afastamento ou suspensão — dias em que a pessoa não trabalha.
 
@@ -846,6 +896,25 @@ class DpLancamento(models.Model):
     # Histórico da planilha fica em 0, que é o conservador — não descontamos
     # DSR retroativo de algo que não sabemos se era injustificado.
     faltas_injustificadas_dias = models.FloatField(default=0)
+
+    # ── DESCONTOS QUE NAO SAO TRIBUTO ─────────────────────────────────────
+    # Existem porque o liquido da folha nao fechava com o extrato da
+    # contabilidade: faltavam justamente estes. NENHUM deles muda o CUSTO do
+    # escritorio — sao dinheiro que a empresa retem e repassa, ou que ja' foi
+    # pago antes. Mexem so' no quanto sai na conta da pessoa.
+    adiantamento_ferias = models.FloatField(
+        default=0,
+        help_text="Liquido do recibo de ferias, ja' pago adiantado. Desconta na "
+                  "folha do mes pra nao pagar duas vezes.")
+    desconto_consignado = models.FloatField(
+        default=0,
+        help_text="Emprestimo consignado retido em folha e repassado ao banco.")
+    outros_descontos = models.FloatField(
+        default=0, help_text="Outros descontos do mes.")
+    outros_descontos_desc = models.CharField(
+        max_length=120, blank=True, default="",
+        help_text="O que e' o 'outros descontos' — sem isto vira valor orfao "
+                  "que ninguem sabe explicar depois.")
     # Média de horas extras, adicionais e comissões do período aquisitivo, que a
     # lei manda somar à base das FÉRIAS. Hoje o escritório não paga variável
     # nesse formato, então fica zero — o campo existe para quando pagar.
@@ -928,6 +997,12 @@ class DpFolhaItem(models.Model):
     # totais no formato do extrato da contabilidade: sem eles nao da' pra
     # conferir linha a linha, porque liquido igual pode vir de composicoes
     # completamente diferentes
+    adiantamento_ferias = models.FloatField(default=0)
+    desconto_consignado = models.FloatField(default=0)
+    outros_descontos = models.FloatField(default=0)
+    # o que cai na CONTA da pessoa no mês: líquido sem VT/VA, que são cartão.
+    # É o número que fecha com o "Líquido" do extrato da contabilidade.
+    liquido_em_conta = models.FloatField(default=0)
     total_proventos = models.FloatField(default=0)
     total_descontos = models.FloatField(default=0)
     base_inss = models.FloatField(default=0)

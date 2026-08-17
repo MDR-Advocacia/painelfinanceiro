@@ -388,6 +388,11 @@ function CompetenciaDetalhe({ comp, editar, onMudou }: {
                     onClick={() => relatoriosApi.folhaPdf(comp.id).catch((e) => toast.error(e.message))}>
               <FileText className="h-3.5 w-3.5" /> PDF folha
             </Button>
+              <Button size="sm" variant="outline" className="gap-1"
+                      onClick={() => relatoriosApi.extrato(comp.id).catch((e) => toast.error(e.message))}
+                      title="EXTRATO MENSAL no modelo da contabilidade — códigos, proventos, descontos e líquido por colaborador">
+                <FileText className="h-3.5 w-3.5" /> Extrato contábil
+              </Button>
             <Button size="sm" variant="outline" className="gap-1"
                     title="Rateio por CC em PDF timbrado (pro fechamento)"
                     onClick={() => relatoriosApi.rateioPdf(comp.id).catch((e) => toast.error(e.message))}>
@@ -438,37 +443,98 @@ function CompetenciaDetalhe({ comp, editar, onMudou }: {
                     linhas, rolar sem saber que coluna se está lendo é o pior
                     jeito de conferir uma folha */}
               <TableHeader className="sticky top-0 z-10 bg-card/95 backdrop-blur [&_th]:border-b">
+                  <TableRow className="hover:bg-transparent">
+                    {/* faixa contábil: PROVENTOS → DESCONTOS → RESULTADO, na
+                        ordem do extrato da contabilidade — primeiro tudo que
+                        entra, depois tudo que sai, depois o saldo */}
+                    <TableHead colSpan={4} className="border-b-0" />
+                    <TableHead colSpan={10}
+                               className="border-b-0 text-center text-[10px] font-bold uppercase tracking-wide text-emerald-700">
+                      Proventos (+)
+                    </TableHead>
+                    <TableHead colSpan={6}
+                               className="border-b-0 text-center text-[10px] font-bold uppercase tracking-wide text-rose-600">
+                      Descontos (−)
+                    </TableHead>
+                    <TableHead colSpan={3}
+                               className="border-b-0 text-center text-[10px] font-bold uppercase tracking-wide">
+                      Resultado
+                    </TableHead>
+                    {editar && aberta && <TableHead className="border-b-0" />}
+                  </TableRow>
                   <TableRow>
                     <TH campo="matricula" numerica className="text-xs">Matrícula</TH>
                     <TH campo="nome" numerica={false} className="text-xs">Nome</TH>
                     <TH campo="centro_custo_nome" numerica={false} className="hidden text-xs lg:table-cell">Centro de custo</TH>
-                    <TH campo="salario_bruto" numerica className="text-right text-xs"><TituloAjuda titulo="Salário bruto" ajuda="Salário cadastrado, antes de qualquer desconto." /></TH>
-                    <TH campo="faltas_dias" numerica className="hidden text-right text-xs sm:table-cell"><TituloAjuda titulo="Faltas" ajuda="Dias e horas de falta lançados no mês — geram desconto proporcional." /></TH>
-                    <TH campo="desc_inss" numerica className="text-right text-xs"><TituloAjuda titulo="INSS" ajuda={"Desconto do colaborador pela tabela progressiva vigente (só CLT). Em mês com férias são TRÊS parcelas somadas — INSS das férias, diferença de férias e INSS do salário —, exatamente como no espelho da contabilidade; passe o mouse sobre o valor para ver a quebra. O recibo de férias mostra só a PRIMEIRA delas, porque é o documento do adiantamento e não do mês fechado."} /></TH>
-                    <TH campo="desc_vt" numerica className="hidden text-right text-xs md:table-cell"><TituloAjuda titulo="Desc. VT" ajuda="Desconto de até 6% do salário, previsto em lei, para quem opta pelo vale (só CLT)." /></TH>
-                    <TH campo="vt_com_faltas" numerica className="hidden text-right text-xs xl:table-cell"><TituloAjuda titulo="Vale-transporte" ajuda="Valor do VT no mês, já proporcional às faltas." /></TH>
-                    <TH campo="va_com_faltas" numerica className="hidden text-right text-xs xl:table-cell"><TituloAjuda titulo="Vale-alimentação" ajuda="Valor do VA no mês, já proporcional às faltas." /></TH>
-                    <TH campo="salario_com_descontos" numerica className="hidden text-right text-xs xl:table-cell"><TituloAjuda titulo="Subtotal do salário" ajuda="Passo INTERMEDIÁRIO, não é o que a pessoa recebe: só o salário do mês menos INSS, desconto de VT e IRRF. Os benefícios, férias, prêmios e salário-família ainda vão somar depois. O valor final está em \u0022Líquido a pagar\u0022, no fim da linha." /></TH>
-                    <TH campo="saldo_livre" numerica className="text-right text-xs"><TituloAjuda titulo="Saldo livre" ajuda="Parcela paga fora do salário base, sem incidência de INSS. Em junho eram 63 pessoas e R$ 80,5 mil — some no total sem aparecer se esta coluna não existir." /></TH>
-                    <TH campo="ferias_valor" numerica className="text-right text-xs"><TituloAjuda titulo="Férias" ajuda="Remuneração dos dias de férias + 1/3 constitucional + abono pecuniário, quando houver." /></TH>
-                    <TH campo="acerto_contabil" numerica className="hidden text-right text-xs xl:table-cell"><TituloAjuda titulo="Acerto" ajuda="Acerto contábil do mês: pode ser positivo ou negativo." /></TH>
+                    <TH campo="faltas_dias" numerica className="hidden text-right text-xs sm:table-cell">
+                      <TituloAjuda titulo="Faltas" ajuda="Dias e horas de falta lançados no mês — reduzem o salário do mês, não são desconto sobre ele." />
+                    </TH>
+
+                    {/* ───── PROVENTOS ───── */}
+                    <TH campo="salario_bruto" numerica className="text-right text-xs">
+                      <TituloAjuda titulo="Salário bruto" ajuda="Salário cadastrado, antes de qualquer desconto." />
+                    </TH>
+                    <TH campo="ferias_valor" numerica className="text-right text-xs">
+                      <TituloAjuda titulo="Férias" ajuda="Remuneração dos dias de férias + 1/3 constitucional + abono pecuniário, quando houver." />
+                    </TH>
+                    <TH campo="vt_com_faltas" numerica className="hidden text-right text-xs xl:table-cell">
+                      <TituloAjuda titulo="Vale-transporte" ajuda="Valor do VT no mês, já proporcional às faltas." />
+                    </TH>
+                    <TH campo="va_com_faltas" numerica className="hidden text-right text-xs xl:table-cell">
+                      <TituloAjuda titulo="Vale-alimentação" ajuda="Valor do VA no mês, já proporcional às faltas." />
+                    </TH>
+                    <TH campo="saldo_livre" numerica className="text-right text-xs">
+                      <TituloAjuda titulo="Saldo livre" ajuda="Parcela paga fora do salário base, sem incidência de INSS." />
+                    </TH>
                     <TH campo="premiacoes" numerica className="hidden text-right text-xs md:table-cell">Prêmios</TH>
-                    <TH campo="salario_familia" numerica className="hidden text-right text-xs lg:table-cell"><TituloAjuda
-                        titulo="Sal. família"
-                        ajuda="Cota por dependente elegível. O escritório adianta e compensa na guia do INSS — por isso entra no que a pessoa recebe, mas NÃO conta como custo do escritório."
-                      /></TH>
-                    <TH campo="desc_irrf" numerica className="hidden text-right text-xs xl:table-cell"><TituloAjuda titulo="IRRF" ajuda="Imposto de renda retido. Fica zero enquanto a tabela não for preenchida em Parâmetros." /></TH>
-                    <TH campo="decimo_terceiro_pago" numerica className="hidden text-right text-xs xl:table-cell"><TituloAjuda titulo="13º pago" ajuda="Parcela do 13º paga neste mês. Entra no que a pessoa recebe mas NÃO soma custo — a despesa já foi provisionada 1/12 por mês." /></TH>
-                    <TH campo="total_proventos" numerica className="bg-muted/40 text-right text-xs">
-                      <TituloAjuda titulo="Total proventos"
-                                   ajuda="Soma de TUDO que a pessoa recebe no mês, antes dos descontos — é o TOTAL DOS PROVENTOS do extrato da contabilidade. O salário entra pelo bruto do mês; se entrasse já descontado, os descontos contariam duas vezes e o líquido não fecharia." />
+                    <TH campo="acerto_contabil" numerica className="hidden text-right text-xs xl:table-cell">
+                      <TituloAjuda titulo="Acerto" ajuda="Acerto contábil do mês: pode ser positivo ou negativo." />
                     </TH>
-                    <TH campo="total_descontos" numerica className="bg-muted/40 text-right text-xs">
-                      <TituloAjuda titulo="Total descontos"
-                                   ajuda="Soma de tudo que sai: INSS, desconto do vale-transporte e IRRF. Faltas e dias de férias NÃO entram aqui — eles reduzem o próprio salário do mês, não são desconto sobre ele." />
+                    <TH campo="salario_familia" numerica className="hidden text-right text-xs lg:table-cell">
+                      <TituloAjuda titulo="Sal. família"
+                                   ajuda="Cota por dependente elegível. O escritório adianta e compensa na guia do INSS — por isso entra no que a pessoa recebe, mas NÃO conta como custo do escritório." />
                     </TH>
-                    <TH campo="total_pagar" numerica className="bg-muted/40 text-right text-xs"><TituloAjuda titulo="Líquido a pagar" ajuda={"O que a pessoa recebe: TOTAL DOS PROVENTOS menos TOTAL DOS DESCONTOS, as duas colunas ao lado. ATENÇÃO: o líquido do extrato da contabilidade pode ser menor, porque lá entram descontos que este sistema ainda não modela — adiantamento de férias já pago no recibo e empréstimo consignado. Passe o mouse no valor para ver a conta da linha."} /></TH>
-                    <TH campo="custo_total" numerica className="hidden text-right text-xs sm:table-cell"><TituloAjuda titulo="Custo total" ajuda="Quanto essa pessoa custa ao escritório no mês, somando pagamento, provisões e encargos." /></TH>
+                    <TH campo="decimo_terceiro_pago" numerica className="hidden text-right text-xs xl:table-cell">
+                      <TituloAjuda titulo="13º pago" ajuda="Parcela do 13º paga neste mês. Entra no que a pessoa recebe mas NÃO soma custo — a despesa já foi provisionada 1/12 por mês." />
+                    </TH>
+                    <TH campo="total_proventos" numerica className="bg-emerald-50/60 text-right text-xs dark:bg-emerald-950/20">
+                      <TituloAjuda titulo="TOTAL PROVENTOS"
+                                   ajuda="Soma de TUDO que a pessoa recebe no mês — o TOTAL DOS PROVENTOS do extrato da contabilidade. O salário entra pelo bruto do mês; já descontado, os descontos contariam duas vezes." />
+                    </TH>
+
+                    {/* ───── DESCONTOS ───── */}
+                    <TH campo="desc_inss" numerica className="text-right text-xs">
+                      <TituloAjuda titulo="INSS" ajuda={"Desconto do colaborador pela tabela progressiva vigente (só CLT). Em mês com férias são TRÊS parcelas somadas — INSS das férias, diferença de férias e INSS do salário —, exatamente como no espelho da contabilidade; passe o mouse sobre o valor para ver a quebra. O recibo de férias mostra só a PRIMEIRA delas, porque é o documento do adiantamento e não do mês fechado."} />
+                    </TH>
+                    <TH campo="desc_vt" numerica className="hidden text-right text-xs md:table-cell">
+                      <TituloAjuda titulo="Desc. VT" ajuda="Desconto de até 6% do salário, previsto em lei, para quem opta pelo vale (só CLT)." />
+                    </TH>
+                    <TH campo="desc_irrf" numerica className="hidden text-right text-xs xl:table-cell">
+                      <TituloAjuda titulo="IRRF" ajuda="Imposto de renda retido. Fica zero enquanto a tabela não for preenchida em Parâmetros." />
+                    </TH>
+                    <TH campo="adiantamento_ferias" numerica className="hidden text-right text-xs xl:table-cell">
+                      <TituloAjuda titulo="Adiant. férias" ajuda="Líquido do recibo de férias, pago ANTES — desconta aqui para não pagar duas vezes. Linha 937 do extrato." />
+                    </TH>
+                    <TH campo="desconto_consignado" numerica className="hidden text-right text-xs lg:table-cell">
+                      <TituloAjuda titulo="Consignado" ajuda="Parcelas dos contratos de crédito do trabalhador cadastrados na ficha (+ ajuste do mês, se houver). Retido e repassado ao banco — não é custo do escritório." />
+                    </TH>
+                    <TH campo="total_descontos" numerica className="bg-rose-50/60 text-right text-xs dark:bg-rose-950/20">
+                      <TituloAjuda titulo="TOTAL DESCONTOS"
+                                   ajuda="Tudo que sai: INSS, desconto do VT, IRRF, adiantamento de férias, consignado e outros. Faltas e dias de férias NÃO entram — reduzem o próprio salário." />
+                    </TH>
+
+                    {/* ───── RESULTADO ───── */}
+                    <TH campo="total_pagar" numerica className="bg-muted/40 text-right text-xs">
+                      <TituloAjuda titulo="Líquido a pagar"
+                                   ajuda="TOTAL PROVENTOS menos TOTAL DESCONTOS. Inclui VT e VA, que a pessoa recebe como benefício (cartão)." />
+                    </TH>
+                    <TH campo="liquido_em_conta" numerica className="bg-muted/40 text-right text-xs">
+                      <TituloAjuda titulo="Líquido em conta"
+                                   ajuda="O que cai na CONTA BANCÁRIA no mês: o líquido sem VT e VA, que vão pelo cartão. É o número que fecha com o campo Líquido do EXTRATO MENSAL da contabilidade." />
+                    </TH>
+                    <TH campo="custo_total" numerica className="bg-muted/40 hidden text-right text-xs sm:table-cell">
+                      <TituloAjuda titulo="Custo total" ajuda="Quanto essa pessoa custa ao escritório no mês, somando pagamento, provisões e encargos. Consignado e adiantamento NÃO reduzem o custo — o dinheiro sai do caixa do mesmo jeito." />
+                    </TH>
                     {editar && aberta && <TableHead className="w-16 text-center text-xs">Ações</TableHead>}
                   </TableRow>
                 </TableHeader>
@@ -503,15 +569,54 @@ function CompetenciaDetalhe({ comp, editar, onMudou }: {
                         </span>
                       </TableCell>
                       <TableCell className="hidden max-w-[150px] truncate text-xs lg:table-cell">{it.centro_custo_nome}</TableCell>
-                      <TableCell className="text-right font-mono text-xs"><Val v={it.salario_bruto} /></TableCell>
                       <TableCell className="hidden text-right font-mono text-xs sm:table-cell">
                         {it.faltas_dias > 0 || it.faltas_horas > 0
                           ? <span className="text-rose-600">{it.faltas_dias}d {it.faltas_horas}h</span> : "—"}
                       </TableCell>
+
+                      {/* ───── PROVENTOS ───── */}
+                      <TableCell className="text-right font-mono text-xs"><Val v={it.salario_bruto} /></TableCell>
                       <TableCell className="text-right font-mono text-xs">
-                        {/* Em mes com ferias o INSS tem TRES parcelas, e mostrar so'
-                            o total fazia o numero parecer errado contra o recibo de
-                            ferias — que traz apenas a primeira delas. */}
+                        {(() => {
+                          const fer = (it.ferias_valor ?? 0) + (it.ferias_terco ?? 0) + (it.ferias_abono ?? 0);
+                          return fer ? (
+                            <span className="text-sky-700"
+                                  title={`Férias ${fmtBRL(it.ferias_valor ?? 0)} + 1/3 ${fmtBRL(it.ferias_terco ?? 0)}`
+                                         + ((it.ferias_abono ?? 0) ? ` + abono ${fmtBRL(it.ferias_abono ?? 0)}` : "")}>
+                              +{fmtBRL(fer)}
+                            </span>
+                          ) : "—";
+                        })()}
+                      </TableCell>
+                      <TableCell className="hidden text-right font-mono text-xs xl:table-cell"><Val v={it.vt_com_faltas} tipo="provento" /></TableCell>
+                      <TableCell className="hidden text-right font-mono text-xs xl:table-cell"><Val v={it.va_com_faltas} tipo="provento" /></TableCell>
+                      <TableCell className="text-right font-mono text-xs">
+                        <Val v={it.saldo_livre} tipo="provento" />
+                      </TableCell>
+                      <TableCell className="hidden text-right font-mono text-xs md:table-cell">
+                        <Val v={it.premiacoes} tipo="provento" />
+                      </TableCell>
+                      <TableCell className="hidden text-right font-mono text-xs xl:table-cell">
+                        <Val v={it.acerto_contabil} tipo="provento"
+                             titulo="Acerto contábil do mês — pode somar ou subtrair" />
+                      </TableCell>
+                      <TableCell className="hidden text-right font-mono text-xs lg:table-cell">
+                        {it.salario_familia ? (
+                          <span className="text-sky-700"
+                                title={`${it.salario_familia_cotas} cota(s) — compensado na GPS, não é custo do escritório`}>
+                            +{fmtBRL(it.salario_familia)}
+                          </span>
+                        ) : "—"}
+                      </TableCell>
+                      <TableCell className="hidden text-right font-mono text-xs xl:table-cell">
+                        <Val v={it.decimo_terceiro_pago} tipo="provento" />
+                      </TableCell>
+                      <TableCell className="bg-emerald-50/60 text-right font-mono text-xs dark:bg-emerald-950/20">
+                        <Val v={it.total_proventos} tipo="provento" />
+                      </TableCell>
+
+                      {/* ───── DESCONTOS ───── */}
+                      <TableCell className="text-right font-mono text-xs">
                         {it.inss_ferias || it.inss_dif_ferias ? (
                           <span
                             className="cursor-help border-b border-dotted border-rose-300"
@@ -533,58 +638,31 @@ function CompetenciaDetalhe({ comp, editar, onMudou }: {
                         )}
                       </TableCell>
                       <TableCell className="hidden text-right font-mono text-xs md:table-cell"><Val v={it.desc_vt} tipo="desconto" /></TableCell>
-                      <TableCell className="hidden text-right font-mono text-xs xl:table-cell"><Val v={it.vt_com_faltas} tipo="provento" /></TableCell>
-                      <TableCell className="hidden text-right font-mono text-xs xl:table-cell"><Val v={it.va_com_faltas} tipo="provento" /></TableCell>
-                      <TableCell className="hidden text-right font-mono text-xs xl:table-cell"><Val v={it.salario_com_descontos} /></TableCell>
-                      <TableCell className="text-right font-mono text-xs">
-                        <Val v={it.saldo_livre} tipo="provento" />
-                      </TableCell>
-                      <TableCell className="text-right font-mono text-xs">
-                        {(() => {
-                          const fer = (it.ferias_valor ?? 0) + (it.ferias_terco ?? 0) + (it.ferias_abono ?? 0);
-                          return fer ? (
-                            <span className="text-sky-700"
-                                  title={`Férias ${fmtBRL(it.ferias_valor ?? 0)} + 1/3 ${fmtBRL(it.ferias_terco ?? 0)}`
-                                         + ((it.ferias_abono ?? 0) ? ` + abono ${fmtBRL(it.ferias_abono ?? 0)}` : "")}>
-                              +{fmtBRL(fer)}
-                            </span>
-                          ) : "—";
-                        })()}
-                      </TableCell>
-                      <TableCell className="hidden text-right font-mono text-xs xl:table-cell">
-                        <Val v={it.acerto_contabil} tipo="provento"
-                             titulo="Acerto contábil do mês — pode somar ou subtrair" />
-                      </TableCell>
-                      <TableCell className="hidden text-right font-mono text-xs md:table-cell">
-                        <Val v={it.premiacoes} tipo="provento" />
-                      </TableCell>
-                      <TableCell className="hidden text-right font-mono text-xs lg:table-cell">
-                        {it.salario_familia ? (
-                          <span className="text-sky-700"
-                                title={`${it.salario_familia_cotas} cota(s) — compensado na GPS, não é custo do escritório`}>
-                            +{fmtBRL(it.salario_familia)}
-                          </span>
-                        ) : "—"}
-                      </TableCell>
                       <TableCell className="hidden text-right font-mono text-xs xl:table-cell">
                         <Val v={it.desc_irrf} tipo="desconto" />
                       </TableCell>
                       <TableCell className="hidden text-right font-mono text-xs xl:table-cell">
-                        <Val v={it.decimo_terceiro_pago} tipo="provento" />
+                        <Val v={it.adiantamento_ferias} tipo="desconto" />
                       </TableCell>
-                      <TableCell className="bg-muted/40 text-right font-mono text-xs">
-                        <Val v={it.total_proventos} tipo="provento" />
+                      <TableCell className="hidden text-right font-mono text-xs lg:table-cell">
+                        <Val v={it.desconto_consignado} tipo="desconto" />
                       </TableCell>
-                      <TableCell className="bg-muted/40 text-right font-mono text-xs">
+                      <TableCell className="bg-rose-50/60 text-right font-mono text-xs dark:bg-rose-950/20">
                         <Val v={it.total_descontos} tipo="desconto" />
                       </TableCell>
+
+                      {/* ───── RESULTADO ───── */}
                       <TableCell className="bg-muted/40 text-right font-mono text-xs"
                                  title={`${fmtBRL(it.total_proventos ?? 0)} de proventos `
                                         + `− ${fmtBRL(it.total_descontos ?? 0)} de descontos `
                                         + `= ${fmtBRL(it.total_pagar)} líquido`}>
                         <Val v={it.total_pagar} tipo="total" />
                       </TableCell>
-                      <TableCell className="hidden text-right font-mono text-xs sm:table-cell"><Val v={it.custo_total} tipo="total" /></TableCell>
+                      <TableCell className="bg-muted/40 text-right font-mono text-xs"
+                                 title="Sem VT e VA, que vão pelo cartão — fecha com o Líquido do extrato da contabilidade">
+                        <Val v={it.liquido_em_conta} tipo="total" />
+                      </TableCell>
+                      <TableCell className="bg-muted/40 hidden text-right font-mono text-xs sm:table-cell"><Val v={it.custo_total} tipo="total" /></TableCell>
                       {editar && aberta && (
                         // stopPropagation: o menu vive dentro da linha clicável e,
                         // sem isso, o clique borbulha e reabre sempre "faltas"
@@ -608,6 +686,13 @@ function CompetenciaDetalhe({ comp, editar, onMudou }: {
                               <DropdownMenuItem onClick={() => setLancando({ ...it, _aba: "faltas" } as DpFolhaItem)}>
                                 <CalendarDays className="mr-2 h-4 w-4" /> Faltas (dias e horas)
                               </DropdownMenuItem>
+                              <DropdownMenuItem onClick={() => setLancando({ ...it, _aba: "descontos" } as DpFolhaItem)}>
+                                <Coins className="mr-2 h-4 w-4 text-rose-500" /> Descontos (adiantamento/consignado)
+                              </DropdownMenuItem>
+                              <DropdownMenuItem onClick={() => relatoriosApi.extrato(comp.id, it.colaborador_id)
+                                  .catch((e) => toast.error(e.message))}>
+                                <FileText className="mr-2 h-4 w-4" /> Extrato contábil (PDF)
+                              </DropdownMenuItem>
                               <DropdownMenuItem onClick={() => setLancando({ ...it, _aba: "extras" } as DpFolhaItem)}>
                                 <Coins className="mr-2 h-4 w-4" /> Premiações e acertos
                               </DropdownMenuItem>
@@ -627,7 +712,7 @@ function CompetenciaDetalhe({ comp, editar, onMudou }: {
                     </TableRow>
                   ))}
                   {!loading && items.length === 0 && (
-                    <TableRow><TableCell colSpan={18} className="py-8 text-center text-sm text-muted-foreground">
+                    <TableRow><TableCell colSpan={23} className="py-8 text-center text-sm text-muted-foreground">
                       Sem itens.
                     </TableCell></TableRow>
                   )}
@@ -640,20 +725,23 @@ function CompetenciaDetalhe({ comp, editar, onMudou }: {
                       <TableCell colSpan={2} className="py-2 text-xs font-semibold">
                         Total da competência
                       </TableCell>
-                      <TableCell className="py-2 text-right text-[11px] text-muted-foreground"
-                                 colSpan={9}>
+                      <TableCell colSpan={11} className="py-2 text-right text-[11px] text-muted-foreground">
                         {total} pessoa(s)
                       </TableCell>
-                      <TableCell className="py-2 text-right font-mono text-xs">
+                      <TableCell className="bg-emerald-50/60 py-2 text-right font-mono text-xs dark:bg-emerald-950/20">
                         <Val v={totais.total_proventos} tipo="provento" />
                       </TableCell>
-                      <TableCell className="py-2 text-right font-mono text-xs">
+                      <TableCell colSpan={5} className="py-2" />
+                      <TableCell className="bg-rose-50/60 py-2 text-right font-mono text-xs dark:bg-rose-950/20">
                         <Val v={totais.total_descontos} tipo="desconto" />
                       </TableCell>
-                      <TableCell className="py-2 text-right font-mono text-xs">
+                      <TableCell className="bg-muted/40 py-2 text-right font-mono text-xs">
                         <Val v={totais.total_pagar} tipo="total" />
                       </TableCell>
-                      <TableCell className="hidden py-2 text-right font-mono text-xs sm:table-cell">
+                      <TableCell className="bg-muted/40 py-2 text-right font-mono text-xs">
+                        <Val v={totais.liquido_em_conta} tipo="total" />
+                      </TableCell>
+                      <TableCell className="bg-muted/40 hidden py-2 text-right font-mono text-xs sm:table-cell">
                         <Val v={totais.custo_total} tipo="total" />
                       </TableCell>
                       {editar && aberta && <TableCell />}
@@ -790,13 +878,18 @@ function LancarDialog({ comp, item, onClose, onLancou }: {
   comp: DpCompetencia; item: DpFolhaItem & { _aba?: string }; onClose: () => void; onLancou: () => void;
 }) {
   // o menu diz qual bloco abrir: "faltas" (padrão) ou "extras"
-  const soFaltas = item._aba !== "extras";
+  const soFaltas = item._aba !== "extras" && item._aba !== "descontos";
   const soExtras = item._aba === "extras";
+  const soDescontos = item._aba === "descontos";
   const [faltasDatas, setFaltasDatas] = useState<FaltaDia[]>(item.faltas_datas ?? []);
   const [faltasHoras, setFaltasHoras] = useState(item.faltas_horas);
   const [premios, setPremios] = useState(item.premiacoes);
   const [acerto, setAcerto] = useState(item.acerto_contabil);
   const [obs, setObs] = useState("");
+  const [adiantFerias, setAdiantFerias] = useState(item.adiantamento_ferias ?? 0);
+  const [consigManual, setConsigManual] = useState(item.desconto_consignado ?? 0);
+  const [outrosDesc, setOutrosDesc] = useState(item.outros_descontos ?? 0);
+  const [outrosDescTxt, setOutrosDescTxt] = useState("");
   const [salvando, setSalvando] = useState(false);
 
   const lancar = async () => {
@@ -810,6 +903,8 @@ function LancarDialog({ comp, item, onClose, onLancou }: {
         faltas_dias: faltasDatas.length,
         faltas_horas: faltasHoras,
         premiacoes: premios, acerto_contabil: acerto, obs,
+        adiantamento_ferias: adiantFerias, desconto_consignado: consigManual,
+        outros_descontos: outrosDesc, outros_descontos_desc: outrosDescTxt,
       });
       toast.success(`Linha recalculada — a pagar: ${fmtBRL(novo.total_pagar)}.`);
       onLancou();
@@ -824,10 +919,12 @@ function LancarDialog({ comp, item, onClose, onLancou }: {
           <DialogTitle className="flex items-center gap-2 text-base">
             {soExtras ? <Coins className="h-4 w-4 text-emerald-600" />
                       : <CalendarDays className="h-4 w-4 text-[hsl(var(--dunatech-blue))]" />}
-            {soExtras ? "Premiações e acertos" : "Faltas do mês"} — {item.nome}
+            {soDescontos ? "Descontos do mês" : soExtras ? "Premiações e acertos" : "Faltas do mês"} — {item.nome}
           </DialogTitle>
           <DialogDescription>
-            {soExtras
+            {soDescontos
+              ? "Descontos que não são tributo: saem do líquido da pessoa mas NÃO mudam o custo do escritório. O consignado por CONTRATO se cadastra na ficha do colaborador e desconta sozinho — aqui é só ajuste do mês."
+              : soExtras
               ? "Valores que entram (prêmios) ou corrigem (acerto contábil) o pagamento deste mês."
               : `As faltas descontam o salário proporcionalmente e reduzem vale-transporte e vale-alimentação na proporção dos ${comp.dias_uteis} dias úteis.`}
           </DialogDescription>
@@ -880,6 +977,46 @@ function LancarDialog({ comp, item, onClose, onLancou }: {
               <Input type="number" step="0.01" value={acerto}
                      onChange={(e) => setAcerto(Number(e.target.value))} className="font-mono" />
             </div>
+          </div>
+        )}
+
+        {soDescontos && (
+          <div className="space-y-3">
+            <div className="grid grid-cols-2 gap-3">
+              <div>
+                <Label className="flex items-center gap-1 text-xs text-muted-foreground">
+                  Adiantamento de férias (R$)
+                  <Ajuda titulo="Adiantamento de férias"
+                         texto="O líquido do RECIBO de férias, que já foi pago antes. Descontar aqui evita pagar duas vezes no mês — é a linha 937 do extrato da contabilidade." />
+                </Label>
+                <Input type="number" step="0.01" min={0} value={adiantFerias}
+                       onChange={(e) => setAdiantFerias(Number(e.target.value))} className="font-mono" />
+              </div>
+              <div>
+                <Label className="flex items-center gap-1 text-xs text-muted-foreground">
+                  Ajuste de consignado (R$)
+                  <Ajuda titulo="Ajuste manual do consignado"
+                         texto="Os CONTRATOS cadastrados na ficha já descontam sozinhos. Este campo é só para diferença pontual do mês: quitação antecipada, parcela renegociada. Soma ao valor dos contratos." />
+                </Label>
+                <Input type="number" step="0.01" value={consigManual}
+                       onChange={(e) => setConsigManual(Number(e.target.value))} className="font-mono" />
+              </div>
+              <div>
+                <Label className="text-xs text-muted-foreground">Outros descontos (R$)</Label>
+                <Input type="number" step="0.01" min={0} value={outrosDesc}
+                       onChange={(e) => setOutrosDesc(Number(e.target.value))} className="font-mono" />
+              </div>
+              <div>
+                <Label className="text-xs text-muted-foreground">Descrição do "outros"</Label>
+                <Input value={outrosDescTxt} maxLength={120}
+                       onChange={(e) => setOutrosDescTxt(e.target.value)}
+                       placeholder="obrigatória se houver valor" />
+              </div>
+            </div>
+            <p className="rounded bg-muted/60 px-2 py-1.5 text-[0.7rem] text-muted-foreground">
+              Nenhum destes muda o custo do escritório — o dinheiro sai do caixa do
+              mesmo jeito, só não vai para a conta da pessoa.
+            </p>
           </div>
         )}
 

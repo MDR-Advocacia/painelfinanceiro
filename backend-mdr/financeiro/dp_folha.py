@@ -699,7 +699,51 @@ def calcular_item(colab: DpColaborador, lanc, comp: DpCompetencia, fiscal: DpTab
     total_proventos = round(sal_faltas + vt_faltas + va_faltas + saldo + acerto
                             + premio + fer_valor + fer_terco + fer_abono_valor
                             + sal_familia + decimo_pago, 2)
-    total_descontos = round(desc_inss + desc_vt + desc_irrf, 2)
+    # ── DESCONTOS QUE NAO SAO TRIBUTO ─────────────────────────────────────
+    # adiantamento de ferias (o recibo pagou antes; descontar evita pagar duas
+    # vezes), consignado e outros. NAO mudam o custo do escritorio — mudam so'
+    # o quanto sai na conta da pessoa.
+    adiant_fer = round(float(getattr(lanc, "adiantamento_ferias", 0.0) or 0.0), 2) if lanc else 0.0
+    # CONSIGNADO VEM DO CADASTRO por contrato: soma a parcela de cada contrato
+    # cuja janela cobre esta competencia. O campo do lancamento vira AJUSTE
+    # manual por cima (quitacao antecipada, parcela renegociada no mes).
+    consig_contratos, consig_detalhe = 0.0, []
+    try:
+        contratos = list(colab.consignados.all())
+    except AttributeError:
+        contratos = []          # simulacao usa colaborador fake, sem cadastro
+    for ct in contratos:
+        v = ct.parcela_no_mes(comp.ano, comp.mes)
+        if v:
+            consig_contratos = round(consig_contratos + v, 2)
+            rot_total = f"/{ct.parcelas_total}" if ct.parcelas_total else ""
+            consig_detalhe.append(
+                f"contrato {ct.contrato}: parcela "
+                f"{ct.parcelas_pagas_ate(comp.ano, comp.mes)}{rot_total} "
+                f"de R$ {v:.2f}")
+    consig_manual = round(float(getattr(lanc, "desconto_consignado", 0.0) or 0.0), 2) if lanc else 0.0
+    consignado = round(consig_contratos + consig_manual, 2)
+    if consig_detalhe:
+        mem["consignado"] = "; ".join(consig_detalhe) + (
+            f"; ajuste manual R$ {consig_manual:.2f}" if consig_manual else "")
+    outros_desc = round(float(getattr(lanc, "outros_descontos", 0.0) or 0.0), 2) if lanc else 0.0
+    desc_nao_tributo = round(adiant_fer + consignado + outros_desc, 2)
+    if desc_nao_tributo:
+        total_pagar = round(total_pagar - desc_nao_tributo, 2)
+        partes = []
+        if adiant_fer:
+            partes.append(f"adiantamento de férias já pago R$ {adiant_fer:.2f}")
+        if consignado:
+            partes.append(f"consignado R$ {consignado:.2f}")
+        if outros_desc:
+            rot = (getattr(lanc, "outros_descontos_desc", "") or "outros") if lanc else "outros"
+            partes.append(f"{rot} R$ {outros_desc:.2f}")
+        mem["descontos_nao_tributo"] = (
+            " + ".join(partes)
+            + f" = R$ {desc_nao_tributo:.2f} a menos no líquido. NÃO alteram o "
+              f"custo do escritório: são retidos e repassados, ou já pagos antes.")
+
+    total_descontos = round(desc_inss + desc_vt + desc_irrf + desc_nao_tributo, 2)
     mem["totais"] = (f"proventos {total_proventos:.2f} − descontos "
                      f"{total_descontos:.2f} = líquido {total_pagar:.2f}")
     if decimo_pago:
@@ -792,6 +836,11 @@ def calcular_item(colab: DpColaborador, lanc, comp: DpCompetencia, fiscal: DpTab
         "decimo_terceiro_pago": decimo_pago, "media_variaveis_ferias": media_var,
         "salario_com_descontos": sal_desc, "total_pagar": total_pagar,
         "total_proventos": total_proventos, "total_descontos": total_descontos,
+        "adiantamento_ferias": adiant_fer, "desconto_consignado": consignado,
+        "outros_descontos": outros_desc,
+        # o extrato da contabilidade nao poe VT/VA no liquido (sao cartao, nao
+        # deposito) — este e' o numero que fecha com o "Liquido" de la'
+        "liquido_em_conta": round(total_pagar - vt_faltas - va_faltas, 2),
         "decimo_mensal": decimo, "ferias_mensal": ferias, "terco_ferias_mensal": terco,
         "fgts_mensal": fgts, "multa_fgts_mensal": multa, "recesso_mensal": recesso,
         "ferias_dias": fer_dias, "ferias_valor": fer_valor, "ferias_terco": fer_terco,
@@ -814,7 +863,11 @@ def calcular_item(colab: DpColaborador, lanc, comp: DpCompetencia, fiscal: DpTab
         # margem por cliente sem que um centavo tivesse saído do caixa.
         # saem do custo: salário-família e maternidade (voltam pela guia) e o
         # 13º pago (já provisionado mês a mês — contar de novo seria duplicar)
-        "custo_total": round(total_pagar - sal_familia - sal_compensavel - decimo_pago
+        # desc_nao_tributo VOLTA aqui: consignado e adiantamento sairam do caixa
+        # do escritorio do mesmo jeito, so' nao foram pra conta da pessoa.
+        # Sem devolver, registrar um consignado faria o custo do mes CAIR.
+        "custo_total": round(total_pagar + desc_nao_tributo
+                             - sal_familia - sal_compensavel - decimo_pago
                              + provisoes + patronal, 2),
         "memoria": mem,
         "ajuste_manual": ajustada,
@@ -1015,6 +1068,9 @@ class DpCompetenciaViewSet(viewsets.ViewSet):
                   "faltas_dias": num, "faltas_horas": num, "premiacoes": num,
                   "acerto_contabil": num, "faltas_injustificadas_dias": num,
                   "media_variaveis_ferias": num, "decimo_terceiro_pago": num,
+                  "adiantamento_ferias": num, "desconto_consignado": num,
+                  "outros_descontos": num,
+                  "outros_descontos_desc": lambda v: str(v or "")[:120],
                   "ferias_dias": inteiro,
                   "ferias_abono_dias": inteiro, "ferias_inicio": data}
         for campo, conv in campos.items():
@@ -1063,7 +1119,8 @@ class DpCompetenciaViewSet(viewsets.ViewSet):
             "matricula", "nome", "centro_custo_nome", "salario_bruto",
             "faltas_dias", "desc_inss", "inss_ferias", "inss_dif_ferias",
             "inss_salario", "base_inss", "base_fgts", "fgts", "desc_vt", "desc_irrf",
-            "total_proventos", "total_descontos",
+            "total_proventos", "total_descontos", "adiantamento_ferias",
+            "desconto_consignado", "outros_descontos", "liquido_em_conta",
             "vt_com_faltas",
             "va_com_faltas", "salario_com_descontos", "saldo_livre",
             "ferias_valor", "acerto_contabil", "premiacoes", "salario_familia",
@@ -1079,7 +1136,8 @@ class DpCompetenciaViewSet(viewsets.ViewSet):
                           patronal=Sum("inss_patronal"), custo=Sum("custo_total"),
                           sal_familia=Sum("salario_familia"),
                           proventos=Sum("total_proventos"),
-                          descontos=Sum("total_descontos"))
+                          descontos=Sum("total_descontos"),
+                          em_conta=Sum("liquido_em_conta"))
         try:
             limit = min(int(request.query_params.get("limit", 50)), 500)
             offset = max(int(request.query_params.get("offset", 0)), 0)
@@ -1113,6 +1171,7 @@ class DpCompetenciaViewSet(viewsets.ViewSet):
             # fecham a competência no formato do extrato da contabilidade
             "total_proventos": round(ag["proventos"] or 0, 2),
             "total_descontos": round(ag["descontos"] or 0, 2),
+            "liquido_em_conta": round(ag["em_conta"] or 0, 2),
         }})
 
     @action(detail=True, methods=["get"])

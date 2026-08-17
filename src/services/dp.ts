@@ -128,6 +128,15 @@ export interface DpDependente {
 }
 
 /** Afastamento ou suspensão — dias em que a pessoa não trabalha. */
+export interface DpConsignado {
+  id: string; contrato: string; banco: string;
+  parcela_valor: number; parcelas_total: number;
+  primeira_competencia: string; primeira_br: string;
+  ativo: boolean; observacao: string;
+  parcelas_pagas: number; descontando_neste_mes: boolean;
+  restantes: number | null; quitado: boolean;
+}
+
 export interface DpAfastamento {
   id: string;
   tipo: string; tipo_label: string;
@@ -182,6 +191,20 @@ export const dpApi = {
       .then((r) => j<DpDocumento[]>(r)),
 
   // ── afastamentos e suspensões ──
+  consignados: (id: string) =>
+    fetch(`${API_URL}/dp/colaboradores/${id}/consignados/`, { headers: authHeaders() })
+      .then((r) => j<DpConsignado[]>(r)),
+  criarConsignado: (id: string, dados: Partial<DpConsignado>) =>
+    fetch(`${API_URL}/dp/colaboradores/${id}/consignados/`,
+          { method: "POST", headers: H(), body: JSON.stringify(dados) })
+      .then((r) => j<DpConsignado>(r)),
+  editarConsignado: (id: string, ctId: string, dados: Partial<DpConsignado>) =>
+    fetch(`${API_URL}/dp/colaboradores/${id}/consignados/${ctId}/`,
+          { method: "PATCH", headers: H(), body: JSON.stringify(dados) })
+      .then((r) => j<DpConsignado>(r)),
+  removerConsignado: (id: string, ctId: string) =>
+    fetch(`${API_URL}/dp/colaboradores/${id}/consignados/${ctId}/`,
+          { method: "DELETE", headers: H() }).then((r) => j<{ detail: string }>(r)),
   afastamentos: (id: string) =>
     fetch(`${API_URL}/dp/colaboradores/${id}/afastamentos/`, { headers: authHeaders() })
       .then((r) => j<DpAfastamento[]>(r)),
@@ -345,6 +368,12 @@ export interface DpFolhaItem {
   afastamento_dias_empresa?: number;
   afastamento_dias_inss?: number;
   desc_afastamento?: number;
+  /** descontos que não são tributo — retidos e repassados, ou já pagos antes */
+  adiantamento_ferias?: number;
+  desconto_consignado?: number;
+  outros_descontos?: number;
+  /** o que cai na CONTA no mês (sem VT/VA, que são cartão) — fecha com o extrato */
+  liquido_em_conta?: number;
   /** soma de tudo que a pessoa recebe, no formato do extrato da contabilidade */
   total_proventos?: number;
   /** soma de tudo que sai (INSS, desconto de VT, IRRF) */
@@ -370,6 +399,7 @@ export interface DpFolhaTotais {
   salario_familia?: number;
   /** somas da competência no formato do extrato da contabilidade */
   total_proventos?: number; total_descontos?: number;
+  liquido_em_conta?: number;
 }
 export interface DpRateioLinha {
   centro_custo_nome: string; nucleo: string; headcount: number;
@@ -501,6 +531,11 @@ export const relatoriosApi = {
   dashboard: (escopo: "fechadas" | "todas" = "fechadas") =>
     fetch(`${API_URL}/dp/dashboard/?escopo=${escopo}`, { headers: authHeaders() })
       .then((r) => j<DpDashboard>(r)),
+  /** EXTRATO MENSAL no modelo da contabilidade — mês inteiro ou um colaborador */
+  extrato: (compId: string, colaboradorId?: string) =>
+    baixar(`${API_URL}/dp/competencias/${compId}/relatorio/?tipo=extrato&formato=pdf`
+           + (colaboradorId ? `&colaborador=${colaboradorId}` : ""),
+           "extrato_mensal.pdf"),
   folhaExcel: (compId: string) =>
     baixar(`${API_URL}/dp/competencias/${compId}/relatorio/?tipo=folha&formato=excel`, "folha.xlsx"),
   rateioExcel: (compId: string) =>
@@ -609,6 +644,10 @@ export const exportApi = {
     if (formato === "pdf") qs.set("formato", "pdf");
     return baixar(`${API_URL}/dp/relatorio-quadro/?${qs}`, `quadro_pessoal.${formato === "pdf" ? "pdf" : "xlsx"}`);
   },
+  extrato: (compId: string, colaboradorId?: string) =>
+    baixar(`${API_URL}/dp/competencias/${compId}/relatorio/?tipo=extrato&formato=pdf`
+           + (colaboradorId ? `&colaborador=${colaboradorId}` : ""),
+           "extrato_mensal.pdf"),
   folha: (compId: string, formato: "excel" | "pdf" = "excel") =>
     baixar(`${API_URL}/dp/competencias/${compId}/relatorio/?tipo=folha&formato=${formato}`, `folha.${formato === "pdf" ? "pdf" : "xlsx"}`),
   rateio: (compId: string, formato: "excel" | "pdf" = "excel") =>

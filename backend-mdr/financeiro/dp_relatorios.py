@@ -420,6 +420,120 @@ def _quem(request):
 
 # ─────────────────────────────── RELATÓRIOS ───────────────────────────────
 
+def _linhas_extrato(it):
+    """Verbas de UM colaborador no formato do EXTRATO MENSAL da contabilidade.
+
+    Os códigos são os MESMOS do sistema da Montenegro (8781 dias normais, 812
+    INSS férias…) de propósito: o DP confere lado a lado, e código igual elimina
+    o "qual linha daqui é qual linha de lá". Devolve (proventos, descontos,
+    informativas) — informativa é o FGTS, que não entra em nenhum dos totais.
+    """
+    P, D = [], []
+
+    def p(cod, desc, ref, valor):
+        if valor:
+            P.append((cod, desc, ref, round(valor, 2)))
+
+    def d(cod, desc, ref, valor):
+        if valor:
+            D.append((cod, desc, ref, round(valor, 2)))
+
+    estag = it.regime == "estagiario"
+    dias_norm = 30 - (it.ferias_dias or 0)
+    if estag:
+        p("8797", "DIAS BOLSA AUXILIO", f"{dias_norm:g}", it.salario_com_faltas)
+    else:
+        p("8781", "DIAS NORMAIS", f"{dias_norm:g}", it.salario_com_faltas)
+    p("8783", "DIAS FERIAS", f"{it.ferias_dias:g}" if it.ferias_dias else "",
+      it.ferias_valor)
+    p("931", "1/3 DAS FERIAS", "33,33", it.ferias_terco)
+    p("8800", "ABONO PECUNIARIO + 1/3", "", it.ferias_abono)
+    p("995", "SALARIO FAMILIA", f"{it.salario_familia_cotas or ''}", it.salario_familia)
+    p("201", "AUXILIO TRANSPORTE (BENEFICIO)", "", it.vt_com_faltas)
+    p("202", "AUXILIO ALIMENTACAO (BENEFICIO)", "", it.va_com_faltas)
+    p("300", "SALDO LIVRE", "", it.saldo_livre)
+    p("310", "PREMIACOES", "", it.premiacoes)
+    p("320", "ACERTO CONTABIL", "", max(it.acerto_contabil or 0, 0))
+    p("330", "13o SALARIO (PARCELA PAGA)", "", it.decimo_terceiro_pago)
+
+    d("998", "I.N.S.S.", "", it.inss_salario if it.inss_ferias else it.desc_inss)
+    d("812", "INSS FERIAS", "", it.inss_ferias)
+    d("821", "INSS DIFERENCA FERIAS", "", it.inss_dif_ferias)
+    d("48", "VALE TRANSPORTE", "6,00", it.desc_vt)
+    d("11", "I.R.R.F.", "", it.desc_irrf)
+    d("937", "ADIANTAMENTO DE FERIAS", "", it.adiantamento_ferias)
+    d("9750", "EMPRESTIMO CONSIGNADO", "", it.desconto_consignado)
+    d("999", "OUTROS DESCONTOS", "", it.outros_descontos)
+    d("321", "ACERTO CONTABIL (DESCONTO)", "", -min(it.acerto_contabil or 0, 0))
+    return P, D
+
+
+def _pdf_extrato_mensal(comp, itens, usuario):
+    """EXTRATO MENSAL em PDF — um bloco por colaborador, fechado com
+    Proventos/Descontos/Líquido e as bases, igual ao relatório da contabilidade.
+    """
+    from reportlab.lib import colors
+    from reportlab.lib.pagesizes import A4
+    from reportlab.lib.styles import ParagraphStyle
+    from reportlab.lib.units import mm
+    from reportlab.platypus import (Paragraph, SimpleDocTemplate, Spacer, Table,
+                                    TableStyle)
+
+    buf = BytesIO()
+    doc = SimpleDocTemplate(buf, pagesize=A4, topMargin=14 * mm,
+                            bottomMargin=12 * mm, leftMargin=12 * mm,
+                            rightMargin=12 * mm)
+    st_t = ParagraphStyle("t", fontName="Helvetica-Bold", fontSize=13)
+    st_s = ParagraphStyle("s", fontName="Helvetica", fontSize=8,
+                          textColor=colors.HexColor("#555555"))
+    st_n = ParagraphStyle("n", fontName="Helvetica-Bold", fontSize=9.5)
+    el = [Paragraph(f"EXTRATO MENSAL — {comp.mes:02d}/{comp.ano}", st_t),
+          Paragraph(f"{len(itens)} colaborador(es) · gerado por {usuario} · "
+                    f"competência {comp.get_status_display().lower()}", st_s),
+          Spacer(1, 4 * mm)]
+
+    cinza = colors.HexColor("#F2F4F7")
+    for it in itens:
+        P, D = _linhas_extrato(it)
+        el.append(Paragraph(
+            f"{it.matricula} · {it.nome} — {REG_LABEL.get(it.regime, it.regime)}"
+            + (f" · {it.centro_custo_nome}" if it.centro_custo_nome else ""), st_n))
+        linhas = [["Cód", "Provento", "Ref", "Valor", "Cód", "Desconto", "Ref", "Valor"]]
+        for i in range(max(len(P), len(D))):
+            pl = P[i] if i < len(P) else ("", "", "", "")
+            dl = D[i] if i < len(D) else ("", "", "", "")
+            linhas.append([pl[0], pl[1], pl[2], _brl(pl[3]) if pl[3] else "",
+                           dl[0], dl[1], dl[2], _brl(dl[3]) if dl[3] else ""])
+        linhas.append(["", "TOTAL PROVENTOS", "", _brl(it.total_proventos),
+                       "", "TOTAL DESCONTOS", "", _brl(it.total_descontos)])
+        linhas.append(["", f"Base INSS: {_brl(it.base_inss)}", "",
+                       f"FGTS: {_brl(it.fgts)}",
+                       "", "LÍQUIDO EM CONTA", "", _brl(it.liquido_em_conta)])
+        t = Table(linhas, colWidths=[11 * mm, 52 * mm, 10 * mm, 20 * mm,
+                                     11 * mm, 52 * mm, 10 * mm, 20 * mm])
+        t.setStyle(TableStyle([
+            ("FONT", (0, 0), (-1, -1), "Helvetica", 7.2),
+            ("FONT", (0, 0), (-1, 0), "Helvetica-Bold", 7.2),
+            ("FONT", (0, -2), (-1, -1), "Helvetica-Bold", 7.2),
+            ("BACKGROUND", (0, 0), (-1, 0), cinza),
+            ("BACKGROUND", (0, -2), (-1, -1), cinza),
+            ("ALIGN", (3, 0), (3, -1), "RIGHT"),
+            ("ALIGN", (7, 0), (7, -1), "RIGHT"),
+            ("GRID", (0, 0), (-1, -1), 0.25, colors.HexColor("#DDDDDD")),
+            ("TOPPADDING", (0, 0), (-1, -1), 1.4),
+            ("BOTTOMPADDING", (0, 0), (-1, -1), 1.4),
+        ]))
+        el.append(t)
+        el.append(Spacer(1, 4 * mm))
+
+    doc.build(el)
+    buf.seek(0)
+    resp = HttpResponse(buf.read(), content_type="application/pdf")
+    resp["Content-Disposition"] = (
+        f'attachment; filename="extrato_mensal_{comp.ano}_{comp.mes:02d}.pdf"')
+    return resp
+
+
 @api_view(["GET"])
 @permission_classes(_PERM)
 def dp_relatorio_competencia(request, pk):
@@ -429,6 +543,17 @@ def dp_relatorio_competencia(request, pk):
     tipo = request.query_params.get("tipo", "folha")
     formato = request.query_params.get("formato", "excel")
     rotulo = f"{comp.mes:02d}/{comp.ano}"
+
+    if tipo == "extrato":
+        itens = comp.itens.select_related("colaborador").order_by("nome")
+        colab_id = request.query_params.get("colaborador")
+        if colab_id:
+            itens = itens.filter(colaborador_id=colab_id)
+        itens = list(itens)
+        if not itens:
+            return Response({"detail": "Nenhum item na competência para esse filtro."},
+                            status=404)
+        return _pdf_extrato_mensal(comp, itens, _quem(request))
 
     if tipo == "rateio":
         # usa o mesmo resumo detalhado da tela (espelho da aba CC da planilha)

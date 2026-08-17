@@ -36,6 +36,7 @@ import DocumentosColaborador from "@/components/dp/DocumentosColaborador";
 import DependentesColaborador from "@/components/dp/DependentesColaborador";
 import TransferenciaContrato from "@/components/dp/TransferenciaContrato";
 import AfastamentosColaborador from "@/components/dp/AfastamentosColaborador";
+import ConsignadosColaborador from "@/components/dp/ConsignadosColaborador";
 import { usePermissions } from "@/hooks/usePermissions";
 import {
   type DpAuditFiltros, type DpCargo, type DpCentroCusto, type DpColaborador,
@@ -665,6 +666,9 @@ function FichaDialog({ colaborador, ccs, cargos, editar, onClose, onMudou }: {
 
         {/* Afastamentos e suspensões */}
         <AfastamentosColaborador colaborador={c} editar={editar} />
+
+        {/* consignado: a folha desconta a partir DAQUI, por contrato */}
+        <ConsignadosColaborador colaborador={c} editar={editar} />
 
         {/* Dependentes (salário-família) */}
         <DependentesColaborador colaborador={c} editar={editar} />
