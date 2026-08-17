@@ -6,7 +6,7 @@
 // quando a comprovação (vacinação até 6 anos, frequência escolar dos 7 aos 14)
 // está vencida — valor pago sem comprovação não é compensável na GPS.
 import { useCallback, useEffect, useState } from "react";
-import { Baby, Loader2, Plus, TriangleAlert, UserMinus } from "lucide-react";
+import { Baby, Loader2, PencilLine, Plus, TriangleAlert, UserMinus, UserPlus } from "lucide-react";
 import { toast } from "sonner";
 
 import { Badge } from "@/components/ui/badge";
@@ -38,7 +38,34 @@ export default function DependentesColaborador({ colaborador, editar }: {
   const [carregando, setCarregando] = useState(true);
   const [salvando, setSalvando] = useState(false);
   const [abrindo, setAbrindo] = useState(false);
+  // id do dependente em edição; null = cadastro novo. O MESMO formulário serve
+  // para os dois — campo que existe só no cadastro vira campo que ninguém
+  // consegue corrigir depois, e data de nascimento errada muda o mês em que a
+  // cota acaba.
+  const [editandoId, setEditandoId] = useState<string | null>(null);
   const [form, setForm] = useState({ ...VAZIO });
+
+  /** Abre o formulário já preenchido com o dependente clicado. */
+  const abrirEdicao = (d: DpDependente) => {
+    setForm({
+      nome: d.nome ?? "",
+      // o backend devolve ISO; o input type=date exige exatamente isso
+      data_nascimento: (d.data_nascimento ?? "").slice(0, 10),
+      tipo: d.tipo ?? "filho",
+      cpf: d.cpf ?? "",
+      invalido: !!d.invalido,
+      vacinacao_valida_ate: (d.vacinacao_valida_ate ?? "").slice(0, 10),
+      frequencia_escolar_valida_ate: (d.frequencia_escolar_valida_ate ?? "").slice(0, 10),
+    });
+    setEditandoId(d.id);
+    setAbrindo(true);
+  };
+
+  const fechar = () => {
+    setAbrindo(false);
+    setEditandoId(null);
+    setForm({ ...VAZIO });
+  };
 
   const carregar = useCallback(() => {
     setCarregando(true);
@@ -60,20 +87,39 @@ export default function DependentesColaborador({ colaborador, editar }: {
       return toast.error("Informe a data de nascimento — é ela que define até quando a cota vale.");
     }
     setSalvando(true);
+    // datas em branco vão como null: string vazia o backend recusa como data
+    // inválida, e o que o operador quis dizer foi "não tem comprovação"
+    const dados = {
+      ...form,
+      vacinacao_valida_ate: form.vacinacao_valida_ate || null,
+      frequencia_escolar_valida_ate: form.frequencia_escolar_valida_ate || null,
+    } as Partial<DpDependente>;
     try {
-      await dpApi.criarDependente(colaborador.id, {
-        ...form,
-        vacinacao_valida_ate: form.vacinacao_valida_ate || null,
-        frequencia_escolar_valida_ate: form.frequencia_escolar_valida_ate || null,
-      } as Partial<DpDependente>);
-      toast.success("Dependente cadastrado");
-      setForm({ ...VAZIO });
-      setAbrindo(false);
+      if (editandoId) {
+        await dpApi.editarDependente(colaborador.id, editandoId, dados);
+        toast.success("Dependente atualizado", {
+          description: "Recalcule a competência aberta para a cota refletir a mudança.",
+        });
+      } else {
+        await dpApi.criarDependente(colaborador.id, dados);
+        toast.success("Dependente cadastrado");
+      }
+      fechar();
       carregar();
     } catch (e) {
-      toast.error(e instanceof Error ? e.message : "Falha ao cadastrar");
+      toast.error(e instanceof Error ? e.message : "Falha ao salvar");
     } finally {
       setSalvando(false);
+    }
+  };
+
+  const reativar = async (d: DpDependente) => {
+    try {
+      await dpApi.editarDependente(colaborador.id, d.id, { ativo: true } as Partial<DpDependente>);
+      toast.success(`${d.nome} reativado`);
+      carregar();
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "Falha ao reativar");
     }
   };
 
@@ -105,7 +151,7 @@ export default function DependentesColaborador({ colaborador, editar }: {
         </div>
         {editar && !abrindo && (
           <Button size="sm" variant="outline" className="h-7 text-xs"
-                  onClick={() => setAbrindo(true)}>
+                  onClick={() => { setEditandoId(null); setForm({ ...VAZIO }); setAbrindo(true); }}>
             <Plus className="mr-1 h-3.5 w-3.5" /> Adicionar
           </Button>
         )}
@@ -169,12 +215,27 @@ export default function DependentesColaborador({ colaborador, editar }: {
                   {d.comprovacao_pendente}
                 </Badge>
               )}
-              {editar && d.ativo && (
-                <Button size="sm" variant="ghost"
-                        className="ml-auto h-6 px-1.5 text-[0.65rem] text-muted-foreground"
-                        onClick={() => remover(d)}>
-                  <UserMinus className="mr-1 h-3 w-3" /> inativar
-                </Button>
+              {editar && (
+                <span className="ml-auto flex items-center gap-1">
+                  <Button size="sm" variant="ghost"
+                          className="h-6 px-1.5 text-[0.65rem] text-muted-foreground"
+                          onClick={() => abrirEdicao(d)}>
+                    <PencilLine className="mr-1 h-3 w-3" /> editar
+                  </Button>
+                  {d.ativo ? (
+                    <Button size="sm" variant="ghost"
+                            className="h-6 px-1.5 text-[0.65rem] text-muted-foreground"
+                            onClick={() => remover(d)}>
+                      <UserMinus className="mr-1 h-3 w-3" /> inativar
+                    </Button>
+                  ) : (
+                    <Button size="sm" variant="ghost"
+                            className="h-6 px-1.5 text-[0.65rem] text-muted-foreground"
+                            onClick={() => reativar(d)}>
+                      <UserPlus className="mr-1 h-3 w-3" /> reativar
+                    </Button>
+                  )}
+                </span>
               )}
             </li>
           ))}
@@ -183,6 +244,9 @@ export default function DependentesColaborador({ colaborador, editar }: {
 
       {editar && abrindo && (
         <div className="mt-3 space-y-2 rounded-lg border bg-card p-3">
+          <div className="mb-1 text-[0.72rem] font-semibold text-muted-foreground">
+            {editandoId ? "Editando dependente" : "Novo dependente"}
+          </div>
           <div className="grid gap-2 sm:grid-cols-2">
             <div>
               <Label className="text-[0.7rem]">Nome</Label>
@@ -230,12 +294,12 @@ export default function DependentesColaborador({ colaborador, editar }: {
             Dependente inválido (sem limite de idade)
           </label>
           <div className="flex justify-end gap-2 pt-1">
-            <Button size="sm" variant="ghost" className="h-7 text-xs"
-                    onClick={() => { setAbrindo(false); setForm({ ...VAZIO }); }}>
+            <Button size="sm" variant="ghost" className="h-7 text-xs" onClick={fechar}>
               Cancelar
             </Button>
             <Button size="sm" className="h-7 text-xs" disabled={salvando} onClick={salvar}>
-              {salvando ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : "Salvar dependente"}
+              {salvando ? <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                        : editandoId ? "Salvar alterações" : "Cadastrar dependente"}
             </Button>
           </div>
         </div>
