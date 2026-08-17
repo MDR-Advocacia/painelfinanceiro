@@ -1154,7 +1154,18 @@ class DpCompetenciaViewSet(viewsets.ViewSet):
                   "salario_familia", "salario_familia_cotas",
                   "desc_irrf", "decimo_terceiro_pago", "faltas_injustificadas_dias",
                   "desc_dsr", "dsr_semanas", "faltas_datas", "afastamento_tipo", "afastamento_dias_empresa",
-                  "afastamento_dias_inss", "desc_afastamento"]
+                  "afastamento_dias_inss", "desc_afastamento",
+                  # tres patches emendaram a ALLOWLIST de ordenacao em vez desta
+                  # lista, porque a ancora de texto era igual nas duas — a linha
+                  # mostrava travessao nos totais e a soma dos descontos parecia
+                  # nao fechar (INSS+VT na tela, consignado+adiantamento so' no
+                  # rodape). Campo novo na folha entra AQUI, senao nao existe
+                  # pra tela.
+                  "inss_ferias", "inss_dif_ferias", "inss_salario",
+                  "base_inss", "base_fgts", "fgts",
+                  "total_proventos", "total_descontos",
+                  "adiantamento_ferias", "desconto_consignado", "outros_descontos",
+                  "liquido_em_conta"]
         items = []
         for it in qs[offset:offset + limit]:
             row = {k: getattr(it, k) for k in campos}
