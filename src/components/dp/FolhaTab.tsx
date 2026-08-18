@@ -16,6 +16,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import {
   Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle,
 } from "@/components/ui/dialog";
+import { Checkbox } from "@/components/ui/checkbox";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import {
@@ -886,6 +887,9 @@ function LancarDialog({ comp, item, onClose, onLancou }: {
   const [premios, setPremios] = useState(item.premiacoes);
   const [acerto, setAcerto] = useState(item.acerto_contabil);
   const [obs, setObs] = useState("");
+  const [he50, setHe50] = useState(item.horas_extras_50 ?? 0);
+  const [he100, setHe100] = useState(item.horas_extras_100 ?? 0);
+  const [adiantAuto, setAdiantAuto] = useState(item.adiantamento_ferias_auto !== false);
   const [adiantFerias, setAdiantFerias] = useState(item.adiantamento_ferias ?? 0);
   const [consigManual, setConsigManual] = useState(item.desconto_consignado ?? 0);
   const [outrosDesc, setOutrosDesc] = useState(item.outros_descontos ?? 0);
@@ -903,6 +907,8 @@ function LancarDialog({ comp, item, onClose, onLancou }: {
         faltas_dias: faltasDatas.length,
         faltas_horas: faltasHoras,
         premiacoes: premios, acerto_contabil: acerto, obs,
+        horas_extras_50: he50, horas_extras_100: he100,
+        adiantamento_ferias_auto: adiantAuto,
         adiantamento_ferias: adiantFerias, desconto_consignado: consigManual,
         outros_descontos: outrosDesc, outros_descontos_desc: outrosDescTxt,
       });
@@ -963,6 +969,36 @@ function LancarDialog({ comp, item, onClose, onLancou }: {
           <div className="grid grid-cols-2 gap-3">
             <div>
               <Label className="flex items-center gap-1 text-xs text-muted-foreground">
+                Horas extras 50% (dia útil)
+                <Ajuda titulo="Hora extra de 50%"
+                       texto="Adicional mínimo da CLT para hora extra em dia útil. A hora normal sai do salário dividido pela carga do cargo (220h no padrão), não por 30 dias." />
+              </Label>
+              <Input type="number" step="0.5" min={0} value={he50}
+                     onChange={(e) => setHe50(Number(e.target.value))} className="font-mono" />
+            </div>
+            <div>
+              <Label className="flex items-center gap-1 text-xs text-muted-foreground">
+                Horas extras 100% (folga/feriado)
+                <Ajuda titulo="Hora extra de 100%"
+                       texto="Domingo e feriado sem folga compensatória pagam o dobro. Junto com as de 50%, integram a base do INSS e do FGTS e geram reflexo no DSR." />
+              </Label>
+              <Input type="number" step="0.5" min={0} value={he100}
+                     onChange={(e) => setHe100(Number(e.target.value))} className="font-mono" />
+            </div>
+            {(he50 > 0 || he100 > 0) && (() => {
+              const vh = item.salario_bruto / 220;
+              const v = he50 * vh * 1.5 + he100 * vh * 2;
+              const dsr = comp.dias_uteis
+                ? (v * Math.max(comp.dias_mes - comp.dias_uteis, 0)) / comp.dias_uteis : 0;
+              return (
+                <p className="col-span-2 rounded bg-muted/60 px-2 py-1.5 text-[0.7rem] text-muted-foreground">
+                  Hora normal {fmtBRL(vh)} · extras {fmtBRL(v)} + reflexo no DSR{" "}
+                  {fmtBRL(dsr)} = <b>{fmtBRL(v + dsr)}</b>. Entram na base do INSS e do FGTS.
+                </p>
+              );
+            })()}
+            <div>
+              <Label className="flex items-center gap-1 text-xs text-muted-foreground">
                 Premiações / extras (R$)
                 <Ajuda titulo="Premiações e extras" texto="Valores adicionais pagos no mês (bônus, produtividade). Somam ao líquido." />
               </Label>
@@ -989,8 +1025,24 @@ function LancarDialog({ comp, item, onClose, onLancou }: {
                   <Ajuda titulo="Adiantamento de férias"
                          texto="O líquido do RECIBO de férias, que já foi pago antes. Descontar aqui evita pagar duas vezes no mês — é a linha 937 do extrato da contabilidade." />
                 </Label>
-                <Input type="number" step="0.01" min={0} value={adiantFerias}
-                       onChange={(e) => setAdiantFerias(Number(e.target.value))} className="font-mono" />
+                <Input type="number" step="0.01" min={0}
+                       value={adiantAuto ? (item.adiantamento_ferias ?? 0) : adiantFerias}
+                       disabled={adiantAuto}
+                       onChange={(e) => setAdiantFerias(Number(e.target.value))}
+                       className="font-mono disabled:opacity-70" />
+                <label className="mt-1 flex items-start gap-1.5 text-[0.68rem] text-muted-foreground">
+                  <Checkbox checked={adiantAuto} className="mt-0.5"
+                            onCheckedChange={(v) => {
+                              setAdiantAuto(!!v);
+                              if (!v) setAdiantFerias(item.adiantamento_ferias ?? 0);
+                            }} />
+                  <span>
+                    calcular automaticamente
+                    <span className="block">
+                      líquido do recibo: férias + 1/3 + abono − INSS − IRRF
+                    </span>
+                  </span>
+                </label>
               </div>
               <div>
                 <Label className="flex items-center gap-1 text-xs text-muted-foreground">

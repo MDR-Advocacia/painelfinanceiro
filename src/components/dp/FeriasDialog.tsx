@@ -67,7 +67,14 @@ export default function FeriasDialog({ comp, item, onClose, onLancou }: {
     };
   }, [clt, estagiario, item.salario_bruto, dias, abono]);
 
-  const maxAbono = Math.min(10, Math.floor(dias / 3));
+  // O abono e' 1/3 do DIREITO ADQUIRIDO, e o direito e' gozo + venda — nao o
+  // gozo sozinho. Resolvendo abono <= (gozo + abono)/3 sai abono <= gozo/2:
+  // quem goza 20 vende 10 (direito 30), quem goza 16 vende 8 (direito 24, o
+  // exemplo do proprio DP). Dividir por 3 o gozo dava 6 em cima de 20 e
+  // travava a venda legitima; e' o mesmo erro que o backend ja' tinha e que o
+  // recibo do PEDRO corrigiu la'. Teto absoluto de 10 porque o direito para
+  // em 30 dias.
+  const maxAbono = Math.min(10, Math.floor(dias / 2));
 
   const salvar = async () => {
     if (dias > 0 && !inicio) { toast.error("Escolha a data de início das férias."); return; }
@@ -152,13 +159,13 @@ export default function FeriasDialog({ comp, item, onClose, onLancou }: {
             <Label className="flex items-center gap-1 text-xs text-muted-foreground">
               Abono pecuniário — dias vendidos
               <Ajuda titulo="Abono pecuniário"
-                     texto="O colaborador pode vender até 1/3 do período de férias (no máximo 10 dias). O valor é indenizatório: entra no pagamento acrescido de 1/3 e não sofre INSS." />
+                     texto="O colaborador pode vender até 1/3 do DIREITO ADQUIRIDO — e o direito é o que ele goza mais o que vende. Quem goza 20 dias tem direito de 30 e pode vender 10; quem goza 16 tem direito de 24 e vende 8. Teto absoluto de 10 dias. O valor é indenizatório: entra no pagamento acrescido de 1/3 e não sofre INSS." />
             </Label>
             <div className="flex items-center gap-2">
               <Input type="number" min={0} max={maxAbono} value={abono} className="h-9 w-24 font-mono"
                      onChange={(e) => setAbono(Math.max(0, Math.min(maxAbono, Number(e.target.value))))} />
               <span className="text-xs text-muted-foreground">
-                máximo {maxAbono} dia(s) — 1/3 do período
+                máximo {maxAbono} dia(s) — 1/3 do direito de {dias + maxAbono} dias
               </span>
             </div>
           </div>

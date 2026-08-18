@@ -355,6 +355,38 @@ def calcular_item(colab: DpColaborador, lanc, comp: DpCompetencia, fiscal: DpTab
                               f"sem desconto de salário nem de DSR")
     sal_faltas = round(bruto - desc_faltas, 2)
 
+    # ── HORAS EXTRAS ──────────────────────────────────────────────────────
+    # 50% no dia util e 100% em domingo/feriado. O valor da hora sai da CARGA
+    # DO CARGO (220h no padrao), nao de 30 dias — hora e' hora.
+    #
+    # Elas INTEGRAM a remuneracao: entram na base do INSS e do FGTS, e geram
+    # REFLEXO NO DSR (Lei 605/49) — quem faz hora extra tem o descanso semanal
+    # remunerado proporcionalmente maior. O reflexo e' o total das extras
+    # dividido pelos dias uteis e multiplicado pelos dias de repouso do mes.
+    he50_h = float(getattr(lanc, "horas_extras_50", 0.0) or 0.0) if lanc else 0.0
+    he100_h = float(getattr(lanc, "horas_extras_100", 0.0) or 0.0) if lanc else 0.0
+    he50 = round(valor_hora * 1.5 * he50_h, 2) if he50_h else 0.0
+    he100 = round(valor_hora * 2.0 * he100_h, 2) if he100_h else 0.0
+    valor_he = round(he50 + he100, 2)
+    dsr_he = 0.0
+    if valor_he and comp.dias_uteis:
+        dias_repouso = max(comp.dias_mes - comp.dias_uteis, 0)
+        dsr_he = round(valor_he * dias_repouso / comp.dias_uteis, 2)
+    total_he = round(valor_he + dsr_he, 2)
+    if valor_he:
+        partes_he = []
+        if he50_h:
+            partes_he.append(f"{he50_h:g}h a 50% × R$ {valor_hora * 1.5:.2f} = R$ {he50:.2f}")
+        if he100_h:
+            partes_he.append(f"{he100_h:g}h a 100% × R$ {valor_hora * 2:.2f} = R$ {he100:.2f}")
+        mem["horas_extras"] = (
+            " + ".join(partes_he)
+            + f" (hora normal = salário ÷ {horas_ref}h = R$ {valor_hora:.2f})"
+            + (f"; reflexo no DSR: {valor_he:.2f} ÷ {comp.dias_uteis} dias úteis × "
+               f"{max(comp.dias_mes - comp.dias_uteis, 0)} dias de repouso = R$ {dsr_he:.2f}"
+               if dsr_he else "")
+            + f" → total R$ {total_he:.2f}. Integram a base do INSS e do FGTS.")
+
     # ── AFASTAMENTOS E SUSPENSÕES DO MÊS (só CLT) ──────────────────────────
     # Regras confirmadas com o DP em 12/08/2026 e tabeladas em
     # REGRAS_AFASTAMENTO: quem custeia cada faixa de dias, se o FGTS é devido e
@@ -558,7 +590,7 @@ def calcular_item(colab: DpColaborador, lanc, comp: DpCompetencia, fiscal: DpTab
     # (benefício previdenciário, não remuneração).
     inss_ferias = inss_salario = inss_dif_ferias = 0.0
     if clt:
-        base_inss = round(sal_faltas + fer_valor + fer_terco, 2)
+        base_inss = round(sal_faltas + fer_valor + fer_terco + total_he, 2)
         desc_inss, mem_inss = calcular_inss(base_inss, fiscal.inss_faixas)
         mem["inss"] = mem_inss
         if fer_valor:
@@ -626,6 +658,7 @@ def calcular_item(colab: DpColaborador, lanc, comp: DpCompetencia, fiscal: DpTab
     # Férias se apuram SEPARADAS no imposto (o oposto do INSS, onde a base é
     # única) — por isso duas contas aqui e uma só lá em cima.
     desc_irrf = 0.0
+    irrf_ferias = 0.0        # usado pra derivar o liquido do recibo de ferias
     if clt:
         n_dep_irrf = sum(1 for d in colab.dependentes.all() if d.ativo
                          and getattr(d, "conta_irrf", True))
@@ -640,6 +673,7 @@ def calcular_item(colab: DpColaborador, lanc, comp: DpCompetencia, fiscal: DpTab
         if fer_valor:
             irrf_fer, mem_fer = calcular_irrf(round(fer_valor + fer_terco, 2), 0,
                                               fiscal, tabela="ferias")
+            irrf_ferias = irrf_fer
             desc_irrf = round(desc_irrf + irrf_fer, 2)
             if irrf_fer:
                 mem["irrf_ferias"] = mem_fer
@@ -682,7 +716,7 @@ def calcular_item(colab: DpColaborador, lanc, comp: DpCompetencia, fiscal: DpTab
     # prêmios + férias + salário-família
     total_pagar = round(sal_desc + vt_faltas + va_faltas + saldo + acerto + premio
                         + fer_valor + fer_terco + fer_abono_valor + sal_familia
-                        + decimo_pago, 2)
+                        + decimo_pago + total_he, 2)
 
     # ── TOTAL DOS PROVENTOS / TOTAL DOS DESCONTOS ─────────────────────────
     # O extrato da contabilidade fecha toda linha com esses dois totais, e sem
@@ -698,12 +732,29 @@ def calcular_item(colab: DpColaborador, lanc, comp: DpCompetencia, fiscal: DpTab
     # não trabalhado) e os descontos ficam todos do outro lado.
     total_proventos = round(sal_faltas + vt_faltas + va_faltas + saldo + acerto
                             + premio + fer_valor + fer_terco + fer_abono_valor
-                            + sal_familia + decimo_pago, 2)
+                            + sal_familia + decimo_pago + total_he, 2)
     # ── DESCONTOS QUE NAO SAO TRIBUTO ─────────────────────────────────────
     # adiantamento de ferias (o recibo pagou antes; descontar evita pagar duas
     # vezes), consignado e outros. NAO mudam o custo do escritorio — mudam so'
     # o quanto sai na conta da pessoa.
-    adiant_fer = round(float(getattr(lanc, "adiantamento_ferias", 0.0) or 0.0), 2) if lanc else 0.0
+    # ADIANTAMENTO DE FERIAS: por padrao e' DERIVADO, nao digitado. O recibo
+    # paga ferias + 1/3 + abono menos o INSS e o IRRF que incidem sobre eles;
+    # esse liquido e' exatamente o que a folha do mes tem que descontar pra nao
+    # pagar duas vezes. Conferido contra o recibo da CINTHIA (690 + 230 - 69 =
+    # 851, o mesmo valor que o operador vinha digitando na mao).
+    auto_adiant = bool(getattr(lanc, "adiantamento_ferias_auto", True)) if lanc else True
+    manual_adiant = round(float(getattr(lanc, "adiantamento_ferias", 0.0) or 0.0), 2) if lanc else 0.0
+    if auto_adiant and (fer_valor or fer_abono_valor):
+        adiant_fer = round(max(
+            fer_valor + fer_terco + fer_abono_valor - inss_ferias - irrf_ferias, 0.0), 2)
+        mem["adiantamento_ferias"] = (
+            f"líquido do recibo: férias {fer_valor:.2f} + 1/3 {fer_terco:.2f}"
+            + (f" + abono {fer_abono_valor:.2f}" if fer_abono_valor else "")
+            + (f" − INSS {inss_ferias:.2f}" if inss_ferias else "")
+            + (f" − IRRF {irrf_ferias:.2f}" if irrf_ferias else "")
+            + f" = {adiant_fer:.2f} (calculado; desmarque o automático para digitar)")
+    else:
+        adiant_fer = manual_adiant
     # CONSIGNADO VEM DO CADASTRO por contrato: soma a parcela de cada contrato
     # cuja janela cobre esta competencia. O campo do lancamento vira AJUSTE
     # manual por cima (quitacao antecipada, parcela renegociada no mes).
@@ -836,7 +887,11 @@ def calcular_item(colab: DpColaborador, lanc, comp: DpCompetencia, fiscal: DpTab
         "decimo_terceiro_pago": decimo_pago, "media_variaveis_ferias": media_var,
         "salario_com_descontos": sal_desc, "total_pagar": total_pagar,
         "total_proventos": total_proventos, "total_descontos": total_descontos,
-        "adiantamento_ferias": adiant_fer, "desconto_consignado": consignado,
+        "horas_extras_50": he50_h, "horas_extras_100": he100_h,
+        "valor_horas_extras": valor_he, "dsr_horas_extras": dsr_he,
+        "adiantamento_ferias": adiant_fer,
+        "adiantamento_ferias_auto": auto_adiant,
+        "desconto_consignado": consignado,
         "outros_descontos": outros_desc,
         # o extrato da contabilidade nao poe VT/VA no liquido (sao cartao, nao
         # deposito) — este e' o numero que fecha com o "Liquido" de la'
@@ -1068,7 +1123,9 @@ class DpCompetenciaViewSet(viewsets.ViewSet):
                   "faltas_dias": num, "faltas_horas": num, "premiacoes": num,
                   "acerto_contabil": num, "faltas_injustificadas_dias": num,
                   "media_variaveis_ferias": num, "decimo_terceiro_pago": num,
+                  "horas_extras_50": num, "horas_extras_100": num,
                   "adiantamento_ferias": num, "desconto_consignado": num,
+                  "adiantamento_ferias_auto": lambda v: bool(v),
                   "outros_descontos": num,
                   "outros_descontos_desc": lambda v: str(v or "")[:120],
                   "ferias_dias": inteiro,
@@ -1165,7 +1222,9 @@ class DpCompetenciaViewSet(viewsets.ViewSet):
                   "base_inss", "base_fgts", "fgts",
                   "total_proventos", "total_descontos",
                   "adiantamento_ferias", "desconto_consignado", "outros_descontos",
-                  "liquido_em_conta"]
+                  "liquido_em_conta", "adiantamento_ferias_auto",
+                  "horas_extras_50", "horas_extras_100", "valor_horas_extras",
+                  "dsr_horas_extras"]
         items = []
         for it in qs[offset:offset + limit]:
             row = {k: getattr(it, k) for k in campos}

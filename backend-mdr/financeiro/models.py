@@ -897,6 +897,15 @@ class DpLancamento(models.Model):
     # DSR retroativo de algo que não sabemos se era injustificado.
     faltas_injustificadas_dias = models.FloatField(default=0)
 
+    # ── HORAS EXTRAS ──────────────────────────────────────────────────────
+    # Dois adicionais porque a lei trata diferente: 50% no dia util (CLT art.
+    # 7o XVI, minimo) e 100% em domingo e feriado. Guardamos HORAS, nao valor:
+    # o valor depende do salario do mes, e salario muda.
+    horas_extras_50 = models.FloatField(
+        default=0, help_text="Horas extras em dia util (adicional de 50%).")
+    horas_extras_100 = models.FloatField(
+        default=0, help_text="Horas extras em domingo/feriado (adicional de 100%).")
+
     # ── DESCONTOS QUE NAO SAO TRIBUTO ─────────────────────────────────────
     # Existem porque o liquido da folha nao fechava com o extrato da
     # contabilidade: faltavam justamente estes. NENHUM deles muda o CUSTO do
@@ -906,6 +915,14 @@ class DpLancamento(models.Model):
         default=0,
         help_text="Liquido do recibo de ferias, ja' pago adiantado. Desconta na "
                   "folha do mes pra nao pagar duas vezes.")
+    # o valor e' DERIVAVEL: liquido do recibo = ferias + 1/3 + abono - INSS das
+    # ferias - IRRF das ferias. Digitar a mao e' so' fonte de erro, entao o
+    # padrao e' calcular. A flag existe pros casos em que o recibo trouxe algo
+    # a mais (a ALEXIA teve consignado descontado no proprio recibo).
+    adiantamento_ferias_auto = models.BooleanField(
+        default=True,
+        help_text="Calcula o adiantamento como o liquido do recibo de ferias. "
+                  "Desmarque para digitar um valor diferente.")
     desconto_consignado = models.FloatField(
         default=0,
         help_text="Emprestimo consignado retido em folha e repassado ao banco.")
@@ -997,7 +1014,15 @@ class DpFolhaItem(models.Model):
     # totais no formato do extrato da contabilidade: sem eles nao da' pra
     # conferir linha a linha, porque liquido igual pode vir de composicoes
     # completamente diferentes
+    horas_extras_50 = models.FloatField(default=0)
+    horas_extras_100 = models.FloatField(default=0)
+    valor_horas_extras = models.FloatField(default=0)
+    dsr_horas_extras = models.FloatField(default=0)
     adiantamento_ferias = models.FloatField(default=0)
+    # a tela precisa saber em que MODO o valor foi apurado pra marcar o
+    # checkbox certo — sem isso ela reabriria sempre em "automatico" e
+    # sobrescreveria o valor que o operador digitou a mao
+    adiantamento_ferias_auto = models.BooleanField(default=True)
     desconto_consignado = models.FloatField(default=0)
     outros_descontos = models.FloatField(default=0)
     # o que cai na CONTA da pessoa no mês: líquido sem VT/VA, que são cartão.

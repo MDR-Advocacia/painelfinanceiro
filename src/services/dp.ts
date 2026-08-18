@@ -368,6 +368,17 @@ export interface DpFolhaItem {
   afastamento_dias_empresa?: number;
   afastamento_dias_inss?: number;
   desc_afastamento?: number;
+  /** as 3 parcelas do INSS + as bases, como no espelho da contabilidade */
+  inss_ferias?: number; inss_dif_ferias?: number; inss_salario?: number;
+  base_inss?: number; base_fgts?: number; fgts?: number;
+  /** horas extras: 50% em dia útil, 100% em domingo/feriado */
+  horas_extras_50?: number;
+  horas_extras_100?: number;
+  /** valor das extras e o reflexo delas no DSR (Lei 605/49) */
+  valor_horas_extras?: number;
+  dsr_horas_extras?: number;
+  /** o adiantamento é DERIVADO do recibo; false = valor digitado à mão */
+  adiantamento_ferias_auto?: boolean;
   /** descontos que não são tributo — retidos e repassados, ou já pagos antes */
   adiantamento_ferias?: number;
   desconto_consignado?: number;
@@ -461,7 +472,15 @@ export const folhaApi = {
                                faltas_datas?: { data: string; justificada?: boolean;
                                                 motivo?: string }[];
                                premiacoes?: number; acerto_contabil?: number; obs?: string;
-                               ferias_inicio?: string; ferias_dias?: number; ferias_abono_dias?: number }) =>
+                               ferias_inicio?: string; ferias_dias?: number; ferias_abono_dias?: number;
+                               // horas extras (proventos) e descontos que não são tributo:
+                               // o tipo ficou defasado quando os campos entraram, e o
+                               // vite build não checa tipo — só o tsc pega
+                               horas_extras_50?: number; horas_extras_100?: number;
+                               adiantamento_ferias?: number;
+                               adiantamento_ferias_auto?: boolean;
+                               desconto_consignado?: number; outros_descontos?: number;
+                               outros_descontos_desc?: string }) =>
     fetch(`${API_URL}/dp/competencias/${id}/lancar/`, { method: "POST", headers: H(), body: JSON.stringify(dados) })
       .then((r) => j<DpFolhaItem>(r)),
   enviarRevisao: (id: string) =>
