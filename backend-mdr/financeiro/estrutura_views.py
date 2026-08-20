@@ -245,6 +245,11 @@ def estrutura(request):
             # custo da equipe RATEADO pela participação dela nesta linha
             "custo_total": round(base["custo_total"] * fator, 2) if base else None,
             "a_pagar": round(base["a_pagar"] * fator, 2) if base else None,
+            # pessoas da MESMA folha de onde sai o custo acima, nao os ativos de
+            # hoje: as duas metades do chip tem que falar da mesma competencia,
+            # senao mostra "38 pessoas" ao lado de um custo de 35 e ninguem
+            # consegue conferir. Divergencia entre as duas e' justamente o que o
+            # painel de Cobertura aponta.
             "pessoas": base["pessoas"] if base else None,
         }
 
@@ -372,6 +377,9 @@ def alocacao_percentual(request, pk):
     audit(request, "editar", "ef_alocacao", a.id,
           antes={"equipe": a.equipe.nome, "destino": destino, "percentual": antes},
           depois={"equipe": a.equipe.nome, "destino": destino, "percentual": a.percentual})
+    # a matriz mudou: o dashboard tem que refletir agora, nao no
+    # proximo recalculo de folha
+    reespelhar_competencias_vivas()
     return Response({"id": str(a.id), "percentual": a.percentual})
 
 
@@ -426,6 +434,9 @@ def alocar_equipe(request):
             destino = str(centro)
     audit(request, "criar", "ef_alocacao", "",
           depois={"equipe": equipe.nome, "destino": destino})
+    # a matriz mudou: o dashboard tem que refletir agora, nao no
+    # proximo recalculo de folha
+    reespelhar_competencias_vivas()
     return Response({"ok": True}, status=status.HTTP_201_CREATED)
 
 
@@ -449,6 +460,9 @@ def remover_alocacao(request, pk):
                     r.save(update_fields=["percentual", "updated_at"])
     audit(request, "excluir", "ef_alocacao", pk,
           antes={"equipe": a.equipe.nome, "destino": destino})
+    # a matriz mudou: o dashboard tem que refletir agora, nao no
+    # proximo recalculo de folha
+    reespelhar_competencias_vivas()
     return Response(status=204)
 
 
@@ -1091,6 +1105,100 @@ def linha_faturamento(request, pk):
           antes={"linha": l.nome, "periodo": periodo, "faturamento": atual},
           depois={"linha": l.nome, "periodo": periodo, "faturamento": novo})
     return Response({"periodo": periodo, "faturamento": novo})
+
+
+@api_view(["GET"])
+@permission_classes(_PERM)
+def estrutura_cobertura(request):
+    """Auditoria de COBERTURA do rateio, para a tela de Estrutura.
+
+    Responde tres perguntas que so' se descobria abrindo o banco:
+      1. tem gente ativa fora de equipe?
+      2. tem equipe com gente e sem alocacao?
+      3. tem linha ou centro de infra sem setor no painel legado?
+
+    Qualquer uma das tres faz a pessoa SUMIR do custo por linha, e a margem do
+    cliente sai errada pra menos sem nenhum aviso. Por isso vira painel, e nao
+    consulta de bastidor.
+    """
+    from .models import DpColaborador
+    ativos = DpColaborador.objects.filter(status="ativo").select_related("equipe_ref")
+    soma = {}
+    for a in Alocacao.objects.all():
+        soma[a.equipe_id] = soma.get(a.equipe_id, 0) + (a.percentual or 0)
+
+    hc = {}
+    for c in ativos.exclude(equipe_ref=None):
+        hc[c.equipe_ref_id] = hc.get(c.equipe_ref_id, 0) + 1
+
+    sem_equipe = [{"id": str(c.id), "matricula": c.matricula, "nome": c.nome,
+                   "regime": c.regime}
+                  for c in ativos.filter(equipe_ref=None).order_by("nome")]
+
+    equipes, sem_alocacao = [], []
+    for e in Equipe.objects.all().order_by("nome"):
+        n = hc.get(e.id, 0)
+        pct = soma.get(e.id, 0)
+        destinos = []
+        for a in Alocacao.objects.filter(equipe=e).select_related("linha__centro", "centro"):
+            destinos.append({
+                "alvo": (f"{a.linha.centro.nome} · {a.linha.nome}" if a.linha_id
+                         else f"{a.centro.nome}"),
+                "infra": not a.linha_id,
+                "fatia": round((a.percentual or 0) / pct * 100, 1) if pct else 0,
+            })
+        item = {"id": str(e.id), "nome": e.nome, "pessoas": n,
+                "alocada": bool(pct), "destinos": destinos}
+        equipes.append(item)
+        if n and not pct:
+            sem_alocacao.append(item)
+
+    linhas_orfas = [{"id": str(l.id), "nome": l.nome, "centro": l.centro.nome}
+                    for l in LinhaFaturamento.objects.filter(setor_legado=None)
+                    .select_related("centro")]
+    infra_orfa = [{"id": str(c.id), "nome": c.nome}
+                  for c in CentroFaturamento.objects.filter(tipo="infraestrutura",
+                                                            setor_legado=None)]
+
+    chegam = sum(n for eid, n in hc.items() if soma.get(eid))
+    total = ativos.count()
+    return Response({
+        "ativos": total,
+        "distribuidos": chegam,
+        "fora_do_rateio": total - chegam,
+        "sem_equipe": sem_equipe,
+        "equipes_sem_alocacao": sem_alocacao,
+        "linhas_sem_setor": linhas_orfas,
+        "infra_sem_setor": infra_orfa,
+        "equipes": equipes,
+        "ok": not (sem_equipe or sem_alocacao or linhas_orfas or infra_orfa
+                   or total != chegam),
+    })
+
+
+def reespelhar_competencias_vivas() -> int:
+    """Reespelha as competencias que ainda podem mudar (nao fechadas).
+
+    Existe porque mexer na ESTRUTURA — mover equipe de linha, alterar
+    percentual, criar ou remover alocacao — nao muda a folha, muda so' a
+    DISTRIBUICAO dela. Sem isto, o operador alterava a matriz de alocacao e o
+    dashboard continuava mostrando o rateio velho ate' alguem lembrar de
+    recalcular a folha, que e' uma acao sem relacao nenhuma com o que ele fez.
+
+    Competencia FECHADA fica de fora de proposito: foto congelada nao se mexe.
+    E' barato — agrega ~170 linhas ja' calculadas, sem recalcular folha.
+    """
+    from .models import DpCompetencia
+    n = 0
+    for comp in DpCompetencia.objects.exclude(status="fechada"):
+        try:
+            espelhar_custo_pessoal(comp)
+            n += 1
+        except Exception:
+            # espelho e' conveniencia: se falhar, a alteracao do operador
+            # continua salva e a folha continua correta
+            pass
+    return n
 
 
 def espelhar_custo_pessoal(comp) -> dict:

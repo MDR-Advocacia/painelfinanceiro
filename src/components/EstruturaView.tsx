@@ -14,6 +14,7 @@ import {
 import { toast } from "sonner";
 
 import { Badge } from "@/components/ui/badge";
+import CoberturaRateio from "@/components/CoberturaRateio";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import {
@@ -134,6 +135,10 @@ export function EstruturaView() {
           </>}
         </>}
       />
+
+      {/* a auditoria do rateio fica no TOPO: se alguem sumiu do caminho, os KPIs
+          abaixo ja' estao errados e o operador precisa saber antes de le-los */}
+      <CoberturaRateio />
 
       <div className="grid grid-cols-2 gap-4 md:grid-cols-4">
         <Kpi icone={Coins} rotulo="Receita líquida" valor={formatCurrency(resumo.receita)}

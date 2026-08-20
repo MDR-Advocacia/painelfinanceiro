@@ -24,7 +24,7 @@ from .estrutura_views import (
     centro_sede_rateio, equipe_crud, equipe_detalhe, equipes as ef_equipes,
     estrutura, linha_crud, linha_igualar, linha_sede, remover_alocacao,
     centro_faturamento, faturamento_documento, linha_documentos,
-    linha_faturamento, sede_detalhe, sedes_lista,
+    linha_faturamento, sede_detalhe, sedes_lista, estrutura_cobertura,
 )
 from .arquivo_contabil import (
     arquivo_contabil_download, arquivo_contabil_exercicios, arquivo_contabil_gerar,
@@ -49,6 +49,7 @@ router.register(r'dp/rescisoes', DpRescisaoViewSet, basename='dp-rescisoes')
 
 urlpatterns = [
     # Estrutura de Faturamento (proposta de reestruturação)
+    path('estrutura/cobertura/', estrutura_cobertura),  # auditoria do rateio
     path('estrutura/', estrutura),
     path('estrutura/equipes/', ef_equipes),
     path('estrutura/alocacoes/', alocar_equipe),

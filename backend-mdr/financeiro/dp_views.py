@@ -337,7 +337,17 @@ class DpColaboradorViewSet(viewsets.ModelViewSet):
         inst = serializer.instance
         antes = _snap(inst)
         cc_antes, sal_antes = inst.centro_custo_id, inst.salario_bruto
+        eq_antes, st_antes = inst.equipe_ref_id, inst.status
         obj = serializer.save()
+        # equipe ou status mudou => a DISTRIBUICAO do custo muda junto. Sem
+        # isto, mover alguem de equipe nao aparecia no dashboard ate' alguem
+        # recalcular a folha por um motivo sem relacao nenhuma com isso.
+        if obj.equipe_ref_id != eq_antes or obj.status != st_antes:
+            try:
+                from .estrutura_views import reespelhar_competencias_vivas
+                reespelhar_competencias_vivas()
+            except Exception:
+                pass          # espelho e' conveniencia; a edicao ja' esta' salva
         depois = _snap(obj)
         if antes != depois:
             audit(self.request, "editar", "dp_colaborador", obj.id, antes=antes, depois=depois)
