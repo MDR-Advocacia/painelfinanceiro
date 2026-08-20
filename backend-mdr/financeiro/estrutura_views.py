@@ -1180,6 +1180,36 @@ def espelhar_custo_pessoal(comp) -> dict:
         if h:
             hc_setor[c.setor_legado_id] = round(hc_setor.get(c.setor_legado_id, 0.0) + h, 2)
 
+    # ── RATEIO DO PESSOAL DE APOIO ────────────────────────────────────────
+    # Administrativo e TI servem TODAS as linhas; deixar o custo deles parado
+    # num setor proprio faz cada linha parecer mais rentavel do que e' — em
+    # 06/2026 sao R$ 94.709 (23 pessoas, 13,3% do quadro) fora da conta de
+    # margem de qualquer cliente.
+    #
+    # CRITERIO: POR CABECA, e nao por receita. O trabalho de RH, DP e TI escala
+    # com numero de pessoas, nao com faturamento — e o dado prova: Banese Reu
+    # tem 9,5 pessoas e receita ainda nao cadastrada, entao ratear por receita
+    # jogaria ZERO de apoio numa linha que consome apoio de verdade. Por cabeca
+    # ela recebe R$ 5.998, que e' o custo que ela realmente da'.
+    apoio_custo = sum(direto_centro.get(c.id, 0.0)
+                      for c in CentroFaturamento.objects.filter(tipo="infraestrutura"))
+    apoio_hc = sum(hc_centro.get(c.id, 0.0)
+                   for c in CentroFaturamento.objects.filter(tipo="infraestrutura"))
+    # setores que RECEBEM o rateio: os que tem gente em linha de faturamento
+    base_hc = {sid: h for sid, h in hc_setor.items() if h > 0}
+    setores_infra = set(CentroFaturamento.objects.filter(tipo="infraestrutura")
+                        .exclude(setor_legado=None)
+                        .values_list("setor_legado_id", flat=True))
+    base_hc = {sid: h for sid, h in base_hc.items() if sid not in setores_infra}
+    tot_hc_base = sum(base_hc.values())
+
+    apoio_setor, apoio_hc_setor = {}, {}
+    if tot_hc_base and (apoio_custo or apoio_hc):
+        for sid, h in base_hc.items():
+            fatia = h / tot_hc_base
+            apoio_setor[sid] = round(apoio_custo * fatia, 2)
+            apoio_hc_setor[sid] = round(apoio_hc * fatia, 2)
+
     gravados = 0
     # entrada NOVA nasce com a estrutura completa que o painel legado espera:
     # gravar só custoPessoalReal criava período sem `pessoal`/`faturamento` e o
@@ -1194,15 +1224,30 @@ def espelhar_custo_pessoal(comp) -> dict:
         p.setdefault("pessoal", {})
         p.setdefault("faturamento", dict(FATURAMENTO_VAZIO))
         p.setdefault("despesasEventuais", [])
-        p["custoPessoalReal"] = por_setor.get(setor.id, 0.0)
-        p["headcountReal"] = hc_setor.get(setor.id, 0.0)
+        direto = por_setor.get(setor.id, 0.0)
+        hc_direto = hc_setor.get(setor.id, 0.0)
+        p["custoPessoalReal"] = direto
+        p["headcountReal"] = hc_direto
+        p["custoApoioRateado"] = apoio_setor.get(setor.id, 0.0)
+        p["headcountApoioRateado"] = apoio_hc_setor.get(setor.id, 0.0)
+        # numero PRONTO pra tela: o setor de apoio zera (o custo dele saiu no
+        # rateio) e cada linha carrega o proprio + a fatia. A soma no dashboard
+        # continua sendo a folha inteira, so' que distribuida onde ela e' gerada.
+        if setor.id in setores_infra:
+            p["custoPessoalComApoio"] = 0.0
+            p["headcountComApoio"] = 0.0
+        else:
+            p["custoPessoalComApoio"] = round(direto + apoio_setor.get(setor.id, 0.0), 2)
+            p["headcountComApoio"] = round(hc_direto + apoio_hc_setor.get(setor.id, 0.0), 2)
         periodos[periodo] = p
         setor.periodos = periodos
         setor.save(update_fields=["periodos", "updated_at"])
         gravados += 1
     return {"periodo": periodo, "setores": gravados,
             "total": round(sum(por_setor.values()), 2),
-            "headcount": round(sum(hc_setor.values()), 2)}
+            "headcount": round(sum(hc_setor.values()), 2),
+            "apoio_rateado": round(apoio_custo, 2),
+            "apoio_headcount": round(apoio_hc, 2)}
 
 
 def _espelhar_no_setor_legado(linha, periodo):

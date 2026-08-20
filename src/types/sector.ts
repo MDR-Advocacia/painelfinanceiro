@@ -44,6 +44,12 @@ export interface PeriodoData {
    * Quando presente, substitui a soma das quantidades digitadas por cargo.
    */
   headcountReal?: number;
+  /** fatia do pessoal de APOIO (Administrativo e TI) rateada nesta linha */
+  custoApoioRateado?: number;
+  headcountApoioRateado?: number;
+  /** direto + apoio — é o número que o dashboard consome */
+  custoPessoalComApoio?: number;
+  headcountComApoio?: number;
   pessoal: Pessoal;
   faturamento: Faturamento;
   despesasEventuais?: CustoItem[];

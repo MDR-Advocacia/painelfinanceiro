@@ -108,16 +108,23 @@ export function calcResumo(data: PeriodoData, vpdValor: number = 2472.85): Resum
   // ESTIMATIVA por cargo (quantidade × salário × multiplicador de encargos) e
   // ficava 25% abaixo da folha de verdade — em 06/2026 dava R$ 358.455 contra
   // R$ 478.122 reais, e o operador via dois números pra mesma coisa.
+  // Preferencia: (1) custo COM o apoio rateado, (2) custo direto, (3) estimativa.
+  // O apoio (Administrativo e TI) serve todas as linhas; sem ratear, cada
+  // cliente parece mais rentavel do que e' — sao 13,3% do quadro fora da conta.
+  const comApoio = (data as any).custoPessoalComApoio as number | undefined;
   const real = (data as any).custoPessoalReal as number | undefined;
-  const totalCustoPessoal = real && real > 0 ? real : estimativaPessoal;
+  const totalCustoPessoal = comApoio !== undefined && comApoio > 0
+    ? comApoio
+    : real && real > 0 ? real : estimativaPessoal;
   // mesmo raciocinio do custo: o quadro DIGITADO por cargo e' desenho, o
   // cadastro do DP e' o fato. Em 05/2026 o digitado dizia 178 contra 173 ativos.
   // Aqui doi duas vezes, porque o VPD e' rateado POR CABECA — cada pessoa
   // fantasma vira despesa indireta fantasma na margem do cliente.
+  const hcApoio = (data as any).headcountComApoio as number | undefined;
   const hcReal = (data as any).headcountReal as number | undefined;
-  const headcount = hcReal && hcReal > 0
-    ? hcReal
-    : getTotalProfissionais(pessoalSeguro as any);
+  const headcount = hcApoio !== undefined && hcApoio > 0
+    ? hcApoio
+    : hcReal && hcReal > 0 ? hcReal : getTotalProfissionais(pessoalSeguro as any);
 
   const totalDespesasEventuais = (data.despesasEventuais || []).reduce((sum, item) => sum + item.valor, 0);
 
