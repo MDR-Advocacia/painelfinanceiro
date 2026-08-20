@@ -55,11 +55,12 @@ export function Dashboard() {
   const lucroLiquidoConsolidado = resumos.reduce((a, r) => a + r.resumo.lucroLiquidoReal, 0);
   const margemLiquidaPercent = totalFaturamento > 0 ? (lucroLiquidoConsolidado / totalFaturamento) * 100 : 0;
   
-  // Obs: Ajustado para contar os profissionais apenas dos setores filtrados
-  const totalProfissionais = setoresFiltrados.reduce((a, s) => {
-    const data = s.periodos[periodoAtivo];
-    return a + (data ? getTotalProfissionais(data.pessoal as any) : 0);
-  }, 0);
+  // Vem do RESUMO, nao do bloco `pessoal` do setor. Contar direto do `pessoal`
+  // lia a quantidade DIGITADA por cargo no painel antigo, que ninguem atualiza:
+  // mostrava 171 em junho contra 173 ativos no DP, e ignorava tanto o espelho
+  // do cadastro quanto o rateio do apoio. O resumo ja' resolve essa precedencia.
+  const totalProfissionais = Math.round(
+    resumos.reduce((a, r) => a + r.resumo.headcount, 0));
 
   // 4. Novos Cálculos (Lucro Bruto, VPD, Variáveis)
   const totalVariaveis = resumos.reduce((a, r) => a + r.resumo.totalVariaveis, 0);
