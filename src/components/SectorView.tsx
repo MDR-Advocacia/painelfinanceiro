@@ -1,5 +1,5 @@
 import { useApp } from "@/contexts/AppContext";
-import { PersonnelForm } from "@/components/PersonnelForm";
+import { CustoPessoalDoSetor } from "@/components/CustoPessoalDoSetor";
 import { BillingForm } from "@/components/BillingForm";
 import { SectorSummary } from "@/components/SectorSummary";
 import { PeriodSelector } from "@/components/PeriodSelector";
@@ -111,8 +111,11 @@ export function SectorView() {
 
       <div className="grid lg:grid-cols-2 gap-6">
         <div>
-          <SectionTitle eyebrow="Entrada" titulo="Custos de pessoal" />
-          <PersonnelForm />
+          {/* NAO e' mais entrada: o custo vem da folha do DP. O formulario de
+              quantidade por cargo saiu porque virou letra morta — aceitava
+              numero e o calculo ignorava. */}
+          <SectionTitle eyebrow="Calculado" titulo="Custo de pessoal" />
+          <CustoPessoalDoSetor data={activePeriodoData} />
         </div>
         <div>
           <SectionTitle eyebrow="Entrada" titulo="Faturamento e impostos" />

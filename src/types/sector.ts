@@ -95,6 +95,10 @@ export interface VpdConfig {
 export interface ResumoSetor {
   custosPorCargo: Record<string, number>;
   totalCustoPessoal: number;
+  /** parte do custo que e' pessoal PROPRIO da linha */
+  custoPessoalDireto: number;
+  /** fatia do backoffice (Administrativo e TI) rateada nesta linha */
+  custoBackoffice: number;
   totalDespesasEventuais: number;
   premiacaoTotal: number;
   diversosTotal: number;

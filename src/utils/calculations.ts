@@ -121,6 +121,10 @@ export function calcResumo(data: PeriodoData, vpdValor: number = 2472.85): Resum
   const totalCustoPessoal = comApoio !== undefined
     ? comApoio
     : real !== undefined && real > 0 ? real : estimativaPessoal;
+  // quebra do custo, pra tela poder mostrar o backoffice em coluna propria em
+  // vez de deixa-lo escondido dentro de "custos de pessoal"
+  const custoBackoffice = ((data as any).custoApoioRateado as number | undefined) ?? 0;
+  const custoPessoalDireto = Math.max(totalCustoPessoal - custoBackoffice, 0);
   // mesmo raciocinio do custo: o quadro DIGITADO por cargo e' desenho, o
   // cadastro do DP e' o fato. Em 05/2026 o digitado dizia 178 contra 173 ativos.
   // Aqui doi duas vezes, porque o VPD e' rateado POR CABECA — cada pessoa
@@ -166,6 +170,8 @@ export function calcResumo(data: PeriodoData, vpdValor: number = 2472.85): Resum
   return {
     custosPorCargo,
     totalCustoPessoal,
+    custoPessoalDireto,
+    custoBackoffice,
     premiacaoTotal,
     diversosTotal,
     totalVariaveis,
@@ -197,6 +203,8 @@ export function aggregateResumos(resumos: ResumoSetor[]): ResumoSetor {
 
   const custosPorCargo: Record<string, number> = {};
   let totalCustoPessoal = 0;
+  let custoPessoalDireto = 0;
+  let custoBackoffice = 0;
   let totalDespesasEventuais = 0;
   let faturamentoBruto = 0;
   let premiacaoTotal = 0;
@@ -213,6 +221,8 @@ export function aggregateResumos(resumos: ResumoSetor[]): ResumoSetor {
       custosPorCargo[k] = (custosPorCargo[k] ?? 0) + v;
     }
     totalCustoPessoal += r.totalCustoPessoal;
+    custoPessoalDireto += r.custoPessoalDireto ?? 0;
+    custoBackoffice += r.custoBackoffice ?? 0;
     totalDespesasEventuais += r.totalDespesasEventuais;
     faturamentoBruto += r.faturamentoBruto;
     premiacaoTotal += r.premiacaoTotal;
@@ -247,7 +257,8 @@ export function aggregateResumos(resumos: ResumoSetor[]): ResumoSetor {
   };
 
   return {
-    custosPorCargo, totalCustoPessoal, totalDespesasEventuais, faturamentoBruto, premiacaoTotal, diversosTotal, totalVariaveis, impostos, 
+    custosPorCargo, totalCustoPessoal, custoPessoalDireto, custoBackoffice,
+    totalDespesasEventuais, faturamentoBruto, premiacaoTotal, diversosTotal, totalVariaveis, impostos, 
     // denominador é a base tributada (líquida), coerente com calcImpostos
     cargaTributaria: impostos.baseCalculo > 0
       ? (totalImpostos / impostos.baseCalculo) * 100 : 0,
@@ -258,7 +269,7 @@ export function aggregateResumos(resumos: ResumoSetor[]): ResumoSetor {
 
 function emptyResumo(): ResumoSetor {
   return {
-    custosPorCargo: {}, totalCustoPessoal: 0, totalDespesasEventuais: 0, faturamentoBruto: 0, premiacaoTotal: 0,
+    custosPorCargo: {}, totalCustoPessoal: 0, custoPessoalDireto: 0, custoBackoffice: 0, totalDespesasEventuais: 0, faturamentoBruto: 0, premiacaoTotal: 0,
     diversosTotal: 0, totalVariaveis:0,
     impostos: { baseCalculo: 0, lucroPresumido: 0, irpj: 0, irpjAdicional: 0, csll: 0, pis: 0, cofins: 0, iss: 0, total: 0 },
     cargaTributaria: 0, faturamentoLiquido: 0, margemBruta: 0, margemBrutaPercent: 0, status: 'critico',

@@ -14,7 +14,7 @@ import {
   BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip as RTooltip,
   ResponsiveContainer, PieChart, Pie, Cell, Legend,
 } from "recharts";
-import { DollarSign, TrendingUp, Users, AlertTriangle, Building2, Award } from "lucide-react";
+import { DollarSign, TrendingUp, Users, AlertTriangle, Building2, Award, HelpCircle } from "lucide-react";
 import { Kpi, PageHeader, SectionTitle, SegButtons, Vazio } from "@/components/Pagina";
 import { TabelaRolavel } from "@/components/TabelaRolavel";
 
@@ -210,6 +210,31 @@ export function Dashboard() {
                       <TableHead className="text-xs">Tipo</TableHead>
                       <TableHead className="text-xs text-right">Faturamento</TableHead>
                       <TableHead className="text-xs text-right">Impostos</TableHead>
+                      <TableHead className="text-xs text-right">
+                        <span className="inline-flex items-center gap-1">
+                          Pessoal direto
+                          <span title={"Folha das pessoas que trabalham NESTA linha: salário, "
+                                        + "benefícios, provisões e encargos. Não inclui o backoffice, "
+                                        + "que aparece na coluna ao lado."} className="cursor-help">
+                            <HelpCircle className="h-3 w-3 text-muted-foreground" />
+                          </span>
+                        </span>
+                      </TableHead>
+                      <TableHead className="text-xs text-right">
+                        <span className="inline-flex items-center gap-1">
+                          Backoffice
+                          <span title={"RATEIO PROPORCIONAL das equipes de apoio (Administrativo e "
+                                        + "TI), que servem todas as linhas e não faturam. "
+                                        + "O critério é o NÚMERO DE COLABORADORES envolvidos: o custo "
+                                        + "total do apoio é dividido pelo total de pessoas das linhas, e "
+                                        + "cada linha leva a fatia proporcional à sua própria equipe. "
+                                        + "Linha com o dobro de gente carrega o dobro de backoffice. "
+                                        + "Sem esse rateio a margem de cada cliente apareceria melhor do "
+                                        + "que é, porque o custo do apoio ficaria fora da conta."} className="cursor-help">
+                            <HelpCircle className="h-3 w-3 text-muted-foreground" />
+                          </span>
+                        </span>
+                      </TableHead>
                       <TableHead className="text-xs text-right">Custos Pessoal</TableHead>
                       <TableHead className="text-xs text-right">Margem Líquida (R$)</TableHead>
                       <TableHead className="text-xs text-right">Margem Líquida (%)</TableHead>
@@ -234,7 +259,22 @@ export function Dashboard() {
                         </TableCell>
                         <TableCell className="text-right font-mono text-xs">{formatCurrency(resumo.faturamentoBruto)}</TableCell>
                         <TableCell className="text-right font-mono text-xs">{formatCurrency(resumo.impostos.total)}</TableCell>
-                        <TableCell className="text-right font-mono text-xs">{formatCurrency(resumo.totalCustoPessoal)}</TableCell>
+                        <TableCell className="text-right font-mono text-xs">
+                          {formatCurrency(resumo.custoPessoalDireto)}
+                        </TableCell>
+                        <TableCell className="text-right font-mono text-xs"
+                                   title={resumo.custoBackoffice > 0
+                                     ? `${formatCurrency(resumo.custoBackoffice)} de apoio rateado por cabeça`
+                                     : "Setor de apoio: o custo dele é rateado NAS outras linhas"}>
+                          {resumo.custoBackoffice > 0
+                            ? <span className="text-sky-700 dark:text-sky-300">
+                                {formatCurrency(resumo.custoBackoffice)}
+                              </span>
+                            : <span className="text-muted-foreground">—</span>}
+                        </TableCell>
+                        <TableCell className="text-right font-mono text-xs font-semibold">
+                          {formatCurrency(resumo.totalCustoPessoal)}
+                        </TableCell>
                         <TableCell className={`text-right font-mono text-xs ${resumo.lucroLiquidoReal >= 0 ? 'text-success' : 'text-destructive'}`}>
                           {formatCurrency(resumo.lucroLiquidoReal)}
                         </TableCell>

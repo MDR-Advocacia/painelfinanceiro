@@ -1176,6 +1176,57 @@ def estrutura_cobertura(request):
     })
 
 
+def ratear_infra_por_pessoas() -> dict:
+    """Redivide o custo de infraestrutura entre as SEDES por CABECA.
+
+    Era 50/50 fixo, herdado do desenho antigo — e o comentario do modelo
+    ("igual entre as sedes, por padrao") deixava claro que era default, nao
+    decisao. So' que o quadro nao e' metade a metade: Capim Macio tem 109 das
+    150 pessoas produtivas (72,7%) e Manhattan 41 (27,3%). Com 50/50, Manhattan
+    absorvia R$ 47.354 de backoffice tendo pouco mais de um quarto da gente —
+    R$ 21.467 por mes na sede errada, R$ 257 mil no ano, direto na margem.
+
+    A BASE e' a mesma do rateio por linha: quem CONSOME o apoio, ou seja o
+    quadro produtivo, sem as proprias equipes de apoio. Usar as duas bases
+    diferentes faria a visao por sede e a visao por linha nao fecharem entre si.
+
+    Sede sem ninguem fica com 0 em vez de sumir: zero e' informacao (a sede
+    existe e nao consome apoio), enquanto sumir esconderia o caso.
+    """
+    from .models import DpColaborador, Sede
+    eq_apoio = set()
+    for c in CentroFaturamento.objects.filter(tipo="infraestrutura"):
+        eq_apoio |= set(Alocacao.objects.filter(centro=c).values_list("equipe_id", flat=True))
+
+    produtivos = (DpColaborador.objects.filter(status="ativo")
+                  .exclude(equipe_ref_id__in=eq_apoio))
+    por_unidade = {}
+    for u in produtivos.values_list("unidade", flat=True):
+        if u:
+            por_unidade[u] = por_unidade.get(u, 0) + 1
+    total = sum(por_unidade.values())
+    if not total:
+        return {"aplicado": False, "motivo": "nenhum colaborador produtivo com unidade"}
+
+    # unidade do DP casa com a sede pelo NOME; sede sem gente entra com 0
+    sedes = list(Sede.objects.all())
+    pesos = {sd.id: por_unidade.get(sd.nome, 0) for sd in sedes}
+    if not sum(pesos.values()):
+        return {"aplicado": False, "motivo": "nenhuma sede casa com as unidades do DP"}
+
+    detalhe, tocados = [], 0
+    for c in CentroFaturamento.objects.filter(tipo="infraestrutura"):
+        for sd in sedes:
+            pct = round(pesos[sd.id] / total * 100, 2)
+            cs, _ = CentroSede.objects.update_or_create(
+                centro=c, sede=sd, defaults={"percentual": pct})
+            tocados += 1
+            detalhe.append({"centro": c.nome, "sede": sd.nome,
+                            "pessoas": pesos[sd.id], "percentual": pct})
+    return {"aplicado": True, "base_produtiva": total, "rateios": tocados,
+            "detalhe": detalhe}
+
+
 def reespelhar_competencias_vivas() -> int:
     """Reespelha as competencias que ainda podem mudar (nao fechadas).
 
@@ -1189,6 +1240,12 @@ def reespelhar_competencias_vivas() -> int:
     E' barato — agrega ~170 linhas ja' calculadas, sem recalcular folha.
     """
     from .models import DpCompetencia
+    # o rateio por SEDE segue a mesma regra por cabeca do rateio por linha;
+    # se ficasse so' na linha, as duas visoes de margem divergiriam
+    try:
+        ratear_infra_por_pessoas()
+    except Exception:
+        pass
     n = 0
     for comp in DpCompetencia.objects.exclude(status="fechada"):
         try:
