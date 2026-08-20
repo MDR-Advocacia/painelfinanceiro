@@ -110,7 +110,14 @@ export function calcResumo(data: PeriodoData, vpdValor: number = 2472.85): Resum
   // R$ 478.122 reais, e o operador via dois números pra mesma coisa.
   const real = (data as any).custoPessoalReal as number | undefined;
   const totalCustoPessoal = real && real > 0 ? real : estimativaPessoal;
-  const headcount = getTotalProfissionais(pessoalSeguro as any);
+  // mesmo raciocinio do custo: o quadro DIGITADO por cargo e' desenho, o
+  // cadastro do DP e' o fato. Em 05/2026 o digitado dizia 178 contra 173 ativos.
+  // Aqui doi duas vezes, porque o VPD e' rateado POR CABECA — cada pessoa
+  // fantasma vira despesa indireta fantasma na margem do cliente.
+  const hcReal = (data as any).headcountReal as number | undefined;
+  const headcount = hcReal && hcReal > 0
+    ? hcReal
+    : getTotalProfissionais(pessoalSeguro as any);
 
   const totalDespesasEventuais = (data.despesasEventuais || []).reduce((sum, item) => sum + item.valor, 0);
 

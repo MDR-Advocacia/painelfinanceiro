@@ -1113,27 +1113,72 @@ def espelhar_custo_pessoal(comp) -> dict:
     custo_eq = _custo_por_equipe(comp)
     soma_eq = _soma_percentual_por_equipe(comp)
 
-    # custo rateado por LINHA, mesma conta da Estrutura
-    por_linha = {}
-    for a in Alocacao.objects.select_related("linha").all():
+    # HEADCOUNT REAL por equipe, do cadastro do DP. Vai junto com o custo pelo
+    # mesmo caminho porque sofria o MESMO problema: o painel legado guarda uma
+    # quantidade DIGITADA por cargo, que ninguém atualiza — em 05/2026 ela dizia
+    # 178 pessoas contra 173 ativos de verdade, e variava 163/166/178/171 de mês
+    # a mês sem relação com admissão ou desligamento.
+    #
+    # O número errado não fica só na tela: o VPD é rateado POR CABEÇA
+    # (custoVPD = headcount × valor), então cada pessoa fantasma vira despesa
+    # indireta fantasma na margem do cliente.
+    from .models import DpColaborador
+    hc_eq = {}
+    for c in DpColaborador.objects.filter(status="ativo").exclude(equipe_ref=None):
+        hc_eq[c.equipe_ref_id] = hc_eq.get(c.equipe_ref_id, 0) + 1
+
+    # custo e headcount rateados por LINHA, mesma conta da Estrutura.
+    # `direto_centro` recolhe a alocacao que nao passa por linha — e' o caso da
+    # INFRAESTRUTURA (Administrativo e TI), que nao fatura e por isso nao tem
+    # linha nenhuma. Sem este ramo, o custo dessa gente ficava orfao.
+    por_linha, hc_linha = {}, {}
+    direto_centro, hc_centro = {}, {}
+    for a in Alocacao.objects.select_related("linha", "centro").all():
         base = custo_eq.get(str(a.equipe_id))
-        if not base or not a.linha_id:
-            continue
         soma = soma_eq.get(a.equipe_id) or 0
         if not soma:
             continue
-        parcela = round(base["custo_total"] * ((a.percentual or 0) / soma), 2)
+        if not a.linha_id:
+            if a.centro_id:
+                f = (a.percentual or 0) / soma
+                if hc_eq.get(a.equipe_id):
+                    hc_centro[a.centro_id] = round(
+                        hc_centro.get(a.centro_id, 0.0) + hc_eq[a.equipe_id] * f, 2)
+                if base:
+                    direto_centro[a.centro_id] = round(
+                        direto_centro.get(a.centro_id, 0.0) + base["custo_total"] * f, 2)
+            continue
+        fracao = (a.percentual or 0) / soma
+        # a pessoa dividida entre duas linhas entra fracionada nas duas: e' o
+        # que faz a soma dos setores fechar com o total do quadro
+        if hc_eq.get(a.equipe_id):
+            hc_linha[a.linha_id] = round(
+                hc_linha.get(a.linha_id, 0.0) + hc_eq[a.equipe_id] * fracao, 2)
+        if not base:
+            continue
+        parcela = round(base["custo_total"] * fracao, 2)
         por_linha[a.linha_id] = round(por_linha.get(a.linha_id, 0.0) + parcela, 2)
 
     # linha → setor legado (1:1 hoje; a soma cobre 1:N sem quebrar)
-    por_setor = {}
+    por_setor, hc_setor = {}, {}
     for l in LinhaFaturamento.objects.select_related("setor_legado"):
         if not l.setor_legado_id:
             continue
         v = por_linha.get(l.id)
-        if not v:
-            continue
-        por_setor[l.setor_legado_id] = round(por_setor.get(l.setor_legado_id, 0.0) + v, 2)
+        if v:
+            por_setor[l.setor_legado_id] = round(por_setor.get(l.setor_legado_id, 0.0) + v, 2)
+        h = hc_linha.get(l.id)
+        if h:
+            hc_setor[l.setor_legado_id] = round(hc_setor.get(l.setor_legado_id, 0.0) + h, 2)
+
+    # centro de infraestrutura → setor administrativo, quando vinculado
+    for c in CentroFaturamento.objects.exclude(setor_legado=None):
+        v = direto_centro.get(c.id)
+        if v:
+            por_setor[c.setor_legado_id] = round(por_setor.get(c.setor_legado_id, 0.0) + v, 2)
+        h = hc_centro.get(c.id)
+        if h:
+            hc_setor[c.setor_legado_id] = round(hc_setor.get(c.setor_legado_id, 0.0) + h, 2)
 
     gravados = 0
     # entrada NOVA nasce com a estrutura completa que o painel legado espera:
@@ -1142,19 +1187,22 @@ def espelhar_custo_pessoal(comp) -> dict:
     FATURAMENTO_VAZIO = {"bruto": 0, "descontos": 0, "aliquotaLucroPresumido": 0.32,
                          "aliquotaISS": 0.02, "modoISS": "sociedade",
                          "profissionaisISS": 0, "premiacaoTotal": 0, "diversosTotal": 0}
-    for setor in Setor.objects.filter(id__in=por_setor.keys()):
+    alvos = set(por_setor) | set(hc_setor)
+    for setor in Setor.objects.filter(id__in=alvos):
         periodos = setor.periodos or {}
         p = dict(periodos.get(periodo) or {})
         p.setdefault("pessoal", {})
         p.setdefault("faturamento", dict(FATURAMENTO_VAZIO))
         p.setdefault("despesasEventuais", [])
-        p["custoPessoalReal"] = por_setor[setor.id]
+        p["custoPessoalReal"] = por_setor.get(setor.id, 0.0)
+        p["headcountReal"] = hc_setor.get(setor.id, 0.0)
         periodos[periodo] = p
         setor.periodos = periodos
         setor.save(update_fields=["periodos", "updated_at"])
         gravados += 1
     return {"periodo": periodo, "setores": gravados,
-            "total": round(sum(por_setor.values()), 2)}
+            "total": round(sum(por_setor.values()), 2),
+            "headcount": round(sum(hc_setor.values()), 2)}
 
 
 def _espelhar_no_setor_legado(linha, periodo):

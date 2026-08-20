@@ -39,6 +39,11 @@ export interface PeriodoData {
    * Quando presente, substitui a estimativa por cargo do bloco `pessoal`.
    */
   custoPessoalReal?: number;
+  /**
+   * Headcount REAL do cadastro do DP (espelhado junto com o custo).
+   * Quando presente, substitui a soma das quantidades digitadas por cargo.
+   */
+  headcountReal?: number;
   pessoal: Pessoal;
   faturamento: Faturamento;
   despesasEventuais?: CustoItem[];

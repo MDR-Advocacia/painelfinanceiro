@@ -60,6 +60,16 @@ class CentroFaturamento(models.Model):
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     nome = models.CharField(max_length=120, unique=True)
     tipo = models.CharField(max_length=20, choices=TIPOS, default="faturamento")
+    # Centro de INFRAESTRUTURA nao tem linha de faturamento (nao fatura), entao
+    # o custo dele nao tinha por onde descer ate' o painel legado — Administrativo
+    # e TI simplesmente SUMIAM do card "Custos de pessoal", que mostrava 356 mil
+    # contra 478 mil de folha real. Este vinculo fecha o caminho: a alocacao
+    # feita direto no centro cai no setor administrativo correspondente.
+    setor_legado = models.ForeignKey(
+        "financeiro.Setor", on_delete=models.SET_NULL, null=True, blank=True,
+        related_name="centros_infra",
+        help_text="Setor do painel legado que recebe o custo deste centro "
+                  "quando ele nao tem linha de faturamento.")
     ordem = models.IntegerField(default=0)
     ativo = models.BooleanField(default=True)
     created_at = models.DateTimeField(auto_now_add=True)
