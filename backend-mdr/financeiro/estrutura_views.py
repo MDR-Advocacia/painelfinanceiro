@@ -918,10 +918,11 @@ def equipe_detalhe(request, pk):
                          "salario_bruto", "ferias_dias", "em_rescisao",
                          "matricula", "nome", "cargo_nome", "regime")}
 
+    ids_foto = (list(CompetenciaEnquadramento.objects.filter(
+        competencia=comp, equipe=e).values_list("colaborador_id", flat=True))
+        if comp else [])
     historico_origem = None
     if composicao == "historica" and comp:
-        ids_foto = list(CompetenciaEnquadramento.objects.filter(
-            competencia=comp, equipe=e).values_list("colaborador_id", flat=True))
         if ids_foto:
             ids_pessoas = ids_foto
             from .models_estrutura import _tem_retrato_manual
@@ -1017,6 +1018,8 @@ def equipe_detalhe(request, pk):
                                   .order_by("-ano", "-mes")],
         "composicao": composicao,
         "historico_origem": historico_origem,
+        "historico_disponivel": bool(ids_foto),
+        "historico_total": len(ids_foto),
         "competencia_custo": f"{comp.mes:02d}/{comp.ano}" if comp else None,
         "custo_parcial": custo_parcial,
     })

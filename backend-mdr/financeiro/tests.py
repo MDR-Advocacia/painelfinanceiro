@@ -201,3 +201,21 @@ class EquipeHistoricoTests(TestCase):
             ).count(),
             3,
         )
+
+    def test_equipe_sem_quadro_atual_informa_que_tem_historico(self):
+        cobranca = Equipe.objects.create(
+            slug="cobranca-teste", nome="Cobrança", grupo="credito",
+        )
+        CompetenciaEnquadramento.objects.create(
+            competencia=self.comp, colaborador=self.pessoas[0], equipe=cobranca,
+        )
+
+        resposta = self.client.get(
+            f"/api/estrutura/equipes/{cobranca.id}/detalhe/"
+            "?periodo=2026-07&composicao=atual"
+        )
+
+        self.assertEqual(resposta.status_code, 200)
+        self.assertEqual(resposta.json()["totais"]["ativos"], 0)
+        self.assertTrue(resposta.json()["historico_disponivel"])
+        self.assertEqual(resposta.json()["historico_total"], 1)

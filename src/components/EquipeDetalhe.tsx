@@ -4,7 +4,7 @@
 // composição por cargo; onde a equipe está alocada e quanto de receita a
 // participação representa. Clique numa pessoa não abre nada daqui (a ficha
 // vive no módulo Pessoal), mas o essencial está na linha.
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import {
   ArrowLeft, Briefcase, Coins, Loader2, Palmtree, Scale, Users,
 } from "lucide-react";
@@ -45,6 +45,7 @@ export default function EquipeDetalhe() {
   const [erro, setErro] = useState(false);
   const [mostrarInativos, setMostrarInativos] = useState(false);
   const [composicao, setComposicao] = useState<"atual" | "historica">("atual");
+  const historicosAbertosAutomaticamente = useRef(new Set<string>());
   const equipeId = useSelecionadoId();
 
   useEffect(() => {
@@ -52,7 +53,17 @@ export default function EquipeDetalhe() {
     setDados(null);
     setErro(false);
     estruturaApi.equipeDetalhe(equipeId, periodoAtivo, composicao)
-      .then(setDados)
+      .then((resposta) => {
+        const chave = `${equipeId}:${resposta.periodo || periodoAtivo}`;
+        if (composicao === "atual" && resposta.totais.ativos === 0
+            && resposta.historico_disponivel
+            && !historicosAbertosAutomaticamente.current.has(chave)) {
+          historicosAbertosAutomaticamente.current.add(chave);
+          setComposicao("historica");
+          return;
+        }
+        setDados(resposta);
+      })
       .catch((e) => { toast.error(e.message); setErro(true); });
   }, [equipeId, periodoAtivo, composicao]);
 

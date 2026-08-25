@@ -71,6 +71,7 @@ export interface EfEquipeDetalhe {
   periodo: string | null; periodos_disponiveis: string[];
   composicao: "atual" | "historica";
   historico_origem: "foto_fechamento" | "retrato_competencia" | "folha_e_quadro_atual" | null;
+  historico_disponivel: boolean; historico_total: number;
   pessoas: {
     id: string; matricula: number; nome: string; cargo: string | null;
     regime: string; status: string; supervisor: string | null;
