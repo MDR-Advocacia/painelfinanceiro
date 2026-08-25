@@ -17,7 +17,8 @@ import {
   Table, TableBody, TableCell, TableHead, TableHeader, TableRow,
 } from "@/components/ui/table";
 import { TabelaRolavel } from "@/components/TabelaRolavel";
-import { Kpi, PageHeader, SectionTitle, Vazio } from "@/components/Pagina";
+import { Kpi, PageHeader, SectionTitle, SegButtons, Vazio } from "@/components/Pagina";
+import { PeriodSelector } from "@/components/PeriodSelector";
 import { formatCurrency } from "@/utils/calculations";
 import {
   type EfEquipeDetalhe, abrirDetalheCentro, estruturaApi, useSelecionadoId,
@@ -39,18 +40,21 @@ const REGIME_UI: Record<string, { rotulo: string; cls: string }> = {
 };
 
 export default function EquipeDetalhe() {
-  const { setView } = useApp();
+  const { setView, periodoAtivo, setPeriodoAtivo } = useApp();
   const [dados, setDados] = useState<EfEquipeDetalhe | null>(null);
   const [erro, setErro] = useState(false);
   const [mostrarInativos, setMostrarInativos] = useState(false);
+  const [composicao, setComposicao] = useState<"atual" | "historica">("atual");
   const equipeId = useSelecionadoId();
 
   useEffect(() => {
     if (!equipeId) { setErro(true); return; }
-    estruturaApi.equipeDetalhe(equipeId)
+    setDados(null);
+    setErro(false);
+    estruturaApi.equipeDetalhe(equipeId, periodoAtivo, composicao)
       .then(setDados)
       .catch((e) => { toast.error(e.message); setErro(true); });
-  }, [equipeId]);
+  }, [equipeId, periodoAtivo, composicao]);
 
   if (erro) {
     return <Vazio icone={Users} titulo="Equipe não encontrada"
@@ -64,8 +68,10 @@ export default function EquipeDetalhe() {
     );
   }
 
-  const inativos = dados.pessoas.filter((p) => p.status !== "ativo").length;
-  const pessoas = dados.pessoas.filter((p) => mostrarInativos || p.status === "ativo");
+  const historica = composicao === "historica";
+  const inativos = historica ? 0 : dados.pessoas.filter((p) => p.status !== "ativo").length;
+  const pessoas = historica
+    ? dados.pessoas : dados.pessoas.filter((p) => mostrarInativos || p.status === "ativo");
   const t = dados.totais;
   const custoMedio = t.ativos ? t.custo_total / t.ativos : 0;
 
@@ -79,17 +85,28 @@ export default function EquipeDetalhe() {
           {dados.centro_custo && <>Centro de custo no DP: <b>{dados.centro_custo}</b></>}
           {dados.competencia_custo && <> · folha de <b>{dados.competencia_custo}</b>
             {dados.custo_parcial && <span className="text-warning"> (parcial)</span>}</>}
+          <> · {historica ? "composição da competência" : "composição atual"}</>
         </>}
-        acoes={
+        acoes={<>
+          <SegButtons
+            valor={composicao}
+            onChange={setComposicao}
+            opcoes={[
+              { v: "atual", label: "Quadro atual" },
+              { v: "historica", label: "Histórico da folha" },
+            ]}
+          />
+          <PeriodSelector value={periodoAtivo} onChange={setPeriodoAtivo} />
           <Button variant="outline" size="sm" className="gap-1"
                   onClick={() => setView("estrutura" as any)}>
             <ArrowLeft className="h-4 w-4" /> Estrutura
           </Button>
-        }
+        </>}
       />
 
       <div className="grid grid-cols-2 gap-4 md:grid-cols-4">
-        <Kpi icone={Users} rotulo="Pessoas ativas" valor={String(t.ativos)} />
+        <Kpi icone={Users} rotulo={historica ? "Pessoas na competência" : "Pessoas atuais"}
+             valor={String(t.ativos)} />
         <Kpi icone={Coins} rotulo="Custo mensal" valor={formatCurrency(t.custo_total)}
              sub={`a pagar ${formatCurrency(t.a_pagar)}`} tom="negativo" corValor="text-destructive" />
         <Kpi icone={Briefcase} rotulo="Custo médio por pessoa" valor={formatCurrency(custoMedio)} />
@@ -170,13 +187,22 @@ export default function EquipeDetalhe() {
       {/* ── As pessoas ── */}
       <Card className="glass-card border-0">
         <CardContent className="pt-6">
-          <SectionTitle eyebrow="Quem está na equipe" titulo={`Pessoas (${t.ativos} ativas)`}
-                        acoes={inativos > 0 && (
-                          <button onClick={() => setMostrarInativos((v) => !v)}
-                                  className="text-xs text-[hsl(var(--dunatech-blue))] hover:underline">
-                            {mostrarInativos ? "esconder" : "mostrar"} {inativos} desligado(s)
-                          </button>
-                        )}
+          <SectionTitle eyebrow={historica ? "Histórico da composição" : "Quem está na equipe"}
+                        titulo={historica
+                          ? `Pessoas na folha (${t.ativos})`
+                          : `Pessoas (${t.ativos} ativas)`}
+                        acoes={historica
+                          ? <span className="text-xs text-muted-foreground">
+                              {dados.historico_origem === "foto_fechamento"
+                                ? "foto congelada no fechamento"
+                                : "pessoas do quadro atual presentes nesta folha"}
+                            </span>
+                          : inativos > 0 && (
+                            <button onClick={() => setMostrarInativos((v) => !v)}
+                                    className="text-xs text-[hsl(var(--dunatech-blue))] hover:underline">
+                              {mostrarInativos ? "esconder" : "mostrar"} {inativos} desligado(s)
+                            </button>
+                          )}
           />
           <TabelaRolavel altura="max-h-[56vh]" className="rounded-md border">
             <Table>
@@ -195,7 +221,7 @@ export default function EquipeDetalhe() {
                 {pessoas.map((p) => {
                   const reg = REGIME_UI[p.regime];
                   return (
-                    <TableRow key={p.id} className={p.status !== "ativo" ? "opacity-50" : ""}>
+                    <TableRow key={p.id} className={!historica && p.status !== "ativo" ? "opacity-50" : ""}>
                       <TableCell className="font-mono text-xs">{p.matricula}</TableCell>
                       <TableCell className="max-w-[240px] text-sm">
                         <span className="flex items-center gap-1.5">
@@ -210,7 +236,7 @@ export default function EquipeDetalhe() {
                               rescisão
                             </span>
                           )}
-                          {p.status !== "ativo" && (
+                          {!historica && p.status !== "ativo" && (
                             <span className="shrink-0 rounded bg-muted px-1 text-[9px] font-semibold uppercase text-muted-foreground">
                               desligado
                             </span>

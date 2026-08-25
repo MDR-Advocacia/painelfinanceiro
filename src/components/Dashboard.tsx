@@ -160,8 +160,8 @@ export function Dashboard() {
               ? (alocacao.custo_total || 0)
               : (alocacao.custo_total_por_sede?.[sedeSelecionadaNome] || 0);
             const pessoas = sedeSelecionadaNome === null
-              ? (alocacao.pessoas || 0)
-              : (alocacao.pessoas_por_sede?.[sedeSelecionadaNome] || 0);
+              ? (alocacao.pessoas_ativas || 0)
+              : (alocacao.pessoas_ativas_por_sede?.[sedeSelecionadaNome] || 0);
             if (!linhaDaSede && custo === 0 && pessoas === 0) continue;
             const equipe = obter(alocacao);
             const participacao = denominador > 0 ? (alocacao.percentual || 0) / denominador : 0;
@@ -181,8 +181,8 @@ export function Dashboard() {
             ? (alocacao.custo_total || 0)
             : (alocacao.custo_total_por_sede?.[sedeSelecionadaNome] || 0);
           const pessoas = sedeSelecionadaNome === null
-            ? (alocacao.pessoas || 0)
-            : (alocacao.pessoas_por_sede?.[sedeSelecionadaNome] || 0);
+            ? (alocacao.pessoas_ativas || 0)
+            : (alocacao.pessoas_ativas_por_sede?.[sedeSelecionadaNome] || 0);
           if (custo === 0 && pessoas === 0) continue;
           const equipe = obter(alocacao);
           equipe.custoPessoal += custo;

@@ -8,7 +8,7 @@
 //     chapado. É o padrão dos SaaS de referência (Linear, Vercel, Stripe).
 //  3. RODAPÉ com identidade de quem está logado (avatar, nome, cargo) — a
 //     pessoa sempre sabe com que permissão está enxergando o painel.
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useState } from "react";
 import { useApp } from "@/contexts/AppContext";
 import { useAuth } from "@/hooks/useAuth";
 import { invalidatePermissionsCache, usePermissions } from "@/hooks/usePermissions";
@@ -113,31 +113,14 @@ export function Sidebar() {
   useEffect(() => {
     if (!podeEstrutura) return;
     const carregar = () => {
-      // A lateral e o dashboard precisam falar da mesma competência. Antes os
-      // badges mostravam ativos de hoje enquanto a tabela mostrava a folha do
-      // mês selecionado (ex.: Ajuizamento 5 na lateral e 3 em Jul/26).
-      estruturaApi.carregar(periodoAtivo).then(setEstrutura).catch(() => undefined);
+      estruturaApi.carregar().then(setEstrutura).catch(() => undefined);
       estruturaApi.equipes().then(setEquipesMenu).catch(() => undefined);
     };
     carregar();
     // a tela avisa quando algo muda (criar centro, alocar equipe…)
     window.addEventListener(EF_EVENTOS.mudou, carregar);
     return () => window.removeEventListener(EF_EVENTOS.mudou, carregar);
-  }, [podeEstrutura, periodoAtivo]);
-
-  const pessoasPorEquipe = useMemo(() => {
-    const pessoas = new Map<string, number>();
-    if (!estrutura) return pessoas;
-    const registrar = (equipeId: string, total: number | null) => {
-      pessoas.set(equipeId, Math.max(pessoas.get(equipeId) || 0, total || 0));
-    };
-    for (const centro of [...estrutura.centros, ...estrutura.infraestrutura]) {
-      centro.alocacoes.forEach((a) => registrar(a.equipe_id, a.pessoas));
-      centro.linhas.forEach((linha) =>
-        linha.alocacoes.forEach((a) => registrar(a.equipe_id, a.pessoas)));
-    }
-    return pessoas;
-  }, [estrutura]);
+  }, [podeEstrutura]);
 
   const irParaCentro = (centroId: string) => {
     setActiveSetor(null);
@@ -313,26 +296,20 @@ export function Sidebar() {
                            collapsed={!!collapsed["ef-equipes"]} onToggle={() => toggle("ef-equipes")} />
             {!collapsed["ef-equipes"] && (
               <>
-                {equipesMenu.map((e) => {
-                  const pessoas = pessoasPorEquipe.get(e.id) || 0;
-                  return (
+                {equipesMenu.map((e) => (
                   <button key={e.id} onClick={() => irParaEquipe(e.id)}
                           data-active={false} className="nav-link py-1.5">
                     <span className="nav-ico"><Users className="h-full w-full" strokeWidth={1.8} /></span>
                     <span className="min-w-0 flex-1 text-left">
                       <span className="block truncate">{e.nome ?? e.equipe}</span>
                     </span>
-                    {pessoas > 0 && (
-                      <span
-                        title={`${pessoas} pessoa${pessoas === 1 ? "" : "s"} na folha ${estrutura?.competencia_custo || "selecionada"}`}
-                        className="shrink-0 rounded-full bg-white/[0.07] px-1.5 text-[0.6rem] font-semibold tabular-nums text-sidebar-foreground/50"
-                      >
-                        {pessoas}
+                    {(e.colaboradores ?? 0) > 0 && (
+                      <span className="shrink-0 rounded-full bg-white/[0.07] px-1.5 text-[0.6rem] font-semibold tabular-nums text-sidebar-foreground/50">
+                        {e.colaboradores}
                       </span>
                     )}
                   </button>
-                  );
-                })}
+                ))}
                 <button onClick={() => { setActiveSetor(null); setView("estrutura-admin" as any); }}
                         className="flex w-full items-center gap-2 rounded-lg px-3 py-1.5 text-xs text-sidebar-foreground/45 transition-colors hover:bg-white/[0.04] hover:text-white">
                   <Plus className="h-3.5 w-3.5" /> Administração da estrutura

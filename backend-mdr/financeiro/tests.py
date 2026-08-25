@@ -4,7 +4,10 @@ from rest_framework.authtoken.models import Token
 from rest_framework.test import APIClient
 
 from .estrutura_views import _competencia_do_periodo, _impostos
-from .models import CentroFaturamento, DpCompetencia, LinhaFaturamento, Sede, Setor
+from .models import (
+    CentroFaturamento, DpCentroCusto, DpColaborador, DpCompetencia, DpFolhaItem,
+    Equipe, LinhaFaturamento, Sede, Setor,
+)
 
 
 class FaturamentoEspelhoTests(TestCase):
@@ -102,3 +105,41 @@ class CompetenciaEstruturaTests(TestCase):
 
         self.assertEqual(competencia.id, maio.id)
         self.assertFalse(parcial)
+
+
+class EquipeHistoricoTests(TestCase):
+    def setUp(self):
+        user = User.objects.create_user("equipes", password="senha", is_staff=True)
+        token = Token.objects.create(user=user)
+        self.client = APIClient()
+        self.client.credentials(HTTP_AUTHORIZATION=f"Token {token.key}")
+
+        cc = DpCentroCusto.objects.create(codigo=3, nome="Autor - BB")
+        self.equipe = Equipe.objects.create(
+            slug="ajuizamento-teste", nome="Ajuizamento", grupo="credito")
+        self.comp = DpCompetencia.objects.create(ano=2026, mes=7, status="aberta")
+        self.pessoas = []
+        for n in range(5):
+            pessoa = DpColaborador.objects.create(
+                matricula=2000 + n, nome=f"Pessoa {n}", unidade="Manhattan",
+                centro_custo=cc, equipe_ref=self.equipe, regime="clt", status="ativo",
+            )
+            self.pessoas.append(pessoa)
+        for pessoa in self.pessoas[:3]:
+            DpFolhaItem.objects.create(
+                competencia=self.comp, colaborador=pessoa, matricula=pessoa.matricula,
+                nome=pessoa.nome, regime=pessoa.regime, centro_custo_nome=cc.nome,
+                salario_bruto=2000, custo_total=3000, total_pagar=2000,
+            )
+
+    def test_quadro_atual_e_historico_da_folha_sao_separados(self):
+        url = f"/api/estrutura/equipes/{self.equipe.id}/detalhe/?periodo=2026-07"
+
+        atual = self.client.get(url + "&composicao=atual")
+        historico = self.client.get(url + "&composicao=historica")
+
+        self.assertEqual(atual.status_code, 200)
+        self.assertEqual(historico.status_code, 200)
+        self.assertEqual(atual.json()["totais"]["ativos"], 5)
+        self.assertEqual(historico.json()["totais"]["ativos"], 3)
+        self.assertEqual(historico.json()["historico_origem"], "folha_e_quadro_atual")

@@ -249,6 +249,20 @@ def estrutura(request):
     custo_cc = _custo_por_cc(competencia)
     custo_eq = _custo_por_equipe(competencia)
 
+    # Headcount para breakeven/VPD é o QUADRO ATUAL, por decisão gerencial.
+    # O custo continua sendo o da folha da competência. Mantemos também a
+    # quebra por unidade para o filtro de sede usar os ativos de hoje.
+    from .models import DpColaborador
+    ativos_eq = {}
+    for pessoa in (DpColaborador.objects.filter(status="ativo")
+                   .exclude(equipe_ref=None)
+                   .values("equipe_ref_id", "unidade")):
+        chave = str(pessoa["equipe_ref_id"])
+        item = ativos_eq.setdefault(chave, {"total": 0, "por_sede": {}})
+        item["total"] += 1
+        sede = (pessoa["unidade"] or "Sem unidade").strip()
+        item["por_sede"][sede] = item["por_sede"].get(sede, 0) + 1
+
     # O percentual divide a RECEITA da linha. Pro CUSTO a conta é outra: uma
     # equipe que atende N linhas (Ajuizamento atende 6) tem o custo dela
     # distribuído na PROPORÇÃO das alocações — senão a mesma folha entraria
@@ -268,6 +282,7 @@ def estrutura(request):
         soma_eq = soma_por_equipe.get(a.equipe_id) or 0
         fator = ((a.percentual or 0) / soma_eq) if soma_eq else 0.0
         por_sede = (base or {}).get("por_sede", {})
+        ativos = ativos_eq.get(str(a.equipe_id), {"total": 0, "por_sede": {}})
         return {
             "custo_origem": origem,
             "id": str(a.id),
@@ -297,6 +312,8 @@ def estrutura(request):
             "pessoas_por_sede": {
                 sede: valores["pessoas"] for sede, valores in por_sede.items()
             },
+            "pessoas_ativas": ativos["total"],
+            "pessoas_ativas_por_sede": ativos["por_sede"],
         }
 
     def json_linha(l):
@@ -834,57 +851,104 @@ def centro_detalhe(request, pk):
 @permission_classes(_PERM_EQUIPE)
 def equipe_detalhe(request, pk):
     """A página da equipe: QUEM ESTÁ NELA (pessoas do DP com cargo, salário e
-    custo real da folha), onde está alocada e quanto de receita representa."""
+    custo real da folha), onde está alocada e quanto de receita representa.
+
+    `composicao=atual` mostra o quadro de hoje com custos do mês escolhido.
+    `composicao=historica` mostra quem compunha a folha daquele mês.
+    """
     from .models import DpColaborador, DpFolhaItem as FI
+    from .models_estrutura import CompetenciaEnquadramento
 
     e = Equipe.objects.select_related("centro_custo").filter(pk=pk).first()
     if not e:
         return Response(status=404)
 
-    comp, custo_parcial = _competencia_custo()
+    periodo_pedido = request.query_params.get("periodo")
+    composicao = request.query_params.get("composicao") or "atual"
+    if composicao not in ("atual", "historica"):
+        return Response({"detail": "composicao deve ser atual ou historica."}, status=400)
+    if periodo_pedido and not re.match(r"^\d{4}-\d{2}$", periodo_pedido):
+        return Response({"detail": "Período inválido. Use AAAA-MM."}, status=400)
+
+    if periodo_pedido:
+        comp, custo_parcial = _competencia_do_periodo(periodo_pedido)
+    else:
+        comp, custo_parcial = _competencia_custo()
+    periodo = f"{comp.ano}-{comp.mes:02d}" if comp else periodo_pedido
+
     folha = {}
     if comp:
         folha = {i["colaborador_id"]: i for i in
                  FI.objects.filter(competencia=comp)
                  .values("colaborador_id", "custo_total", "total_pagar",
-                         "salario_bruto", "ferias_dias", "em_rescisao")}
+                         "salario_bruto", "ferias_dias", "em_rescisao",
+                         "matricula", "nome", "cargo_nome", "regime")}
+
+    historico_origem = None
+    if composicao == "historica" and comp:
+        ids_foto = list(CompetenciaEnquadramento.objects.filter(
+            competencia=comp, equipe=e).values_list("colaborador_id", flat=True))
+        if ids_foto:
+            ids_pessoas = ids_foto
+            historico_origem = "foto_fechamento"
+        else:
+            # Competência aberta ainda não tem foto. O histórico verificável é
+            # o quadro atual cruzado com quem efetivamente consta naquela folha.
+            ids_atuais = set(DpColaborador.objects.filter(equipe_ref=e)
+                             .values_list("id", flat=True))
+            ids_pessoas = list(ids_atuais.intersection(folha.keys()))
+            historico_origem = "folha_e_quadro_atual"
+        qs = (DpColaborador.objects.filter(id__in=ids_pessoas)
+              .select_related("cargo", "centro_custo", "supervisor")
+              .order_by("nome"))
+    else:
+        qs = (DpColaborador.objects.filter(equipe_ref=e)
+              .select_related("cargo", "centro_custo", "supervisor")
+              .order_by("-status", "nome"))
 
     pessoas = []
     resumo_cargos = {}
     custo_total = pagar_total = 0.0
-    qs = (DpColaborador.objects.filter(equipe_ref=e)
-          .select_related("cargo", "centro_custo", "supervisor")
-          .order_by("-status", "nome"))
     for cme in qs:
         fi = folha.get(cme.id, {})
         custo = round(fi.get("custo_total") or 0, 2)
-        if cme.status == "ativo":
+        entra_no_resumo = composicao == "historica" or cme.status == "ativo"
+        if entra_no_resumo:
             custo_total += custo
             pagar_total += fi.get("total_pagar") or 0
-            cargo = cme.cargo.nome if cme.cargo_id else "(sem cargo)"
+            cargo = ((fi.get("cargo_nome") if composicao == "historica" else None)
+                     or (cme.cargo.nome if cme.cargo_id else "(sem cargo)"))
             rc = resumo_cargos.setdefault(cargo, {"cargo": cargo, "n": 0, "custo": 0.0})
             rc["n"] += 1
             rc["custo"] = round(rc["custo"] + custo, 2)
         pessoas.append({
-            "id": str(cme.id), "matricula": cme.matricula, "nome": cme.nome,
-            "cargo": cme.cargo.nome if cme.cargo_id else None,
-            "regime": cme.regime, "status": cme.status,
+            "id": str(cme.id),
+            "matricula": ((fi.get("matricula") or cme.matricula)
+                           if composicao == "historica" else cme.matricula),
+            "nome": ((fi.get("nome") or cme.nome)
+                     if composicao == "historica" else cme.nome),
+            "cargo": ((fi.get("cargo_nome") if composicao == "historica" else None)
+                      or (cme.cargo.nome if cme.cargo_id else None)),
+            "regime": ((fi.get("regime") or cme.regime)
+                       if composicao == "historica" else cme.regime),
+            "status": cme.status,
             "supervisor": cme.supervisor.nome if cme.supervisor_id else None,
-            "salario_bruto": cme.salario_bruto,
+            "salario_bruto": ((fi.get("salario_bruto") or cme.salario_bruto)
+                               if composicao == "historica" else cme.salario_bruto),
             "custo_total": custo or None,
             "a_pagar": round(fi.get("total_pagar") or 0, 2) or None,
             "ferias_dias": fi.get("ferias_dias") or 0,
             "em_rescisao": bool(fi.get("em_rescisao")),
         })
 
-    # onde a equipe está alocada + a receita que a participação representa
+    # Alocações e receita da competência selecionada. Antes a página podia
+    # combinar custo de junho com a última receita lançada de outro mês.
     alocs = []
     for a in (Alocacao.objects.filter(equipe=e)
               .select_related("linha__centro", "centro")):
         if a.linha:
-            pers = {p for p, f in (a.linha.periodos or {}).items() if (f or {}).get("bruto")}
-            ult = max(pers) if pers else None
-            receita = (a.linha.periodos or {}).get(ult, {}).get("bruto", 0) if ult else 0
+            receita = ((a.linha.periodos or {}).get(periodo, {}).get("bruto", 0)
+                       if periodo else 0)
             alocs.append({"id": str(a.id), "tipo": "linha",
                           "centro": a.linha.centro.nome, "centro_id": str(a.linha.centro_id),
                           "destino": a.linha.nome, "area": a.linha.area,
@@ -896,7 +960,8 @@ def equipe_detalhe(request, pk):
                           "destino": a.centro.nome, "area": None,
                           "percentual": a.percentual, "receita_participacao": 0})
 
-    ativos = [p for p in pessoas if p["status"] == "ativo"]
+    ativos = ([p for p in pessoas if p["status"] == "ativo"]
+              if composicao == "atual" else pessoas)
     return Response({
         "id": str(e.id), "nome": e.nome, "slug": e.slug, "grupo": e.grupo,
         "centro_custo": e.centro_custo.nome if e.centro_custo_id else None,
@@ -909,6 +974,13 @@ def equipe_detalhe(request, pk):
             "a_pagar": round(pagar_total, 2),
             "receita_participacao": round(sum(a["receita_participacao"] for a in alocs), 2),
         },
+        "periodo": periodo,
+        "periodos_disponiveis": [f"{ano}-{mes:02d}" for ano, mes in
+                                  DpCompetencia.objects.filter(itens__isnull=False)
+                                  .values_list("ano", "mes").distinct()
+                                  .order_by("-ano", "-mes")],
+        "composicao": composicao,
+        "historico_origem": historico_origem,
         "competencia_custo": f"{comp.mes:02d}/{comp.ano}" if comp else None,
         "custo_parcial": custo_parcial,
     })

@@ -9,6 +9,8 @@ export interface EfAlocacao {
   custo_total: number | null; a_pagar: number | null; pessoas: number | null;
   custo_total_por_sede?: Record<string, number>;
   pessoas_por_sede?: Record<string, number>;
+  pessoas_ativas?: number;
+  pessoas_ativas_por_sede?: Record<string, number>;
 }
 export interface EfImpostos {
   lucro_presumido: number; irpj: number; irpj_adicional: number; csll: number;
@@ -62,6 +64,9 @@ export interface EfCentroDetalhe {
 }
 export interface EfEquipeDetalhe {
   id: string; nome: string; slug: string; grupo: string; centro_custo: string | null;
+  periodo: string | null; periodos_disponiveis: string[];
+  composicao: "atual" | "historica";
+  historico_origem: "foto_fechamento" | "folha_e_quadro_atual" | null;
   pessoas: {
     id: string; matricula: number; nome: string; cargo: string | null;
     regime: string; status: string; supervisor: string | null;
@@ -174,8 +179,10 @@ export const estruturaApi = {
     fetch(`${API_URL}/estrutura/sedes/${id}/detalhe/`, { headers: authHeaders() })
       .then((r) => j<EfSedeDetalhe>(r)),
 
-  equipeDetalhe: (id: string) =>
-    fetch(`${API_URL}/estrutura/equipes/${id}/detalhe/`, { headers: authHeaders() })
+  equipeDetalhe: (id: string, periodo?: string, composicao: "atual" | "historica" = "atual") =>
+    fetch(`${API_URL}/estrutura/equipes/${id}/detalhe/`
+          + `?composicao=${composicao}${periodo ? `&periodo=${periodo}` : ""}`,
+          { headers: authHeaders() })
       .then((r) => j<EfEquipeDetalhe>(r)),
 
   carregar: (periodo?: string) =>
