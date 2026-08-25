@@ -114,17 +114,18 @@ def _receita(fat: dict) -> dict:
 def _enquadramento_da_competencia(comp) -> dict:
     """{colaborador_id: equipe_id} VIGENTE NAQUELE MÊS.
 
-    Mês fechado tem foto: usa a foto, senão a margem de um mês encerrado mudaria
-    toda vez que alguém trocasse de equipe. Mês aberto cai no estado ao vivo.
+    A foto prevalece para as pessoas retratadas. O quadro ao vivo completa os
+    demais vínculos, pois uma foto de composição contém somente pessoas ativas
+    e não pode fazer custos de desligados sumirem do cálculo da competência.
     """
     from .models import DpColaborador
     from .models_estrutura import CompetenciaEnquadramento
+    enquadramento = dict(DpColaborador.objects.exclude(equipe_ref=None)
+                         .values_list("id", "equipe_ref_id"))
     foto = dict(CompetenciaEnquadramento.objects.filter(competencia=comp)
                 .values_list("colaborador_id", "equipe_id"))
-    if foto:
-        return foto
-    return dict(DpColaborador.objects.exclude(equipe_ref=None)
-                .values_list("id", "equipe_ref_id"))
+    enquadramento.update(foto)
+    return enquadramento
 
 
 def _soma_percentual_por_equipe(comp) -> dict:
@@ -890,7 +891,8 @@ def equipe_detalhe(request, pk):
             competencia=comp, equipe=e).values_list("colaborador_id", flat=True))
         if ids_foto:
             ids_pessoas = ids_foto
-            historico_origem = "foto_fechamento"
+            historico_origem = ("foto_fechamento" if comp.status == "fechada"
+                                else "retrato_competencia")
         else:
             # Competência aberta ainda não tem foto. O histórico verificável é
             # o quadro atual cruzado com quem efetivamente consta naquela folha.

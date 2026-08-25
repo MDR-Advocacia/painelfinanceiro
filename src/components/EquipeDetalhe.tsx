@@ -90,7 +90,7 @@ export default function EquipeDetalhe() {
         acoes={<>
           <SegButtons
             valor={composicao}
-            onChange={setComposicao}
+            onChange={(valor) => setComposicao(valor as "atual" | "historica")}
             opcoes={[
               { v: "atual", label: "Quadro atual" },
               { v: "historica", label: "Histórico da folha" },
@@ -195,7 +195,9 @@ export default function EquipeDetalhe() {
                           ? <span className="text-xs text-muted-foreground">
                               {dados.historico_origem === "foto_fechamento"
                                 ? "foto congelada no fechamento"
-                                : "pessoas do quadro atual presentes nesta folha"}
+                                : dados.historico_origem === "retrato_competencia"
+                                  ? "retrato salvo para esta competência"
+                                  : "pessoas do quadro atual presentes nesta folha"}
                             </span>
                           : inativos > 0 && (
                             <button onClick={() => setMostrarInativos((v) => !v)}

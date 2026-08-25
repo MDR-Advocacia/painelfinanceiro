@@ -66,7 +66,7 @@ export interface EfEquipeDetalhe {
   id: string; nome: string; slug: string; grupo: string; centro_custo: string | null;
   periodo: string | null; periodos_disponiveis: string[];
   composicao: "atual" | "historica";
-  historico_origem: "foto_fechamento" | "folha_e_quadro_atual" | null;
+  historico_origem: "foto_fechamento" | "retrato_competencia" | "folha_e_quadro_atual" | null;
   pessoas: {
     id: string; matricula: number; nome: string; cargo: string | null;
     regime: string; status: string; supervisor: string | null;

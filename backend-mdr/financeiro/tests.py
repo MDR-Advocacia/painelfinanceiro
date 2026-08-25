@@ -3,11 +3,12 @@ from django.test import TestCase
 from rest_framework.authtoken.models import Token
 from rest_framework.test import APIClient
 
-from .estrutura_views import _competencia_do_periodo, _impostos
+from .estrutura_views import _competencia_do_periodo, _enquadramento_da_competencia, _impostos
 from .models import (
     CentroFaturamento, DpCentroCusto, DpColaborador, DpCompetencia, DpFolhaItem,
     Equipe, LinhaFaturamento, Sede, Setor,
 )
+from .models_estrutura import CompetenciaEnquadramento
 
 
 class FaturamentoEspelhoTests(TestCase):
@@ -143,3 +144,29 @@ class EquipeHistoricoTests(TestCase):
         self.assertEqual(atual.json()["totais"]["ativos"], 5)
         self.assertEqual(historico.json()["totais"]["ativos"], 3)
         self.assertEqual(historico.json()["historico_origem"], "folha_e_quadro_atual")
+
+    def test_retrato_da_competencia_preserva_as_cinco_pessoas_de_hoje(self):
+        CompetenciaEnquadramento.objects.bulk_create([
+            CompetenciaEnquadramento(
+                competencia=self.comp, colaborador=pessoa, equipe=self.equipe,
+            )
+            for pessoa in self.pessoas
+        ])
+
+        url = (f"/api/estrutura/equipes/{self.equipe.id}/detalhe/"
+               "?periodo=2026-07&composicao=historica")
+        historico = self.client.get(url)
+
+        self.assertEqual(historico.status_code, 200)
+        self.assertEqual(historico.json()["totais"]["ativos"], 5)
+        self.assertEqual(historico.json()["historico_origem"], "retrato_competencia")
+
+    def test_retrato_parcial_nao_remove_enquadramento_usado_pelos_custos(self):
+        CompetenciaEnquadramento.objects.create(
+            competencia=self.comp, colaborador=self.pessoas[0], equipe=self.equipe,
+        )
+
+        enquadramento = _enquadramento_da_competencia(self.comp)
+
+        self.assertEqual(len(enquadramento), 5)
+        self.assertEqual(enquadramento[self.pessoas[4].id], self.equipe.id)

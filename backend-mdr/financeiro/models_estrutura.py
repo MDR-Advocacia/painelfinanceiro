@@ -224,7 +224,7 @@ class FaturamentoDocumento(models.Model):
         return f"{self.linha.nome} {self.periodo} — {self.nome_original}"
 
 
-# ═══════════ FOTO DA COMPETÊNCIA (congelamento no fechamento) ═══════════
+# ═══════════ FOTO DA COMPETÊNCIA (retrato ou congelamento) ═══════════
 # A margem de um mês fechado não pode mudar porque alguém trocou de equipe
 # hoje. Ao FECHAR a competência tiramos uma foto de duas coisas:
 #   1) onde cada pessoa estava enquadrada;
@@ -233,7 +233,7 @@ class FaturamentoDocumento(models.Model):
 # apaga a foto — ela é tirada de novo no próximo fechamento.
 
 class CompetenciaEnquadramento(models.Model):
-    """Onde a pessoa estava quando o mês fechou."""
+    """Onde a pessoa ativa estava no retrato daquela competência."""
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     competencia = models.ForeignKey("financeiro.DpCompetencia", on_delete=models.CASCADE,
                                     related_name="foto_enquadramentos")
@@ -265,13 +265,14 @@ class CompetenciaAlocacao(models.Model):
 
 
 def congelar_competencia(competencia):
-    """Tira a foto do enquadramento e das alocações. Idempotente."""
+    """Tira a foto dos ativos e das alocações. Idempotente."""
     from .models import DpColaborador
     CompetenciaEnquadramento.objects.filter(competencia=competencia).delete()
     CompetenciaAlocacao.objects.filter(competencia=competencia).delete()
     CompetenciaEnquadramento.objects.bulk_create([
         CompetenciaEnquadramento(competencia=competencia, colaborador_id=cid, equipe_id=eid)
-        for cid, eid in DpColaborador.objects.exclude(equipe_ref=None)
+        for cid, eid in DpColaborador.objects.filter(status="ativo")
+                                             .exclude(equipe_ref=None)
                                              .values_list("id", "equipe_ref_id")
     ])
     CompetenciaAlocacao.objects.bulk_create([
