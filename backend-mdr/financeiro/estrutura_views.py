@@ -79,17 +79,20 @@ def _impostos(fat: dict) -> dict:
     bruto = float(fat.get("bruto") or 0)
     descontos = float(fat.get("descontos") or 0)
     base = max(0.0, bruto - descontos)
-    lucro_presumido = base * float(fat.get("aliquotaLucroPresumido") or 0)
+    # Registros antigos guardavam apenas bruto/descontos. A tela de edição já
+    # os abre com estes defaults; o cálculo precisa usar a mesma regra, senão
+    # uma linha sem as chaves fiscais paga só PIS/COFINS no dashboard.
+    lucro_presumido = base * float(fat.get("aliquotaLucroPresumido") or 0.32)
     irpj = lucro_presumido * 0.15
     trimestral = lucro_presumido * 3
     irpj_adicional = ((trimestral - 60000) * 0.10) / 3 if trimestral > 60000 else 0.0
     csll = lucro_presumido * 0.09
     pis = base * 0.0065
     cofins = base * 0.03
-    if (fat.get("modoISS") or "percentual") == "sociedade":
+    if (fat.get("modoISS") or "sociedade") == "sociedade":
         iss = _iss_sociedade(fat.get("profissionaisISS"))
     else:
-        iss = base * float(fat.get("aliquotaISS") or 0)
+        iss = base * float(fat.get("aliquotaISS") or 0.02)
     total = irpj + irpj_adicional + csll + pis + cofins + iss
     return {"base_calculo": round(base, 2),
             "lucro_presumido": round(lucro_presumido, 2), "irpj": round(irpj, 2),

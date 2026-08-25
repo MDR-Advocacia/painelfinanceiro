@@ -1,90 +1,241 @@
-import { useApp } from "@/contexts/AppContext";
-import { getSetorResumoForPeriod, formatCurrency, formatPercent, getStatusLabel, getStatusColor, getTotalProfissionais } from "@/utils/calculations";
-import { Card, CardContent } from "@/components/ui/card";
-import { Badge } from "@/components/ui/badge";
-import { PeriodSelector } from "@/components/PeriodSelector";
-import { MONTH_NAMES } from "@/types/sector";
-import type { ViewMode } from "@/types/sector";
-import { useState } from "react";
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { useEffect, useMemo, useState } from "react";
 import {
-  Table, TableBody, TableCell, TableHead, TableHeader, TableRow,
-} from "@/components/ui/table";
+  AlertTriangle, Award, Building2, ChevronDown, DollarSign, TrendingUp, Users,
+} from "lucide-react";
 import {
-  BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip as RTooltip,
-  ResponsiveContainer, PieChart, Pie, Cell, Legend,
+  Bar, BarChart, CartesianGrid, Cell, Legend, Pie, PieChart,
+  ResponsiveContainer, Tooltip as RTooltip, XAxis, YAxis,
 } from "recharts";
-import { DollarSign, TrendingUp, Users, AlertTriangle, Building2, Award, HelpCircle } from "lucide-react";
+
+import { useApp } from "@/contexts/AppContext";
+import { PeriodSelector } from "@/components/PeriodSelector";
 import { Kpi, PageHeader, SectionTitle, SegButtons, Vazio } from "@/components/Pagina";
 import { TabelaRolavel } from "@/components/TabelaRolavel";
+import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
+import { Card, CardContent } from "@/components/ui/card";
+import {
+  DropdownMenu, DropdownMenuCheckboxItem, DropdownMenuContent,
+  DropdownMenuLabel, DropdownMenuSeparator, DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
+import { abrirDetalheEquipe, estruturaApi, type EfAlocacao, type EfEstrutura } from "@/services/estrutura";
+import { MONTH_NAMES } from "@/types/sector";
+import type { ViewMode } from "@/types/sector";
+import {
+  formatCurrency, formatPercent, getMonthsForPeriod, getStatusColor, getStatusLabel,
+} from "@/utils/calculations";
 
-// Paleta DunaTech (família Flow): azul elétrico + navy + tints, semânticos por último
 const CHART_COLORS = ["#1E7BFF", "#0A1940", "#7FB5FF", "#27AE60", "#F39C12", "#E74C3C"];
 
 const VIEW_MODE_LABELS: Record<ViewMode, string> = {
-  mensal: 'Mensal',
-  trimestral: 'Trimestral',
-  semestral: 'Semestral',
-  anual: 'Anual',
+  mensal: "Mensal",
+  trimestral: "Trimestral",
+  semestral: "Semestral",
+  anual: "Anual",
 };
 
+type StatusMargem = "excelente" | "saudavel" | "atencao" | "critico";
+
+interface EquipeResumo {
+  id: string;
+  nome: string;
+  grupo: string;
+  faturamento: number;
+  descontos: number;
+  impostos: number;
+  custoPessoal: number;
+  pessoasPorMes: Record<string, number>;
+  profissionais: number;
+  custoVPD: number;
+  lucroBruto: number;
+  margemLiquida: number;
+  margemLiquidaPercent: number;
+  status: StatusMargem;
+}
+
+function statusDaMargem(percentual: number): StatusMargem {
+  if (percentual > 25) return "excelente";
+  if (percentual > 15) return "saudavel";
+  if (percentual > 5) return "atencao";
+  return "critico";
+}
+
+function competenciaEsperada(periodo: string) {
+  const [ano, mes] = periodo.split("-");
+  return `${mes}/${ano}`;
+}
+
 export function Dashboard() {
-  const { setores, sedes, setActiveSetor, periodoAtivo, setPeriodoAtivo, viewMode, setViewMode, currentVpdValor } = useApp();
-  
-  // Estados dos filtros
-  const [filtroSede, setFiltroSede] = useState<string>("todas");
-  const [filtroSetor, setFiltroSetor] = useState<string>("todos");
-  
-  // 1. Aplica os filtros na lista de setores ANTES de calcular os resumos
-  const setoresFiltrados = setores.filter(s => {
-    const passaSede = filtroSede === "todas" || s.sedeId === filtroSede;
-    const passaSetor = filtroSetor === "todos" || s.id === filtroSetor;
-    return passaSede && passaSetor;
-  });
+  const {
+    sedes, periodoAtivo, setPeriodoAtivo, viewMode, setViewMode, currentVpdValor, setView,
+  } = useApp();
+  const [filtroSede, setFiltroSede] = useState("todas");
+  // Lista vazia representa "todas". Assim novas equipes entram automaticamente.
+  const [equipesSelecionadas, setEquipesSelecionadas] = useState<string[]>([]);
+  const [estruturas, setEstruturas] = useState<EfEstrutura[]>([]);
+  const [carregando, setCarregando] = useState(true);
+  const [erro, setErro] = useState<string | null>(null);
 
-  // 2. Gera os resumos usando apenas os setores filtrados
-  const resumos = setoresFiltrados.map(s => ({
-    setor: s,
-    resumo: getSetorResumoForPeriod(s, periodoAtivo, viewMode, currentVpdValor),
-  }));
+  const meses = useMemo(
+    () => getMonthsForPeriod(periodoAtivo, viewMode),
+    [periodoAtivo, viewMode],
+  );
 
-  // 3. Cálculos Originais
-  const totalFaturamento = resumos.reduce((a, r) => a + r.resumo.faturamentoBruto, 0);
-  const totalImpostos = resumos.reduce((a, r) => a + r.resumo.impostos.total, 0);
-  const totalCustos = resumos.reduce((a, r) => a + r.resumo.totalCustoPessoal, 0);
-  const lucroLiquidoConsolidado = resumos.reduce((a, r) => a + r.resumo.lucroLiquidoReal, 0);
-  const margemLiquidaPercent = totalFaturamento > 0 ? (lucroLiquidoConsolidado / totalFaturamento) * 100 : 0;
-  
-  // Vem do RESUMO, nao do bloco `pessoal` do setor. Contar direto do `pessoal`
-  // lia a quantidade DIGITADA por cargo no painel antigo, que ninguem atualiza:
-  // mostrava 171 em junho contra 173 ativos no DP, e ignorava tanto o espelho
-  // do cadastro quanto o rateio do apoio. O resumo ja' resolve essa precedencia.
-  const totalProfissionais = Math.round(
-    resumos.reduce((a, r) => a + r.resumo.headcount, 0));
+  useEffect(() => {
+    let vigente = true;
+    setCarregando(true);
+    setErro(null);
 
-  // 4. Novos Cálculos (Lucro Bruto, VPD, Variáveis)
-  const totalVariaveis = resumos.reduce((a, r) => a + r.resumo.totalVariaveis, 0);
-  const totalVPD = resumos.reduce((a, r) => a + r.resumo.custoVPD, 0);
-  const lucroBrutoConsolidado = resumos.reduce((a, r) => a + r.resumo.margemBruta, 0);
+    Promise.all(meses.map((mes) => estruturaApi.carregar(mes)))
+      .then((respostas) => {
+        if (!vigente) return;
+        // Evita que uma competência futura sem folha repita, por fallback, o
+        // custo do último mês fechado dentro de uma visão trimestral/anual.
+        const validas = respostas.filter((estrutura, indice) => {
+          const mes = meses[indice];
+          const temReceita = estrutura.periodos?.includes(mes) ?? false;
+          const temFolhaDoMes = estrutura.competencia_custo === competenciaEsperada(mes);
+          return temReceita || temFolhaDoMes;
+        });
+        setEstruturas(validas);
+      })
+      .catch((e) => {
+        if (vigente) setErro(e instanceof Error ? e.message : "Não foi possível carregar o dashboard.");
+      })
+      .finally(() => { if (vigente) setCarregando(false); });
+
+    return () => { vigente = false; };
+  }, [meses]);
+
+  const equipesDisponiveis = useMemo(() => {
+    const mapa = new Map<string, { id: string; nome: string; grupo: string }>();
+    const registrar = (a: EfAlocacao) => mapa.set(a.equipe_id, {
+      id: a.equipe_id, nome: a.equipe, grupo: a.grupo,
+    });
+    for (const estrutura of estruturas) {
+      for (const centro of [...estrutura.centros, ...estrutura.infraestrutura]) {
+        centro.alocacoes.forEach(registrar);
+        centro.linhas.forEach((linha) => linha.alocacoes.forEach(registrar));
+      }
+    }
+    return [...mapa.values()].sort((a, b) => a.nome.localeCompare(b.nome, "pt-BR"));
+  }, [estruturas]);
+
+  const idsSelecionados = useMemo(
+    () => new Set(equipesSelecionadas.length ? equipesSelecionadas : equipesDisponiveis.map((e) => e.id)),
+    [equipesSelecionadas, equipesDisponiveis],
+  );
+
+  const resumos = useMemo<EquipeResumo[]>(() => {
+    type Parcial = Omit<EquipeResumo, "profissionais" | "custoVPD" | "lucroBruto" | "margemLiquida" | "margemLiquidaPercent" | "status">;
+    const mapa = new Map<string, Parcial>();
+    const obter = (a: EfAlocacao) => {
+      let equipe = mapa.get(a.equipe_id);
+      if (!equipe) {
+        equipe = {
+          id: a.equipe_id, nome: a.equipe, grupo: a.grupo,
+          faturamento: 0, descontos: 0, impostos: 0, custoPessoal: 0,
+          pessoasPorMes: {},
+        };
+        mapa.set(a.equipe_id, equipe);
+      }
+      return equipe;
+    };
+
+    for (const estrutura of estruturas) {
+      const mes = estrutura.periodo || periodoAtivo;
+      for (const centro of [...estrutura.centros, ...estrutura.infraestrutura]) {
+        for (const linha of centro.linhas) {
+          if (filtroSede !== "todas" && linha.sede_id !== filtroSede) continue;
+          const denominador = linha.soma_percentual
+            || linha.alocacoes.reduce((soma, a) => soma + (a.percentual || 0), 0);
+          for (const alocacao of linha.alocacoes) {
+            if (!idsSelecionados.has(alocacao.equipe_id)) continue;
+            const equipe = obter(alocacao);
+            const participacao = denominador > 0 ? (alocacao.percentual || 0) / denominador : 0;
+            equipe.faturamento += linha.receita_bruta * participacao;
+            equipe.descontos += linha.descontos * participacao;
+            equipe.impostos += linha.impostos * participacao;
+            equipe.custoPessoal += alocacao.custo_total || 0;
+            equipe.pessoasPorMes[mes] = Math.max(equipe.pessoasPorMes[mes] || 0, alocacao.pessoas || 0);
+          }
+        }
+
+        for (const alocacao of centro.alocacoes) {
+          if (!idsSelecionados.has(alocacao.equipe_id)) continue;
+          let fatorSede = 1;
+          if (filtroSede !== "todas") {
+            if (centro.tipo === "infraestrutura") {
+              fatorSede = (centro.sedes.find((s) => s.sede_id === filtroSede)?.percentual || 0) / 100;
+            } else {
+              const sedesDoCentro = new Set(centro.sedes.map((s) => s.sede_id));
+              fatorSede = sedesDoCentro.has(filtroSede) ? 1 / Math.max(sedesDoCentro.size, 1) : 0;
+            }
+          }
+          if (!fatorSede) continue;
+          const equipe = obter(alocacao);
+          equipe.custoPessoal += (alocacao.custo_total || 0) * fatorSede;
+          equipe.pessoasPorMes[mes] = Math.max(
+            equipe.pessoasPorMes[mes] || 0,
+            (alocacao.pessoas || 0) * fatorSede,
+          );
+        }
+      }
+    }
+
+    const ultimoMes = estruturas.map((e) => e.periodo).filter(Boolean).sort().at(-1) || periodoAtivo;
+    return [...mapa.values()].map((equipe) => {
+      const profissionais = equipe.pessoasPorMes[ultimoMes] || 0;
+      const custoVPD = Object.values(equipe.pessoasPorMes)
+        .reduce((soma, pessoas) => soma + pessoas * currentVpdValor, 0);
+      const lucroBruto = equipe.faturamento - equipe.descontos - equipe.impostos - equipe.custoPessoal;
+      const margemLiquida = lucroBruto - custoVPD;
+      const margemLiquidaPercent = equipe.faturamento > 0 ? (margemLiquida / equipe.faturamento) * 100 : 0;
+      return {
+        ...equipe, profissionais, custoVPD, lucroBruto, margemLiquida,
+        margemLiquidaPercent, status: statusDaMargem(margemLiquidaPercent),
+      };
+    }).sort((a, b) => b.faturamento - a.faturamento || a.nome.localeCompare(b.nome, "pt-BR"));
+  }, [estruturas, filtroSede, idsSelecionados, currentVpdValor, periodoAtivo]);
+
+  const totalFaturamento = resumos.reduce((s, r) => s + r.faturamento, 0);
+  const totalDescontos = resumos.reduce((s, r) => s + r.descontos, 0);
+  const totalImpostos = resumos.reduce((s, r) => s + r.impostos, 0);
+  const totalCustos = resumos.reduce((s, r) => s + r.custoPessoal, 0);
+  const totalVPD = resumos.reduce((s, r) => s + r.custoVPD, 0);
+  const totalProfissionais = Math.round(resumos.reduce((s, r) => s + r.profissionais, 0));
+  const lucroBrutoConsolidado = totalFaturamento - totalDescontos - totalImpostos - totalCustos;
+  const lucroLiquidoConsolidado = lucroBrutoConsolidado - totalVPD;
   const margemBrutaPercent = totalFaturamento > 0 ? (lucroBrutoConsolidado / totalFaturamento) * 100 : 0;
+  const margemLiquidaPercent = totalFaturamento > 0 ? (lucroLiquidoConsolidado / totalFaturamento) * 100 : 0;
 
-  const [year, month] = periodoAtivo.split('-').map(Number);
-  const periodLabel = viewMode === 'mensal' ? `${MONTH_NAMES[month - 1]} ${year}`
-    : viewMode === 'trimestral' ? `${Math.ceil(month / 3)}º Tri ${year}`
-    : viewMode === 'semestral' ? `${month <= 6 ? '1º' : '2º'} Sem ${year}`
-    : `${year}`;
+  const [year, month] = periodoAtivo.split("-").map(Number);
+  const periodLabel = viewMode === "mensal" ? `${MONTH_NAMES[month - 1]} ${year}`
+    : viewMode === "trimestral" ? `${Math.ceil(month / 3)}º Tri ${year}`
+      : viewMode === "semestral" ? `${month <= 6 ? "1º" : "2º"} Sem ${year}` : `${year}`;
 
-  const barData = resumos.map(r => ({
-    name: r.setor.nome.length > 12 ? r.setor.nome.slice(0, 12) + '…' : r.setor.nome,
-    Faturamento: r.resumo.faturamentoBruto,
-    Custos: r.resumo.totalCustoPessoal,
-    Impostos: r.resumo.impostos.total,
+  const filtroEquipeLabel = equipesSelecionadas.length === 0 ? "Todas as equipes"
+    : equipesSelecionadas.length === 1
+      ? equipesDisponiveis.find((e) => e.id === equipesSelecionadas[0])?.nome || "1 equipe"
+      : `${equipesSelecionadas.length} equipes`;
+
+  const alternarEquipe = (id: string, marcada: boolean) => {
+    const todos = equipesDisponiveis.map((e) => e.id);
+    const atuais = equipesSelecionadas.length ? new Set(equipesSelecionadas) : new Set(todos);
+    if (marcada) atuais.add(id); else atuais.delete(id);
+    const proxima = todos.filter((equipeId) => atuais.has(equipeId));
+    setEquipesSelecionadas(proxima.length === todos.length ? [] : proxima);
+  };
+
+  const barData = resumos.map((r) => ({
+    name: r.nome.length > 15 ? `${r.nome.slice(0, 15)}…` : r.nome,
+    Faturamento: r.faturamento, Custos: r.custoPessoal, Impostos: r.impostos,
   }));
-
-  const pieData = resumos.filter(r => r.resumo.faturamentoBruto > 0).map(r => ({
-    name: r.setor.nome,
-    value: r.resumo.faturamentoBruto,
-  }));
+  const pieData = resumos.filter((r) => r.faturamento > 0).map((r) => ({ name: r.nome, value: r.faturamento }));
+  const custoParcial = estruturas.some((e) => e.custo_parcial);
+  const competenciaCusto = estruturas.map((e) => e.competencia_custo).filter(Boolean).sort().at(-1);
 
   return (
     <div className="animate-fade-in space-y-6">
@@ -92,83 +243,91 @@ export function Dashboard() {
         eyebrow="Visão consolidada"
         titulo="Dashboard"
         descricao={<>
-          {periodLabel} · visão {VIEW_MODE_LABELS[viewMode].toLowerCase()}
+          {periodLabel} · visão {VIEW_MODE_LABELS[viewMode].toLowerCase()} por equipe
           {filtroSede !== "todas" && <> · {sedes.find((s) => s.id === filtroSede)?.nome}</>}
         </>}
         acoes={<>
           <SegButtons
             valor={viewMode}
             onChange={(m) => setViewMode(m as ViewMode)}
-            opcoes={(['mensal', 'trimestral', 'semestral', 'anual'] as ViewMode[]).map((m) => ({ v: m, label: VIEW_MODE_LABELS[m] }))}
+            opcoes={(Object.keys(VIEW_MODE_LABELS) as ViewMode[]).map((m) => ({ v: m, label: VIEW_MODE_LABELS[m] }))}
           />
-          <div className="flex gap-2">
-            <Select value={filtroSede} onValueChange={(v) => { setFiltroSede(v); setFiltroSetor('todos'); }}>
-              <SelectTrigger className="w-[140px] h-9 text-xs">
-                <SelectValue placeholder="Todas as Sedes" />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="todas">Todas as Sedes</SelectItem>
-                {sedes?.map(sede => (
-                  <SelectItem key={sede.id} value={sede.id}>{sede.nome}</SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-
-            <Select value={filtroSetor} onValueChange={setFiltroSetor}>
-              <SelectTrigger className="w-[140px] h-9 text-xs">
-                <SelectValue placeholder="Todos os Setores" />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="todos">Todos os Setores</SelectItem>
-                {setores
-                  .filter(s => filtroSede === "todas" || s.sedeId === filtroSede)
-                  .map(s => (
-                  <SelectItem key={s.id} value={s.id}>{s.nome}</SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-          </div>
+          <Select value={filtroSede} onValueChange={setFiltroSede}>
+            <SelectTrigger className="h-9 w-[140px] text-xs"><SelectValue placeholder="Todas as Sedes" /></SelectTrigger>
+            <SelectContent>
+              <SelectItem value="todas">Todas as Sedes</SelectItem>
+              {sedes.map((sede) => <SelectItem key={sede.id} value={sede.id}>{sede.nome}</SelectItem>)}
+            </SelectContent>
+          </Select>
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <Button variant="outline" size="sm" className="w-[190px] justify-between px-3 text-xs font-normal">
+                <span className="truncate">{filtroEquipeLabel}</span><ChevronDown className="ml-2 h-4 w-4 opacity-60" />
+              </Button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="end" className="max-h-[430px] w-[310px] overflow-y-auto">
+              <DropdownMenuLabel>Equipes no dashboard</DropdownMenuLabel>
+              <DropdownMenuCheckboxItem
+                checked={equipesSelecionadas.length === 0}
+                onCheckedChange={() => setEquipesSelecionadas([])}
+                onSelect={(e) => e.preventDefault()}
+              >Todas as equipes</DropdownMenuCheckboxItem>
+              <DropdownMenuSeparator />
+              {equipesDisponiveis.map((equipe) => (
+                <DropdownMenuCheckboxItem
+                  key={equipe.id}
+                  checked={equipesSelecionadas.length === 0 || equipesSelecionadas.includes(equipe.id)}
+                  onCheckedChange={(marcada) => alternarEquipe(equipe.id, marcada === true)}
+                  onSelect={(e) => e.preventDefault()}
+                ><span className="truncate">{equipe.nome}</span></DropdownMenuCheckboxItem>
+              ))}
+            </DropdownMenuContent>
+          </DropdownMenu>
           <PeriodSelector value={periodoAtivo} onChange={setPeriodoAtivo} />
         </>}
       />
 
-      {setores.length === 0 ? (
-        <Vazio
-          icone={Building2}
-          titulo="Nenhum setor cadastrado"
-          texto="Crie o primeiro setor pela barra lateral — o dashboard começa a somar assim que houver faturamento lançado."
-        />
+      {erro ? (
+        <Vazio icone={AlertTriangle} titulo="Não foi possível carregar os dados" texto={erro} />
+      ) : carregando && estruturas.length === 0 ? (
+        <Vazio icone={Building2} titulo="Carregando dashboard" texto="Consolidando faturamento e folha por equipe…" />
+      ) : resumos.length === 0 ? (
+        <Vazio icone={Users} titulo="Nenhuma equipe neste recorte" texto="Altere as equipes, a sede ou o período selecionado." />
       ) : (
         <>
-          {/* Grade alterada para 4 colunas em telas médias/grandes para comportar os 8 cards em 2 linhas */}
-          <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+          <div className="grid grid-cols-2 gap-4 md:grid-cols-4">
             <Kpi icone={DollarSign} rotulo="Faturamento total" valor={formatCurrency(totalFaturamento)} />
             <Kpi icone={AlertTriangle} rotulo="Total de impostos" valor={formatCurrency(totalImpostos)} tom="atencao" corValor="text-warning" />
-            <Kpi icone={Users} rotulo="Custos de pessoal" valor={formatCurrency(totalCustos)} tom="negativo" corValor="text-destructive" />
-            <Kpi icone={Award} rotulo="Var. centro de custo" valor={formatCurrency(totalVariaveis)} tom="negativo" corValor="text-destructive" />
-
-            <Kpi icone={DollarSign} rotulo="Lucro bruto" valor={formatCurrency(lucroBrutoConsolidado)}
-                 sub={formatPercent(margemBrutaPercent)}
-                 tom={lucroBrutoConsolidado >= 0 ? "positivo" : "negativo"}
-                 corValor={lucroBrutoConsolidado >= 0 ? "text-success" : "text-destructive"} />
+            <Kpi
+              icone={Users} rotulo="Custos de pessoal" valor={formatCurrency(totalCustos)}
+              sub={competenciaCusto ? `Folha ${competenciaCusto}${custoParcial ? " · em andamento" : ""}` : undefined}
+              tom="negativo" corValor="text-destructive"
+            />
+            <Kpi icone={Award} rotulo="Var. centro de custo" valor={formatCurrency(0)} tom="negativo" corValor="text-destructive" />
+            <Kpi
+              icone={DollarSign} rotulo="Lucro bruto" valor={formatCurrency(lucroBrutoConsolidado)}
+              sub={formatPercent(margemBrutaPercent)} tom={lucroBrutoConsolidado >= 0 ? "positivo" : "negativo"}
+              corValor={lucroBrutoConsolidado >= 0 ? "text-success" : "text-destructive"}
+            />
             <Kpi icone={Building2} rotulo="Despesas ind. (VPD)" valor={formatCurrency(totalVPD)} tom="negativo" corValor="text-destructive" />
-            <Kpi icone={TrendingUp} rotulo="Margem líquida real" valor={formatCurrency(lucroLiquidoConsolidado)}
-                 sub={formatPercent(margemLiquidaPercent)}
-                 tom={lucroLiquidoConsolidado >= 0 ? "positivo" : "negativo"}
-                 corValor={lucroLiquidoConsolidado >= 0 ? "text-success" : "text-destructive"} />
+            <Kpi
+              icone={TrendingUp} rotulo="Margem líquida real" valor={formatCurrency(lucroLiquidoConsolidado)}
+              sub={formatPercent(margemLiquidaPercent)} tom={lucroLiquidoConsolidado >= 0 ? "positivo" : "negativo"}
+              corValor={lucroLiquidoConsolidado >= 0 ? "text-success" : "text-destructive"}
+            />
             <Kpi icone={Users} rotulo="Total de profissionais" valor={String(totalProfissionais)} />
           </div>
 
-          {barData.some(d => d.Faturamento > 0) && (
-            <div className="grid lg:grid-cols-2 gap-4">
+          {barData.some((d) => d.Faturamento > 0) && (
+            <div className="grid gap-4 lg:grid-cols-2">
               <Card className="glass-card border-0">
                 <CardContent className="pt-6">
-                  <SectionTitle eyebrow="Comparação" titulo="Faturamento vs custos por setor" />
+                  <SectionTitle eyebrow="Comparação" titulo="Faturamento vs custos por equipe" />
                   <ResponsiveContainer width="100%" height={250}>
                     <BarChart data={barData}>
                       <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))" />
                       <XAxis dataKey="name" tick={{ fontSize: 11 }} />
-                      <YAxis tick={{ fontSize: 11 }} tickFormatter={v => `${(v / 1000).toFixed(0)}k`} />
+                      <YAxis tick={{ fontSize: 11 }} tickFormatter={(v) => `${(v / 1000).toFixed(0)}k`} />
                       <RTooltip formatter={(v: number) => formatCurrency(v)} />
                       <Bar dataKey="Faturamento" fill="#1E7BFF" radius={[4, 4, 0, 0]} />
                       <Bar dataKey="Custos" fill="#E74C3C" radius={[4, 4, 0, 0]} />
@@ -178,16 +337,13 @@ export function Dashboard() {
                   </ResponsiveContainer>
                 </CardContent>
               </Card>
-
               <Card className="glass-card border-0">
                 <CardContent className="pt-6">
                   <SectionTitle eyebrow="Participação" titulo="Distribuição do faturamento" />
                   <ResponsiveContainer width="100%" height={250}>
                     <PieChart>
                       <Pie data={pieData} dataKey="value" nameKey="name" cx="50%" cy="50%" innerRadius={50} outerRadius={90} paddingAngle={3}>
-                        {pieData.map((_, i) => (
-                          <Cell key={i} fill={CHART_COLORS[i % CHART_COLORS.length]} />
-                        ))}
+                        {pieData.map((_, i) => <Cell key={i} fill={CHART_COLORS[i % CHART_COLORS.length]} />)}
                       </Pie>
                       <RTooltip formatter={(v: number) => formatCurrency(v)} />
                       <Legend />
@@ -200,83 +356,42 @@ export function Dashboard() {
 
           <Card className="glass-card border-0">
             <CardContent className="pt-6">
-              <SectionTitle eyebrow="Detalhamento" titulo="Comparativo de setores"
-                            acoes={<span className="text-xs text-muted-foreground">clique numa linha para abrir o setor</span>} />
+              <SectionTitle
+                eyebrow="Detalhamento" titulo="Comparativo de equipes"
+                acoes={<span className="text-xs text-muted-foreground">clique numa linha para abrir a equipe</span>}
+              />
               <TabelaRolavel altura="max-h-[58vh]">
                 <Table>
                   <TableHeader className="sticky top-0 z-10 bg-card/95 backdrop-blur [&_th]:border-b">
                     <TableRow>
-                      <TableHead className="text-xs">Setor</TableHead>
-                      <TableHead className="text-xs">Tipo</TableHead>
-                      <TableHead className="text-xs text-right">Faturamento</TableHead>
-                      <TableHead className="text-xs text-right">Impostos</TableHead>
-                      <TableHead className="text-xs text-right">
-                        <span className="inline-flex items-center gap-1">
-                          Pessoal direto
-                          <span title={"Folha das pessoas que trabalham NESTA linha: salário, "
-                                        + "benefícios, provisões e encargos. Não inclui o backoffice, "
-                                        + "que aparece na coluna ao lado."} className="cursor-help">
-                            <HelpCircle className="h-3 w-3 text-muted-foreground" />
-                          </span>
-                        </span>
-                      </TableHead>
-                      <TableHead className="text-xs text-right">
-                        <span className="inline-flex items-center gap-1">
-                          Backoffice
-                          <span title={"RATEIO PROPORCIONAL das equipes de apoio (Administrativo e "
-                                        + "TI), que servem todas as linhas e não faturam. "
-                                        + "O critério é o NÚMERO DE COLABORADORES envolvidos: o custo "
-                                        + "total do apoio é dividido pelo total de pessoas das linhas, e "
-                                        + "cada linha leva a fatia proporcional à sua própria equipe. "
-                                        + "Linha com o dobro de gente carrega o dobro de backoffice. "
-                                        + "Sem esse rateio a margem de cada cliente apareceria melhor do "
-                                        + "que é, porque o custo do apoio ficaria fora da conta."} className="cursor-help">
-                            <HelpCircle className="h-3 w-3 text-muted-foreground" />
-                          </span>
-                        </span>
-                      </TableHead>
-                      <TableHead className="text-xs text-right">Custos Pessoal</TableHead>
-                      <TableHead className="text-xs text-right">Margem Líquida (R$)</TableHead>
-                      <TableHead className="text-xs text-right">Margem Líquida (%)</TableHead>
-                      <TableHead className="text-xs text-center">Status</TableHead>
+                      <TableHead className="text-xs">Equipe</TableHead>
+                      <TableHead className="text-xs">Grupo</TableHead>
+                      <TableHead className="text-right text-xs">Faturamento</TableHead>
+                      <TableHead className="text-right text-xs">Impostos</TableHead>
+                      <TableHead className="text-right text-xs">Profissionais</TableHead>
+                      <TableHead className="text-right text-xs">Custos pessoal</TableHead>
+                      <TableHead className="text-right text-xs">VPD</TableHead>
+                      <TableHead className="text-right text-xs">Margem líquida (R$)</TableHead>
+                      <TableHead className="text-right text-xs">Margem líquida (%)</TableHead>
+                      <TableHead className="text-center text-xs">Status</TableHead>
                     </TableRow>
                   </TableHeader>
                   <TableBody>
-                    {resumos.map(({ setor, resumo }) => (
+                    {resumos.map((resumo) => (
                       <TableRow
-                        key={setor.id}
-                        title="Abrir o setor"
+                        key={resumo.id} title="Abrir a equipe"
                         className="group cursor-pointer border-l-2 border-transparent transition-colors hover:border-l-[hsl(var(--dunatech-blue))] hover:bg-[hsl(var(--dunatech-blue))]/5"
-                        onClick={() => setActiveSetor(setor.id)}
+                        onClick={() => abrirDetalheEquipe(resumo.id, setView)}
                       >
-                        <TableCell className="text-sm font-medium group-hover:text-[hsl(var(--dunatech-blue))]">
-                          {setor.nome}
-                        </TableCell>
-                        <TableCell>
-                          <Badge variant="outline" className="text-[10px]">
-                            {setor.tipo === 'operacional' ? 'Oper.' : 'Admin.'}
-                          </Badge>
-                        </TableCell>
-                        <TableCell className="text-right font-mono text-xs">{formatCurrency(resumo.faturamentoBruto)}</TableCell>
-                        <TableCell className="text-right font-mono text-xs">{formatCurrency(resumo.impostos.total)}</TableCell>
-                        <TableCell className="text-right font-mono text-xs">
-                          {formatCurrency(resumo.custoPessoalDireto)}
-                        </TableCell>
-                        <TableCell className="text-right font-mono text-xs"
-                                   title={resumo.custoBackoffice > 0
-                                     ? `${formatCurrency(resumo.custoBackoffice)} de apoio rateado por cabeça`
-                                     : "Setor de apoio: o custo dele é rateado NAS outras linhas"}>
-                          {resumo.custoBackoffice > 0
-                            ? <span className="text-sky-700 dark:text-sky-300">
-                                {formatCurrency(resumo.custoBackoffice)}
-                              </span>
-                            : <span className="text-muted-foreground">—</span>}
-                        </TableCell>
-                        <TableCell className="text-right font-mono text-xs font-semibold">
-                          {formatCurrency(resumo.totalCustoPessoal)}
-                        </TableCell>
-                        <TableCell className={`text-right font-mono text-xs ${resumo.lucroLiquidoReal >= 0 ? 'text-success' : 'text-destructive'}`}>
-                          {formatCurrency(resumo.lucroLiquidoReal)}
+                        <TableCell className="text-sm font-medium group-hover:text-[hsl(var(--dunatech-blue))]">{resumo.nome}</TableCell>
+                        <TableCell><Badge variant="outline" className="text-[10px]">{resumo.grupo}</Badge></TableCell>
+                        <TableCell className="text-right font-mono text-xs">{formatCurrency(resumo.faturamento)}</TableCell>
+                        <TableCell className="text-right font-mono text-xs">{formatCurrency(resumo.impostos)}</TableCell>
+                        <TableCell className="text-right font-mono text-xs">{Math.round(resumo.profissionais)}</TableCell>
+                        <TableCell className="text-right font-mono text-xs font-semibold">{formatCurrency(resumo.custoPessoal)}</TableCell>
+                        <TableCell className="text-right font-mono text-xs">{formatCurrency(resumo.custoVPD)}</TableCell>
+                        <TableCell className={`text-right font-mono text-xs ${resumo.margemLiquida >= 0 ? "text-success" : "text-destructive"}`}>
+                          {formatCurrency(resumo.margemLiquida)}
                         </TableCell>
                         <TableCell className="text-right font-mono text-xs">{formatPercent(resumo.margemLiquidaPercent)}</TableCell>
                         <TableCell className="text-center">
@@ -296,4 +411,3 @@ export function Dashboard() {
     </div>
   );
 }
-

@@ -3,7 +3,7 @@ from django.test import TestCase
 from rest_framework.authtoken.models import Token
 from rest_framework.test import APIClient
 
-from .estrutura_views import _competencia_do_periodo
+from .estrutura_views import _competencia_do_periodo, _impostos
 from .models import CentroFaturamento, DpCompetencia, LinhaFaturamento, Sede, Setor
 
 
@@ -81,6 +81,11 @@ class FaturamentoEspelhoTests(TestCase):
         self.assertEqual(faturamento["aliquotaLucroPresumido"], 0.32)
 
 class CompetenciaEstruturaTests(TestCase):
+    def test_impostos_usam_defaults_quando_registro_antigo_so_tem_bruto(self):
+        impostos = _impostos({"bruto": 814673.38, "descontos": 0})
+
+        self.assertEqual(impostos["total"], 116372.04)
+
     def test_receita_de_julho_usa_folha_de_julho_mesmo_aberta(self):
         DpCompetencia.objects.create(ano=2026, mes=5, status="fechada")
         julho = DpCompetencia.objects.create(ano=2026, mes=7, status="aberta")
