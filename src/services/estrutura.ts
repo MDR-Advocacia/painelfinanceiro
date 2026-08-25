@@ -7,6 +7,8 @@ export interface EfAlocacao {
   id: string; equipe_id: string; equipe: string; slug: string; grupo: string;
   percentual: number; centro_custo: string | null;
   custo_total: number | null; a_pagar: number | null; pessoas: number | null;
+  custo_total_por_sede?: Record<string, number>;
+  pessoas_por_sede?: Record<string, number>;
 }
 export interface EfImpostos {
   lucro_presumido: number; irpj: number; irpj_adicional: number; csll: number;

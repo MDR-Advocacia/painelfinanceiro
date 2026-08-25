@@ -128,6 +128,8 @@ export function Dashboard() {
     () => new Set(equipesSelecionadas ?? equipesDisponiveis.map((e) => e.id)),
     [equipesSelecionadas, equipesDisponiveis],
   );
+  const sedeSelecionadaNome = filtroSede === "todas"
+    ? null : sedes.find((s) => s.id === filtroSede)?.nome || null;
 
   const resumos = useMemo<EquipeResumo[]>(() => {
     type Parcial = Omit<EquipeResumo, "profissionais" | "custoVPD" | "lucroBruto" | "margemLiquida" | "margemLiquidaPercent" | "status">;
@@ -149,38 +151,44 @@ export function Dashboard() {
       const mes = estrutura.periodo || periodoAtivo;
       for (const centro of [...estrutura.centros, ...estrutura.infraestrutura]) {
         for (const linha of centro.linhas) {
-          if (filtroSede !== "todas" && linha.sede_id !== filtroSede) continue;
+          const linhaDaSede = filtroSede === "todas" || linha.sede_id === filtroSede;
           const denominador = linha.soma_percentual
             || linha.alocacoes.reduce((soma, a) => soma + (a.percentual || 0), 0);
           for (const alocacao of linha.alocacoes) {
             if (!idsSelecionados.has(alocacao.equipe_id)) continue;
+            const custo = sedeSelecionadaNome === null
+              ? (alocacao.custo_total || 0)
+              : (alocacao.custo_total_por_sede?.[sedeSelecionadaNome] || 0);
+            const pessoas = sedeSelecionadaNome === null
+              ? (alocacao.pessoas || 0)
+              : (alocacao.pessoas_por_sede?.[sedeSelecionadaNome] || 0);
+            if (!linhaDaSede && custo === 0 && pessoas === 0) continue;
             const equipe = obter(alocacao);
             const participacao = denominador > 0 ? (alocacao.percentual || 0) / denominador : 0;
-            equipe.faturamento += linha.receita_bruta * participacao;
-            equipe.descontos += linha.descontos * participacao;
-            equipe.impostos += linha.impostos * participacao;
-            equipe.custoPessoal += alocacao.custo_total || 0;
-            equipe.pessoasPorMes[mes] = Math.max(equipe.pessoasPorMes[mes] || 0, alocacao.pessoas || 0);
+            if (linhaDaSede) {
+              equipe.faturamento += linha.receita_bruta * participacao;
+              equipe.descontos += linha.descontos * participacao;
+              equipe.impostos += linha.impostos * participacao;
+            }
+            equipe.custoPessoal += custo;
+            equipe.pessoasPorMes[mes] = Math.max(equipe.pessoasPorMes[mes] || 0, pessoas);
           }
         }
 
         for (const alocacao of centro.alocacoes) {
           if (!idsSelecionados.has(alocacao.equipe_id)) continue;
-          let fatorSede = 1;
-          if (filtroSede !== "todas") {
-            if (centro.tipo === "infraestrutura") {
-              fatorSede = (centro.sedes.find((s) => s.sede_id === filtroSede)?.percentual || 0) / 100;
-            } else {
-              const sedesDoCentro = new Set(centro.sedes.map((s) => s.sede_id));
-              fatorSede = sedesDoCentro.has(filtroSede) ? 1 / Math.max(sedesDoCentro.size, 1) : 0;
-            }
-          }
-          if (!fatorSede) continue;
+          const custo = sedeSelecionadaNome === null
+            ? (alocacao.custo_total || 0)
+            : (alocacao.custo_total_por_sede?.[sedeSelecionadaNome] || 0);
+          const pessoas = sedeSelecionadaNome === null
+            ? (alocacao.pessoas || 0)
+            : (alocacao.pessoas_por_sede?.[sedeSelecionadaNome] || 0);
+          if (custo === 0 && pessoas === 0) continue;
           const equipe = obter(alocacao);
-          equipe.custoPessoal += (alocacao.custo_total || 0) * fatorSede;
+          equipe.custoPessoal += custo;
           equipe.pessoasPorMes[mes] = Math.max(
             equipe.pessoasPorMes[mes] || 0,
-            (alocacao.pessoas || 0) * fatorSede,
+            pessoas,
           );
         }
       }
@@ -199,7 +207,7 @@ export function Dashboard() {
         margemLiquidaPercent, status: statusDaMargem(margemLiquidaPercent),
       };
     }).sort((a, b) => b.faturamento - a.faturamento || a.nome.localeCompare(b.nome, "pt-BR"));
-  }, [estruturas, filtroSede, idsSelecionados, currentVpdValor, periodoAtivo]);
+  }, [estruturas, filtroSede, sedeSelecionadaNome, idsSelecionados, currentVpdValor, periodoAtivo]);
 
   const totalFaturamento = resumos.reduce((s, r) => s + r.faturamento, 0);
   const totalDescontos = resumos.reduce((s, r) => s + r.descontos, 0);

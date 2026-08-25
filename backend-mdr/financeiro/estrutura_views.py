@@ -192,14 +192,24 @@ def _custo_por_equipe(ultima_fechada) -> dict:
     equipe_de = _enquadramento_da_competencia(ultima_fechada)
     saida = {}
     for it in (DpFolhaItem.objects.filter(competencia=ultima_fechada)
-               .values("colaborador_id", "custo_total", "total_pagar")):
+               .values("colaborador_id", "colaborador__unidade",
+                       "custo_total", "total_pagar")):
         eq = equipe_de.get(it["colaborador_id"])
         if not eq:
             continue
-        d = saida.setdefault(str(eq), {"pessoas": 0, "custo_total": 0.0, "a_pagar": 0.0})
+        d = saida.setdefault(str(eq), {"pessoas": 0, "custo_total": 0.0,
+                                      "a_pagar": 0.0, "por_sede": {}})
         d["pessoas"] += 1
         d["custo_total"] = round(d["custo_total"] + (it["custo_total"] or 0), 2)
         d["a_pagar"] = round(d["a_pagar"] + (it["total_pagar"] or 0), 2)
+        sede = (it["colaborador__unidade"] or "Sem unidade").strip()
+        por_sede = d["por_sede"].setdefault(
+            sede, {"pessoas": 0, "custo_total": 0.0, "a_pagar": 0.0})
+        por_sede["pessoas"] += 1
+        por_sede["custo_total"] = round(
+            por_sede["custo_total"] + (it["custo_total"] or 0), 2)
+        por_sede["a_pagar"] = round(
+            por_sede["a_pagar"] + (it["total_pagar"] or 0), 2)
     return saida
 
 
@@ -257,6 +267,7 @@ def estrutura(request):
             origem = "centro_custo" if base else None
         soma_eq = soma_por_equipe.get(a.equipe_id) or 0
         fator = ((a.percentual or 0) / soma_eq) if soma_eq else 0.0
+        por_sede = (base or {}).get("por_sede", {})
         return {
             "custo_origem": origem,
             "id": str(a.id),
@@ -276,6 +287,16 @@ def estrutura(request):
             # consegue conferir. Divergencia entre as duas e' justamente o que o
             # painel de Cobertura aponta.
             "pessoas": base["pessoas"] if base else None,
+            # O filtro de sede do dashboard representa a UNIDADE da pessoa no
+            # DP. Cada fatia continua normalizada pelas alocações da equipe;
+            # ao somar todos os destinos, fecha exatamente com a folha da sede.
+            "custo_total_por_sede": {
+                sede: round(valores["custo_total"] * fator, 2)
+                for sede, valores in por_sede.items()
+            },
+            "pessoas_por_sede": {
+                sede: valores["pessoas"] for sede, valores in por_sede.items()
+            },
         }
 
     def json_linha(l):
