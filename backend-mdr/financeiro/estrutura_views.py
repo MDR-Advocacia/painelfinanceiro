@@ -128,6 +128,36 @@ def _enquadramento_da_competencia(comp) -> dict:
     return enquadramento
 
 
+def _quadro_ativo_por_equipe(comp) -> dict:
+    """Headcount por equipe usado no breakeven, com quebra por unidade.
+
+    Normalmente ele é o quadro vivo. Uma competência com retrato manual é a
+    exceção deliberada: ali a composição mensal curada prevalece, sem alterar
+    a sidebar ou o cadastro atual.
+    """
+    from .models import DpColaborador
+    from .models_estrutura import CompetenciaEnquadramento, _tem_retrato_manual
+
+    if comp and _tem_retrato_manual(comp):
+        fonte = (CompetenciaEnquadramento.objects.filter(competencia=comp)
+                 .values("equipe_id", "colaborador__unidade"))
+        campo_sede = "colaborador__unidade"
+    else:
+        fonte = (DpColaborador.objects.filter(status="ativo")
+                 .exclude(equipe_ref=None).values("equipe_ref_id", "unidade"))
+        campo_sede = "unidade"
+
+    ativos = {}
+    for pessoa in fonte:
+        equipe_id = pessoa.get("equipe_id") or pessoa.get("equipe_ref_id")
+        chave = str(equipe_id)
+        item = ativos.setdefault(chave, {"total": 0, "por_sede": {}})
+        item["total"] += 1
+        sede = (pessoa.get(campo_sede) or "Sem unidade").strip()
+        item["por_sede"][sede] = item["por_sede"].get(sede, 0) + 1
+    return ativos
+
+
 def _soma_percentual_por_equipe(comp) -> dict:
     """{equipe_id: soma dos percentuais} vigente no mês — da foto, se houver.
 
@@ -253,16 +283,7 @@ def estrutura(request):
     # Headcount para breakeven/VPD é o QUADRO ATUAL, por decisão gerencial.
     # O custo continua sendo o da folha da competência. Mantemos também a
     # quebra por unidade para o filtro de sede usar os ativos de hoje.
-    from .models import DpColaborador
-    ativos_eq = {}
-    for pessoa in (DpColaborador.objects.filter(status="ativo")
-                   .exclude(equipe_ref=None)
-                   .values("equipe_ref_id", "unidade")):
-        chave = str(pessoa["equipe_ref_id"])
-        item = ativos_eq.setdefault(chave, {"total": 0, "por_sede": {}})
-        item["total"] += 1
-        sede = (pessoa["unidade"] or "Sem unidade").strip()
-        item["por_sede"][sede] = item["por_sede"].get(sede, 0) + 1
+    ativos_eq = _quadro_ativo_por_equipe(competencia)
 
     # O percentual divide a RECEITA da linha. Pro CUSTO a conta é outra: uma
     # equipe que atende N linhas (Ajuizamento atende 6) tem o custo dela
@@ -414,11 +435,23 @@ def estrutura(request):
 
     # equipes sem nenhuma alocação (ex.: Equipe Mista) — visíveis pra não sumir gente
     alocadas = set(Alocacao.objects.values_list("equipe_id", flat=True))
-    saida["sem_alocacao"] = [
-        {"id": str(e.id), "equipe": e.nome, "slug": e.slug, "grupo": e.grupo,
-         "centro_custo": e.centro_custo.nome if e.centro_custo_id else None}
-        for e in Equipe.objects.exclude(id__in=alocadas).filter(ativo=True)
-    ]
+    saida["sem_alocacao"] = []
+    for e in Equipe.objects.exclude(id__in=alocadas).filter(ativo=True):
+        base = custo_eq.get(str(e.id), {})
+        ativos = ativos_eq.get(str(e.id), {"total": 0, "por_sede": {}})
+        por_sede = base.get("por_sede", {})
+        saida["sem_alocacao"].append({
+            "id": str(e.id), "equipe": e.nome, "slug": e.slug, "grupo": e.grupo,
+            "centro_custo": e.centro_custo.nome if e.centro_custo_id else None,
+            "custo_total": round(base.get("custo_total", 0), 2),
+            "a_pagar": round(base.get("a_pagar", 0), 2),
+            "custo_total_por_sede": {
+                sede: round(valores["custo_total"], 2)
+                for sede, valores in por_sede.items()
+            },
+            "pessoas_ativas": ativos["total"],
+            "pessoas_ativas_por_sede": ativos["por_sede"],
+        })
     return Response(saida)
 
 
@@ -891,8 +924,9 @@ def equipe_detalhe(request, pk):
             competencia=comp, equipe=e).values_list("colaborador_id", flat=True))
         if ids_foto:
             ids_pessoas = ids_foto
-            historico_origem = ("foto_fechamento" if comp.status == "fechada"
-                                else "retrato_competencia")
+            from .models_estrutura import _tem_retrato_manual
+            historico_origem = ("retrato_competencia" if _tem_retrato_manual(comp)
+                                else "foto_fechamento")
         else:
             # Competência aberta ainda não tem foto. O histórico verificável é
             # o quadro atual cruzado com quem efetivamente consta naquela folha.

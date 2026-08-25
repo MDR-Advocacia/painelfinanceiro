@@ -120,6 +120,14 @@ export function Dashboard() {
         centro.alocacoes.forEach(registrar);
         centro.linhas.forEach((linha) => linha.alocacoes.forEach(registrar));
       }
+      for (const equipe of estrutura.sem_alocacao) {
+        if ((equipe.custo_total || 0) > 0 || (equipe.pessoas_ativas || 0) > 0) {
+          mapa.set(equipe.id, {
+            id: equipe.id, nome: equipe.equipe || equipe.nome || "Equipe",
+            grupo: equipe.grupo,
+          });
+        }
+      }
     }
     return [...mapa.values()].sort((a, b) => a.nome.localeCompare(b.nome, "pt-BR"));
   }, [estruturas]);
@@ -191,6 +199,27 @@ export function Dashboard() {
             pessoas,
           );
         }
+      }
+
+      // Retratos históricos podem conter uma equipe que existia naquele mês,
+      // mas que hoje não está alocada em nenhuma linha. Ela continua precisando
+      // aparecer no recorte para o custo e o headcount não sumirem do total.
+      for (const semAlocacao of estrutura.sem_alocacao) {
+        if (!idsSelecionados.has(semAlocacao.id)) continue;
+        const custo = sedeSelecionadaNome === null
+          ? (semAlocacao.custo_total || 0)
+          : (semAlocacao.custo_total_por_sede?.[sedeSelecionadaNome] || 0);
+        const pessoas = sedeSelecionadaNome === null
+          ? (semAlocacao.pessoas_ativas || 0)
+          : (semAlocacao.pessoas_ativas_por_sede?.[sedeSelecionadaNome] || 0);
+        if (custo === 0 && pessoas === 0) continue;
+        const equipe = obter({
+          equipe_id: semAlocacao.id,
+          equipe: semAlocacao.equipe || semAlocacao.nome || "Equipe",
+          grupo: semAlocacao.grupo,
+        } as EfAlocacao);
+        equipe.custoPessoal += custo;
+        equipe.pessoasPorMes[mes] = Math.max(equipe.pessoasPorMes[mes] || 0, pessoas);
       }
     }
 

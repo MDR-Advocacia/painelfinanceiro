@@ -3,12 +3,15 @@ from django.test import TestCase
 from rest_framework.authtoken.models import Token
 from rest_framework.test import APIClient
 
-from .estrutura_views import _competencia_do_periodo, _enquadramento_da_competencia, _impostos
-from .models import (
-    CentroFaturamento, DpCentroCusto, DpColaborador, DpCompetencia, DpFolhaItem,
-    Equipe, LinhaFaturamento, Sede, Setor,
+from .estrutura_views import (
+    _competencia_do_periodo, _enquadramento_da_competencia, _impostos,
+    _quadro_ativo_por_equipe,
 )
-from .models_estrutura import CompetenciaEnquadramento
+from .models import (
+    CentroFaturamento, DpAuditLog, DpCentroCusto, DpColaborador, DpCompetencia,
+    DpFolhaItem, Equipe, LinhaFaturamento, Sede, Setor,
+)
+from .models_estrutura import CompetenciaEnquadramento, congelar_competencia
 
 
 class FaturamentoEspelhoTests(TestCase):
@@ -152,6 +155,10 @@ class EquipeHistoricoTests(TestCase):
             )
             for pessoa in self.pessoas
         ])
+        DpAuditLog.objects.create(
+            usuario="teste", acao="salvar_retrato", entidade="dp_competencia",
+            entidade_id=str(self.comp.id), depois={"foto_enquadramentos": 5},
+        )
 
         url = (f"/api/estrutura/equipes/{self.equipe.id}/detalhe/"
                "?periodo=2026-07&composicao=historica")
@@ -170,3 +177,27 @@ class EquipeHistoricoTests(TestCase):
 
         self.assertEqual(len(enquadramento), 5)
         self.assertEqual(enquadramento[self.pessoas[4].id], self.equipe.id)
+
+    def test_retrato_manual_define_headcount_e_nao_e_sobrescrito_no_fechamento(self):
+        retratadas = self.pessoas[:3]
+        CompetenciaEnquadramento.objects.bulk_create([
+            CompetenciaEnquadramento(
+                competencia=self.comp, colaborador=pessoa, equipe=self.equipe,
+            )
+            for pessoa in retratadas
+        ])
+        DpAuditLog.objects.create(
+            usuario="teste", acao="salvar_retrato", entidade="dp_competencia",
+            entidade_id=str(self.comp.id), depois={"foto_enquadramentos": 3},
+        )
+
+        quadro = _quadro_ativo_por_equipe(self.comp)
+        congelar_competencia(self.comp)
+
+        self.assertEqual(quadro[str(self.equipe.id)]["total"], 3)
+        self.assertEqual(
+            CompetenciaEnquadramento.objects.filter(
+                competencia=self.comp, equipe=self.equipe,
+            ).count(),
+            3,
+        )

@@ -264,17 +264,38 @@ class CompetenciaAlocacao(models.Model):
         db_table = "ef_foto_alocacoes"
 
 
+def _tem_retrato_manual(competencia) -> bool:
+    """A competência tem uma composição histórica curada pelo operador.
+
+    O audit log é imutável e já registra a decisão que originou o retrato. Usá-lo
+    como marcador impede que fechar/reabrir a folha apague uma composição mensal
+    corrigida sem transformar o cadastro atual na fotografia do passado.
+    """
+    from .models import DpAuditLog
+    return DpAuditLog.objects.filter(
+        acao="salvar_retrato", entidade="dp_competencia",
+        entidade_id=str(competencia.id),
+    ).exists()
+
+
 def congelar_competencia(competencia):
     """Tira a foto dos ativos e das alocações. Idempotente."""
     from .models import DpColaborador
-    CompetenciaEnquadramento.objects.filter(competencia=competencia).delete()
+    # Um retrato manual representa uma decisão histórica explícita. Fechar a
+    # folha depois não pode substituí-lo pelo quadro vivo daquele dia.
+    retrato_manual = _tem_retrato_manual(competencia)
+    if not retrato_manual:
+        CompetenciaEnquadramento.objects.filter(competencia=competencia).delete()
     CompetenciaAlocacao.objects.filter(competencia=competencia).delete()
-    CompetenciaEnquadramento.objects.bulk_create([
-        CompetenciaEnquadramento(competencia=competencia, colaborador_id=cid, equipe_id=eid)
-        for cid, eid in DpColaborador.objects.filter(status="ativo")
-                                             .exclude(equipe_ref=None)
-                                             .values_list("id", "equipe_ref_id")
-    ])
+    if not retrato_manual:
+        CompetenciaEnquadramento.objects.bulk_create([
+            CompetenciaEnquadramento(
+                competencia=competencia, colaborador_id=cid, equipe_id=eid,
+            )
+            for cid, eid in DpColaborador.objects.filter(status="ativo")
+                                                 .exclude(equipe_ref=None)
+                                                 .values_list("id", "equipe_ref_id")
+        ])
     CompetenciaAlocacao.objects.bulk_create([
         CompetenciaAlocacao(competencia=competencia, equipe_id=a.equipe_id,
                             linha_id=a.linha_id, centro_id=a.centro_id,
@@ -287,7 +308,9 @@ def congelar_competencia(competencia):
 
 def descongelar_competencia(competencia):
     """Reabriu o mês: a foto sai e volta a valer o estado ao vivo."""
-    n1 = CompetenciaEnquadramento.objects.filter(competencia=competencia).delete()[0]
+    n1 = 0
+    if not _tem_retrato_manual(competencia):
+        n1 = CompetenciaEnquadramento.objects.filter(competencia=competencia).delete()[0]
     n2 = CompetenciaAlocacao.objects.filter(competencia=competencia).delete()[0]
     return n1, n2
 

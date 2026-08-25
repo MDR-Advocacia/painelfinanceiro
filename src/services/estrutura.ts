@@ -45,6 +45,10 @@ export interface EfEquipe {
   centro_custo: string | null; centro_custo_id?: string | null;
   alocada_em?: string[];
   colaboradores?: number;
+  custo_total?: number; a_pagar?: number;
+  custo_total_por_sede?: Record<string, number>;
+  pessoas_ativas?: number;
+  pessoas_ativas_por_sede?: Record<string, number>;
 }
 export interface EfCentroDetalhe {
   id: string; nome: string; tipo: string;
