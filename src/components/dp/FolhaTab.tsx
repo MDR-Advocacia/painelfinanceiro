@@ -1156,10 +1156,20 @@ function AjusteDialog({ comp, item, onClose, onAjustou }: {
           <div><Label className="text-xs text-muted-foreground">Saldo livre (R$)</Label>
             <Input type="number" step="0.01" value={saldo} onChange={(e) => setSaldo(e.target.value)}
                    className="font-mono text-sm" /></div>
-          <div><Label className="text-xs text-muted-foreground">Vale-transporte (R$)</Label>
+          <div>
+            <Label className="flex items-center gap-1 text-xs text-muted-foreground">
+              Vale-transporte (R$)
+              <Ajuda titulo="VT fixado à mão"
+                     texto="O valor digitado aqui é FINAL: a proporcionalidade de faltas e férias não se aplica por cima. É a válvula pros casos que o automático não alcança — férias programadas depois da folha anterior já fechada, acerto de depósito. Lembrete da regra: o VT do mês é depositado no mês ANTERIOR, então férias programadas já reduzem o depósito da folha anterior sozinhas." />
+            </Label>
             <Input type="number" step="0.01" value={vt} onChange={(e) => setVt(e.target.value)}
                    className="font-mono text-sm" /></div>
-          <div><Label className="text-xs text-muted-foreground">Vale-alimentação (R$)</Label>
+          <div>
+            <Label className="flex items-center gap-1 text-xs text-muted-foreground">
+              Vale-alimentação (R$)
+              <Ajuda titulo="VA fixado à mão"
+                     texto="Valor FINAL, sem proporcionalidade por cima — mesma regra do VT ao lado. Férias programadas para o mês seguinte já reduzem o depósito desta folha automaticamente; use este campo quando a programação chegou tarde ou para acerto pontual." />
+            </Label>
             <Input type="number" step="0.01" value={va} onChange={(e) => setVa(e.target.value)}
                    className="font-mono text-sm" /></div>
           <div className="col-span-2">

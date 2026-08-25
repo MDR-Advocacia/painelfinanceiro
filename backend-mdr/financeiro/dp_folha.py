@@ -492,7 +492,14 @@ def calcular_item(colab: DpColaborador, lanc, comp: DpCompetencia, fiscal: DpTab
     # (VT ÷ dias úteis) e o vale-alimentação por dia CORRIDO (VA ÷ 30). Antes os
     # dois usavam dias úteis, o que descontava VA a mais.
     dias_falta = f_dias + (f_horas / (horas_ref / dias_ref) if horas_ref else 0)
-    dias_corridos_fora = fer_dias + afast_empresa + afast_inss
+
+    # FÉRIAS NÃO CORTAM VT/VA NO MÊS DO GOZO. Regra do DP (21/08/2026): o
+    # benefício é DEPOSITADO NO MÊS ANTERIOR para custear o mês seguinte, então
+    # a proporcionalidade das férias tem que sair da folha ANTERIOR ao gozo —
+    # é lá embaixo, no bloco de antecipação. Cortar aqui cortaria um benefício
+    # que já foi pago antes, e por inteiro.
+    # Afastamento é diferente: é imprevisto por natureza, corta no próprio mês.
+    dias_corridos_fora = afast_empresa + afast_inss
 
     # VT: converte os dias corridos ausentes em dias úteis equivalentes
     ausencia_vt = dias_falta + dias_corridos_fora * (comp.dias_uteis / 30)
@@ -500,16 +507,64 @@ def calcular_item(colab: DpColaborador, lanc, comp: DpCompetencia, fiscal: DpTab
 
     # VA: dia corrido direto. Em ACIDENTE de trabalho o vale-alimentação NÃO
     # pode ser cortado, então os dias de afastamento saem da conta.
-    dias_va = dias_falta + fer_dias + ((afast_empresa + afast_inss) if afast_corta_va else 0)
+    dias_va = dias_falta + ((afast_empresa + afast_inss) if afast_corta_va else 0)
     fator_va = min(dias_va / 30, 1.0) if dias_va else 0.0
 
-    vt_faltas = round(vt * (1 - fator_vt), 2) if vt else 0.0
-    va_faltas = round(va * (1 - fator_va), 2) if va else 0.0
-    if fator_vt or fator_va:
+    # ── ANTECIPAÇÃO: férias programadas para o MÊS SEGUINTE cortam AQUI ────
+    # O depósito desta folha custeia o transporte e a alimentação do mês que
+    # vem; se a pessoa vai gozar N dias lá, este depósito já sai proporcional.
+    fer_prox_dias = 0
+    prox_uteis = comp.dias_uteis
+    if lanc is not None:
+        pa, pm = (comp.ano + 1, 1) if comp.mes == 12 else (comp.ano, comp.mes + 1)
+        prox = DpCompetencia.objects.filter(ano=pa, mes=pm).first()
+        # simulacao usa colaborador fake sem pk — filtrar por ele explodiria
+        if prox and getattr(colab, "pk", None):
+            lanc_prox = DpLancamento.objects.filter(
+                competencia=prox, colaborador=colab).first()
+            if lanc_prox and (lanc_prox.ferias_dias or 0) > 0:
+                fer_prox_dias = min(int(lanc_prox.ferias_dias), 30)
+                prox_uteis = prox.dias_uteis or comp.dias_uteis
+    if fer_prox_dias:
+        # a régua é a do MÊS DE GOZO (é lá que os dias deixam de ser usados)
+        corte_vt_prox = min(fer_prox_dias * (prox_uteis / 30) / max(prox_uteis, 1), 1.0)
+        corte_va_prox = min(fer_prox_dias / 30, 1.0)
+        fator_vt = min(fator_vt + corte_vt_prox, 1.0)
+        fator_va = min(fator_va + corte_va_prox, 1.0)
+        mem["beneficios_antecipacao"] = (
+            f"férias de {fer_prox_dias} dia(s) programadas para "
+            f"{pm:02d}/{pa}: o depósito deste mês custeia o mês do gozo, "
+            f"então VT corta {corte_vt_prox:.1%} e VA corta {corte_va_prox:.1%} "
+            f"JÁ NESTA folha (regra do depósito antecipado)")
+
+    # ── OVERRIDE MANUAL = VALOR FINAL ──────────────────────────────────────
+    # Quando o operador fixa VT/VA no ajuste pontual, o número dele é o que
+    # vale — SEM proporcionalidade por cima. É a válvula para o caso que o
+    # automático não alcança: férias lançadas depois da folha anterior já
+    # fechada ("no máximo na folha posterior ao retorno", nas palavras do DP),
+    # acerto de depósito, situação atípica.
+    vt_fixado = lanc is not None and getattr(lanc, "vt_override", None) is not None
+    va_fixado = lanc is not None and getattr(lanc, "va_override", None) is not None
+
+    vt_faltas = round(vt if vt_fixado else vt * (1 - fator_vt), 2) if vt else 0.0
+    va_faltas = round(va if va_fixado else va * (1 - fator_va), 2) if va else 0.0
+    if vt_fixado or va_fixado:
+        mem["beneficios_fixados"] = (
+            ("VT fixado à mão em R$ %.2f — proporcionalidade não se aplica. " % vt
+             if vt_fixado else "")
+            + ("VA fixado à mão em R$ %.2f — proporcionalidade não se aplica." % va
+               if va_fixado else ""))
+    if (fator_vt or fator_va) and not (vt_fixado and va_fixado):
         mem["beneficios_proporcionais"] = (
-            f"VT: {ausencia_vt:.2f} dia(s) ÷ {comp.dias_uteis} úteis = {fator_vt:.1%} "
-            f"de corte · VA: {dias_va:.2f} dia(s) ÷ 30 = {fator_va:.1%} de corte"
+            f"VT: {fator_vt:.1%} de corte · VA: {fator_va:.1%} de corte"
             + ("" if afast_corta_va else " (VA preservado: acidente de trabalho)"))
+    if fer_dias and not fer_prox_dias and not (vt_fixado or va_fixado):
+        mem["beneficios_ferias_mes"] = (
+            f"férias de {fer_dias} dia(s) NESTE mês não cortam o VT/VA daqui: "
+            f"o corte saiu (ou deveria ter saído) da folha ANTERIOR, que "
+            f"custeou este mês. Se a programação veio tarde e a folha anterior "
+            f"já estava fechada, ajuste o VT/VA à mão nesta folha ou na "
+            f"posterior ao retorno — ajuste pontual, campos VT e VA.")
 
     # ── FÉRIAS DO MÊS ──────────────────────────────────────────────────────
     # Os dias de férias saem do salário (não se trabalha) e voltam como
