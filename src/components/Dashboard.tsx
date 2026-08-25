@@ -72,8 +72,9 @@ export function Dashboard() {
     sedes, periodoAtivo, setPeriodoAtivo, viewMode, setViewMode, currentVpdValor, setView,
   } = useApp();
   const [filtroSede, setFiltroSede] = useState("todas");
-  // Lista vazia representa "todas". Assim novas equipes entram automaticamente.
-  const [equipesSelecionadas, setEquipesSelecionadas] = useState<string[]>([]);
+  // null representa "todas"; [] representa nenhuma, para o usuário poder
+  // limpar o menu e montar rapidamente um recorte com duas ou três equipes.
+  const [equipesSelecionadas, setEquipesSelecionadas] = useState<string[] | null>(null);
   const [estruturas, setEstruturas] = useState<EfEstrutura[]>([]);
   const [carregando, setCarregando] = useState(true);
   const [erro, setErro] = useState<string | null>(null);
@@ -124,7 +125,7 @@ export function Dashboard() {
   }, [estruturas]);
 
   const idsSelecionados = useMemo(
-    () => new Set(equipesSelecionadas.length ? equipesSelecionadas : equipesDisponiveis.map((e) => e.id)),
+    () => new Set(equipesSelecionadas ?? equipesDisponiveis.map((e) => e.id)),
     [equipesSelecionadas, equipesDisponiveis],
   );
 
@@ -216,17 +217,18 @@ export function Dashboard() {
     : viewMode === "trimestral" ? `${Math.ceil(month / 3)}º Tri ${year}`
       : viewMode === "semestral" ? `${month <= 6 ? "1º" : "2º"} Sem ${year}` : `${year}`;
 
-  const filtroEquipeLabel = equipesSelecionadas.length === 0 ? "Todas as equipes"
-    : equipesSelecionadas.length === 1
+  const filtroEquipeLabel = equipesSelecionadas === null ? "Todas as equipes"
+    : equipesSelecionadas.length === 0 ? "Nenhuma equipe"
+      : equipesSelecionadas.length === 1
       ? equipesDisponiveis.find((e) => e.id === equipesSelecionadas[0])?.nome || "1 equipe"
       : `${equipesSelecionadas.length} equipes`;
 
   const alternarEquipe = (id: string, marcada: boolean) => {
     const todos = equipesDisponiveis.map((e) => e.id);
-    const atuais = equipesSelecionadas.length ? new Set(equipesSelecionadas) : new Set(todos);
+    const atuais = equipesSelecionadas === null ? new Set(todos) : new Set(equipesSelecionadas);
     if (marcada) atuais.add(id); else atuais.delete(id);
     const proxima = todos.filter((equipeId) => atuais.has(equipeId));
-    setEquipesSelecionadas(proxima.length === todos.length ? [] : proxima);
+    setEquipesSelecionadas(proxima.length === todos.length ? null : proxima);
   };
 
   const barData = resumos.map((r) => ({
@@ -268,15 +270,15 @@ export function Dashboard() {
             <DropdownMenuContent align="end" className="max-h-[430px] w-[310px] overflow-y-auto">
               <DropdownMenuLabel>Equipes no dashboard</DropdownMenuLabel>
               <DropdownMenuCheckboxItem
-                checked={equipesSelecionadas.length === 0}
-                onCheckedChange={() => setEquipesSelecionadas([])}
+                checked={equipesSelecionadas === null}
+                onCheckedChange={(marcada) => setEquipesSelecionadas(marcada === true ? null : [])}
                 onSelect={(e) => e.preventDefault()}
               >Todas as equipes</DropdownMenuCheckboxItem>
               <DropdownMenuSeparator />
               {equipesDisponiveis.map((equipe) => (
                 <DropdownMenuCheckboxItem
                   key={equipe.id}
-                  checked={equipesSelecionadas.length === 0 || equipesSelecionadas.includes(equipe.id)}
+                  checked={equipesSelecionadas === null || equipesSelecionadas.includes(equipe.id)}
                   onCheckedChange={(marcada) => alternarEquipe(equipe.id, marcada === true)}
                   onSelect={(e) => e.preventDefault()}
                 ><span className="truncate">{equipe.nome}</span></DropdownMenuCheckboxItem>
