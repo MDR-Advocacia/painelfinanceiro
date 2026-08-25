@@ -74,7 +74,7 @@ function CampoValor({ valor, onChange, destaque }: {
 export default function InformeFaturamento({ centroId, centroNome, podeEditar }: {
   centroId: string; centroNome: string; podeEditar: boolean;
 }) {
-  const { periodoAtivo } = useApp();
+  const { periodoAtivo, refreshSetores } = useApp();
   const [periodo, setPeriodo] = useState(periodoAtivo);
   const [linhas, setLinhas] = useState<EfInformeLinha[] | null>(null);
   const [mesesLancados, setMeses] = useState<string[]>([]);
@@ -122,11 +122,23 @@ export default function InformeFaturamento({ centroId, centroNome, podeEditar }:
     estruturaApi.lancarInforme(centroId, periodo, pendentes.map((l) => ({
       linha_id: l.linha_id, bruto: valor(l, "bruto"), descontos: valor(l, "descontos"),
     })))
-      .then((r) => {
+      .then(async (r) => {
+        // O dashboard ainda consome o Setor legado, atualizado pelo backend
+        // junto com a linha. Sem recarregar esse espelho, a tela continuava
+        // exibindo o snapshot do login (R$ 0,00) até um refresh completo.
+        let dashboardAtualizado = true;
+        try {
+          await refreshSetores();
+        } catch {
+          dashboardAtualizado = false;
+        }
         toast.success(
           `${r.alteradas} linha${r.alteradas === 1 ? "" : "s"} lançada${r.alteradas === 1 ? "" : "s"} em ${rotuloMes(periodo)}.`,
           r.espelhado_em.length ? { description: `Espelhado no histórico: ${r.espelhado_em.join(", ")}.` } : undefined,
         );
+        if (!dashboardAtualizado) {
+          toast.warning("O lançamento foi salvo, mas o dashboard precisa ser recarregado.");
+        }
         carregar();
       })
       .catch((e) => toast.error(e.message))

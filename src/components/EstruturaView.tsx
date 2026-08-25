@@ -825,7 +825,7 @@ export default EstruturaView;
 function FaturamentoDialog({ linha, onFechar, onSalvou }: {
   linha: EfLinha; onFechar: () => void; onSalvou: () => void;
 }) {
-  const { periodoAtivo } = useApp();
+  const { periodoAtivo, refreshSetores } = useApp();
   const [periodo, setPeriodo] = useState(periodoAtivo);
   const [dados, setDados] = useState<Record<string, any> | null>(null);
   const [meses, setMeses] = useState<string[]>([]);
@@ -850,7 +850,19 @@ function FaturamentoDialog({ linha, onFechar, onSalvou }: {
   const salvar = () => {
     setSalvando(true);
     estruturaApi.lancarFaturamento(linha.id, periodo, dados!)
-      .then(() => { toast.success(`Faturamento de ${rotuloMes(periodo)} lançado em ${linha.nome}.`); onSalvou(); })
+      .then(async () => {
+        let dashboardAtualizado = true;
+        try {
+          await refreshSetores();
+        } catch {
+          dashboardAtualizado = false;
+        }
+        toast.success(`Faturamento de ${rotuloMes(periodo)} lançado em ${linha.nome}.`);
+        if (!dashboardAtualizado) {
+          toast.warning("O lançamento foi salvo, mas o dashboard precisa ser recarregado.");
+        }
+        onSalvou();
+      })
       .catch((e) => { toast.error(e.message); setSalvando(false); });
   };
 

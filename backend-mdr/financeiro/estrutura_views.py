@@ -17,8 +17,9 @@ from rest_framework.parsers import FormParser, MultiPartParser
 from .models_estrutura import FaturamentoDocumento
 from .models import (
     Alocacao, CentroFaturamento, CentroSede, DpCompetencia, DpFolhaItem, Equipe,
-    LinhaFaturamento, Sede,
+    LinhaFaturamento, Sede, Setor,
 )
+from .sso_views import LEGACY_DATA_USER_ID
 from .views import modulo_permission
 
 # Permissões separadas por RISCO, não por tela:
@@ -154,6 +155,32 @@ def _ultimo_periodo(linhas) -> str | None:
     return max(pers) if pers else None
 
 
+def _competencia_do_periodo(periodo):
+    """Folha da mesma competência da receita exibida.
+
+    Misturar receita de julho com a última folha fechada e alocações atuais
+    duplica custo sempre que uma linha nasce depois da foto do fechamento.
+    Competência aberta pode ser usada, mas a resposta a sinaliza como parcial.
+    Sem folha naquele mês, mantém o fallback histórico da última fechada.
+    """
+    if periodo:
+        try:
+            ano, mes = (int(v) for v in periodo.split("-", 1))
+        except (TypeError, ValueError):
+            ano = mes = None
+        if ano and mes:
+            comp = DpCompetencia.objects.filter(ano=ano, mes=mes).first()
+            if comp:
+                return comp, comp.status != "fechada"
+
+    fechada = (DpCompetencia.objects.filter(status="fechada")
+               .order_by("-ano", "-mes").first())
+    if fechada:
+        return fechada, False
+    aberta = DpCompetencia.objects.order_by("-ano", "-mes").first()
+    return aberta, aberta is not None
+
+
 def _custo_por_equipe(ultima_fechada) -> dict:
     """Custo por EQUIPE somando a folha das pessoas ENQUADRADAS nela — a conta
     exata que a normalização funcionário→equipe permite."""
@@ -202,24 +229,19 @@ def estrutura(request):
     linhas = list(linhas_qs)
     per = request.query_params.get("periodo") or _ultimo_periodo(linhas)
 
-    # regra acordada: custo vem da última competência FECHADA. Enquanto não
-    # existir nenhuma (caso do ambiente local), cai na mais recente calculada
-    # e avisa que o número é parcial.
-    fechada = (DpCompetencia.objects.filter(status="fechada")
-               .order_by("-ano", "-mes").first())
-    custo_parcial = False
-    if not fechada:
-        fechada = DpCompetencia.objects.order_by("-ano", "-mes").first()
-        custo_parcial = fechada is not None
-    custo_cc = _custo_por_cc(fechada)
-    custo_eq = _custo_por_equipe(fechada)
+    # Receita e custo precisam falar da MESMA competência. Usar a última folha
+    # fechada com as alocações vivas de julho foi o que inflou 419 mil para
+    # 565 mil quando "Faturamentos diversos" recebeu as equipes do BB.
+    competencia, custo_parcial = _competencia_do_periodo(per)
+    custo_cc = _custo_por_cc(competencia)
+    custo_eq = _custo_por_equipe(competencia)
 
     # O percentual divide a RECEITA da linha. Pro CUSTO a conta é outra: uma
     # equipe que atende N linhas (Ajuizamento atende 6) tem o custo dela
     # distribuído na PROPORÇÃO das alocações — senão a mesma folha entraria
     # inteira em cada cliente (dupla contagem: foi o que a primeira versão
     # desta tela mostrou com Ativos Réu em Ativos S.A. E em Banese).
-    soma_por_equipe = _soma_percentual_por_equipe(fechada)
+    soma_por_equipe = _soma_percentual_por_equipe(competencia)
 
     def json_alocacao(a):
         # 1ª escolha: folha das pessoas ENQUADRADAS na equipe (normalização);
@@ -274,7 +296,8 @@ def estrutura(request):
     periodos = sorted({p for l in linhas for p, f in (l.periodos or {}).items()
                        if (f or {}).get("bruto")}, reverse=True)
     saida = {"periodo": per, "periodos": periodos,
-             "competencia_custo": (f"{fechada.mes:02d}/{fechada.ano}" if fechada else None),
+             "competencia_custo": (f"{competencia.mes:02d}/{competencia.ano}"
+                                    if competencia else None),
              "custo_parcial": custo_parcial,
              "centros": [], "infraestrutura": []}
     por_centro = {}
@@ -549,8 +572,21 @@ def linha_crud(request, pk=None):
             return Response({"detail": "Área inválida."}, status=400)
         if centro.linhas.filter(nome__iexact=nome).exists():
             return Response({"detail": "Já existe essa linha neste centro."}, status=409)
-        l = LinhaFaturamento.objects.create(centro=centro, nome=nome, area=area,
-                                            ordem=centro.linhas.count())
+        # Dashboard/Projeções/Rentabilidade ainda leem Setor. Linha nova sem
+        # esse vínculo fica invisível nesses painéis (foi o caso de
+        # "Faturamentos diversos" em 07/2026).
+        nome_setor = nome
+        if Setor.objects.filter(nome=nome_setor).exists():
+            nome_setor = f"{nome} - {centro.nome}"
+        with transaction.atomic():
+            setor = Setor.objects.create(
+                user_id=LEGACY_DATA_USER_ID, nome=nome_setor,
+                tipo="operacional", periodos={},
+            )
+            l = LinhaFaturamento.objects.create(
+                centro=centro, nome=nome, area=area,
+                ordem=centro.linhas.count(), setor_legado=setor,
+            )
         audit(request, "criar", "ef_linha", l.id, depois={"linha": str(l), "area": area})
         return Response({"id": str(l.id)}, status=status.HTTP_201_CREATED)
 
@@ -858,7 +894,9 @@ def equipe_detalhe(request, pk):
 @permission_classes(_PERM)
 def linha_sede(request, pk):
     """Troca a sede de uma linha. {sede_id: uuid|null}"""
-    l = LinhaFaturamento.objects.select_related("centro", "sede").filter(pk=pk).first()
+    l = LinhaFaturamento.objects.select_related(
+        "centro", "sede", "setor_legado",
+    ).filter(pk=pk).first()
     if not l:
         return Response(status=404)
     antes = l.sede.nome if l.sede_id else None
@@ -866,8 +904,12 @@ def linha_sede(request, pk):
     sede = Sede.objects.filter(pk=sede_id).first() if sede_id else None
     if sede_id and not sede:
         return Response({"detail": "Sede não encontrada."}, status=400)
-    l.sede = sede
-    l.save(update_fields=["sede", "updated_at"])
+    with transaction.atomic():
+        l.sede = sede
+        l.save(update_fields=["sede", "updated_at"])
+        if l.setor_legado_id:
+            l.setor_legado.sede = sede
+            l.setor_legado.save(update_fields=["sede", "updated_at"])
     audit(request, "editar", "ef_linha", l.id,
           antes={"linha": str(l), "sede": antes},
           depois={"linha": str(l), "sede": sede.nome if sede else None})
@@ -1053,6 +1095,11 @@ def sede_detalhe(request, pk):
 # histórico copiado na migração continue válido e nada se perca.
 _CAMPOS_FAT_NUM = ("bruto", "descontos", "aliquotaLucroPresumido", "aliquotaISS",
                    "profissionaisISS", "premiacaoTotal", "diversosTotal")
+_FATURAMENTO_DEFAULT = {
+    "bruto": 0, "descontos": 0, "aliquotaLucroPresumido": 0.32,
+    "aliquotaISS": 0.02, "modoISS": "sociedade", "profissionaisISS": 0,
+    "premiacaoTotal": 0, "diversosTotal": 0,
+}
 _PERIODO_RE = re.compile(r"^\d{4}-(0[1-9]|1[0-2])$")
 
 
@@ -1073,7 +1120,8 @@ def linha_faturamento(request, pk):
     if not _PERIODO_RE.match(periodo):
         return Response({"detail": "Informe o período no formato AAAA-MM."}, status=400)
 
-    atual = dict((l.periodos or {}).get(periodo) or {})
+    salvo = dict((l.periodos or {}).get(periodo) or {})
+    atual = {**_FATURAMENTO_DEFAULT, **salvo}
     if request.method == "GET":
         return Response({
             "linha": l.nome, "centro": l.centro.nome, "periodo": periodo,
@@ -1097,14 +1145,17 @@ def linha_faturamento(request, pk):
     if novo.get("bruto", 0) < 0:
         return Response({"detail": "O faturamento bruto não pode ser negativo."}, status=400)
 
-    periodos = dict(l.periodos or {})
-    periodos[periodo] = novo
-    l.periodos = periodos
-    l.save(update_fields=["periodos", "updated_at"])
+    with transaction.atomic():
+        periodos = dict(l.periodos or {})
+        periodos[periodo] = novo
+        l.periodos = periodos
+        l.save(update_fields=["periodos", "updated_at"])
+        espelhado_em = _espelhar_no_setor_legado(l, periodo)
     audit(request, "editar", "ef_linha", l.id,
           antes={"linha": l.nome, "periodo": periodo, "faturamento": atual},
           depois={"linha": l.nome, "periodo": periodo, "faturamento": novo})
-    return Response({"periodo": periodo, "faturamento": novo})
+    return Response({"periodo": periodo, "faturamento": novo,
+                     "espelhado_em": [espelhado_em] if espelhado_em else []})
 
 
 @api_view(["GET"])
@@ -1435,12 +1486,17 @@ def _espelhar_no_setor_legado(linha, periodo):
         total_desc += float(f.get("descontos") or 0)
         if l.id == linha.id:
             base = f
-    fat = dict(base or {})
-    fat["bruto"] = round(total_bruto, 2)
-    fat["descontos"] = round(total_desc, 2)
-
     pers = dict(setor.periodos or {})
     bloco = dict(pers.get(periodo) or {})
+    # Metadados fiscais já existentes no Setor (ex.: profissionais do ISS)
+    # não podem sumir quando o informe em lote manda apenas bruto/descontos.
+    fat = {
+        **_FATURAMENTO_DEFAULT,
+        **(bloco.get("faturamento") or {}),
+        **(base or {}),
+    }
+    fat["bruto"] = round(total_bruto, 2)
+    fat["descontos"] = round(total_desc, 2)
     bloco["faturamento"] = fat
     bloco.setdefault("pessoal", (pers.get(periodo) or {}).get("pessoal") or {})
     bloco.setdefault("despesasEventuais", (pers.get(periodo) or {}).get("despesasEventuais") or [])
@@ -1452,7 +1508,8 @@ def _espelhar_no_setor_legado(linha, periodo):
 
 def _aplicar_faturamento(linha, periodo, dados):
     """Grava o faturamento de um mês na linha. Devolve (antes, depois)."""
-    atual = dict((linha.periodos or {}).get(periodo) or {})
+    salvo = dict((linha.periodos or {}).get(periodo) or {})
+    atual = {**_FATURAMENTO_DEFAULT, **salvo}
     novo = dict(atual)
     for campo in _CAMPOS_FAT_NUM:
         if campo in dados:

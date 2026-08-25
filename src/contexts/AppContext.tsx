@@ -8,6 +8,14 @@ import { getVpdValor } from '@/utils/calculations';
 // A URL DA NOSSA NOVA API DJANGO!
 const API_URL = import.meta.env.VITE_API_URL;
 
+interface SetorApiRow {
+  id: string;
+  nome: string;
+  tipo: TipoSetor;
+  sedeId?: string | null;
+  periodos?: Record<string, PeriodoData>;
+}
+
 interface AppState {
   setores: Setor[];
   sedes: Sede[];
@@ -40,6 +48,8 @@ interface AppContextType extends AppState {
   hasUnsavedChanges: boolean;
   isSaving: boolean;
   saveData: () => Promise<void>;
+  /** Recarrega o espelho legado consumido pelo dashboard. */
+  refreshSetores: () => Promise<void>;
   // Atualizado para receber os novos campos
   updateVpdValor: (periodo: string, valor: number, headcount: number, despesasBase: any[], pessoalApoio: any[]) => void;
   currentVpdValor: number;
@@ -89,6 +99,27 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
   const markUnsaved = useCallback(() => {
     lastChangeRef.current = Date.now();
     setHasUnsavedChanges(true);
+  }, []);
+
+  const refreshSetores = useCallback(async () => {
+    const res = await fetch(`${API_URL}/setores/`, { headers: authHeaders() });
+    if (res.status === 401) {
+      clearSessionAndReload();
+      throw new Error('unauthorized');
+    }
+    if (!res.ok) throw new Error(`${res.status} ${res.statusText}`);
+    const rows = await res.json();
+    if (!Array.isArray(rows)) throw new Error('Resposta inválida ao carregar setores.');
+
+    const setoresData = rows.map((r: SetorApiRow) => ({
+      id: r.id,
+      nome: r.nome,
+      tipo: r.tipo,
+      sedeId: r.sedeId ?? undefined,
+      periodos: r.periodos ?? {},
+    }));
+    setSetores(setoresData);
+    persistedSetorIdsRef.current = new Set(setoresData.map((s) => s.id));
   }, []);
 
   // --- 1. CARREGAMENTO INICIAL DO BANCO (VIA DJANGO API) ---
@@ -368,7 +399,8 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
         const count = setores.filter(s => s.sedeId === id).length;
         return count === 0 ? 0 : total / count;
       },
-      loading, hasUnsavedChanges, isSaving, saveData, updateVpdValor, currentVpdValor
+      loading, hasUnsavedChanges, isSaving, saveData, refreshSetores,
+      updateVpdValor, currentVpdValor
     }}>
       {children}
     </AppContext.Provider>
